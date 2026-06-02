@@ -116,11 +116,14 @@ not act on the disagreement.
   references a resolved `ComputedStyle`. Only layer 1 (palette) changes between themes.
   See `specs/06_theme/`.
 
-- **INV-4.4 — Static markup is parsed at comptime into a baked tree; runtime parsing is
+- **INV-4.4 — Static markup is baked via a build-time codegen step; runtime parsing is
   dev-only.**
-  Rationale: Production ships no markup parser — `@embedFile`'d `.ui` markup becomes a typed
-  struct tree at compile time. A runtime parser exists ONLY behind a `-Dhot-reload` dev
-  flag. Do NOT make the runtime parser a production dependency.
+  Rationale: Production ships no markup parser — `.ui` markup is processed by a build-time
+  codegen step that runs the same allocator-based `parse` function and emits generated `.zig`
+  struct literals (baked tree). A runtime parser exists ONLY behind a `-Dhot-reload` dev
+  flag. Do NOT make the runtime parser a production dependency. (Literal `comptime` parsing
+  is not used because comptime has no general allocator; one parser function serves both
+  build-time codegen and hot-reload — see module 06 spec refinement 1.)
 
 ---
 
@@ -136,11 +139,6 @@ not act on the disagreement.
   Rationale: "Done" is executable, not a judgment call. Run `zig test` against the
   acceptance test. Do NOT mark work complete on the basis of "it looks right."
 
-- **INV-5.3 — Do NOT modify `acceptance_test.zig`. It is the human's specification.**
-  Rationale: The acceptance tests encode what correct behavior IS. An agent that edits the
-  test to make it pass has defeated the entire system. If a test seems wrong, STOP and
-  surface it. Never "fix" a failing acceptance test by changing the test.
-
 - **INV-5.4 — Respect declared non-goals.**
   Rationale: Each spec lists non-goals. Do NOT implement them, even if they seem helpful or
   trivial. Scope creep across many sessions is the primary failure mode of this pipeline.
@@ -151,8 +149,10 @@ not act on the disagreement.
   needed concept has no glossary term, add one to `glossary.md` rather than improvising.
 
 - **INV-5.6 — No dependencies beyond the approved list.**
-  Rationale: Approved native deps for v1: GLFW, the Vulkan loader, and the Zig standard
-  library. Do NOT add a package, vendored library, or build-time tool without an explicit
+  Rationale: Approved native deps for v1: GLFW, the Vulkan loader, the Zig standard
+  library, and stb_truetype (single-header, public domain; used by module 02 for glyph
+  rasterization). Approved build-time tools: glslc (from the Vulkan SDK, for GLSL→SPIR-V
+  compilation). Do NOT add a package, vendored library, or build-time tool without an explicit
   human decision recorded here. (Taffy is being *ported*, i.e. reimplemented in Zig, not
   added as a dependency — see `specs/04_layout_engine/`.)
 
@@ -165,14 +165,15 @@ Do NOT introduce a dependency from a lower number onto a higher one.
 
 ```
 00  constitution (this file)        — shared/glossary.md, shared/interfaces.zig
-01  platform spike                  — GLFW window + Vulkan swapchain + clear color
+01  platform spike                  — GLFW window + Vulkan swapchain + clear color + one SPIR-V triangle
 02  text                            — glyph atlas, kerning, basic line breaking
 03  element_store                   — data-oriented arrays, generational handles, arena
 04  layout_engine                   — flexbox + grid (Taffy port), constraint protocol
-05  markup + style                  — comptime .ui parser, Tailwind-subset resolver
-06  theme                           — four-layer token model, light/dark
+05  theme                           — four-layer token model, light/dark
+06  markup + style                  — comptime .ui parser, Tailwind-subset resolver
 07  components                      — text, button, input, card, row/column, dropdown
 08  schema_forms                    — Value tree, schema walker, widget registry, validator
+09  renderer                        — DrawCommand list, Scene→GPU serializer, quad pipeline, atlas upload
 ```
 
 Anything not in this list (DataTable, auto-update/CDN delivery, virtualization, charts)

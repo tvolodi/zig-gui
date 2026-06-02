@@ -1,0 +1,13 @@
+.{
+    .name = .zig_gui,
+    .fingerprint = 0x694d33ca55fe0edf,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .glfw = .{
+            .url = "https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz",
+            .hash = "N-V-__8AAL40TADEbrysYHBl-UIZO4KiG4chP8pLDVDINGH4",
+        },
+    },
+    .paths = .{"."},
+}

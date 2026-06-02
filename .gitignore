@@ -1,0 +1,52 @@
+# Zig build artifacts
+zig-cache/
+.zig-cache/
+zig-pkg/
+zig-out/
+build/
+
+# Build output
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.exe
+*.dll
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Development tools
+.dirlocal
+node_modules/
+
+# Test artifacts
+*.dwo
+*.dwp
+
+# Dependencies (if vendored)
+deps/
+
+# Local configuration
+.env
+.env.local
+*.local
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Generated files (if any)
+src/generated/

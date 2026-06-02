@@ -251,11 +251,16 @@ DO:
   - If the module introduced a new pattern not in AGENT_GUIDE.md, add it
   - If the module corrects the constitution (as some specs do), apply the update to
     00_constitution.md per the spec's explicit instruction
+  - Update docs/HOW_TO_USE.md to reflect any new public API, new tags, new class names,
+    new widget kinds, new form keywords, or changes to the build command list introduced
+    by this module. If the module completes the renderer bridge (post-v1), remove or
+    update the "What is NOT wired yet" section accordingly.
   - Write a one-paragraph completion summary to docs/.agent-context/
 
 VALIDATE — pass criteria:
   ✓ No new pattern is undocumented
   ✓ Any constitution updates listed in the spec's "action" items are applied
+  ✓ docs/HOW_TO_USE.md reflects the current public API (no stale entries, no missing entries)
   ✓ Completion summary written
 
 PASS → module complete. Orchestrator marks done.

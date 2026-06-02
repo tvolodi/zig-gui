@@ -154,9 +154,9 @@ test "atlas grows and preserves prior entries" {
 // ===========================================================================
 
 fn loadTestFont(gpa: std.mem.Allocator) !?[]u8 {
-    const file = std.fs.cwd().openFile(TEST_FONT_PATH, .{}) catch return null;
-    defer file.close();
-    return try file.readToEndAlloc(gpa, 16 * 1024 * 1024);
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    const io = threaded.io();
+    return std.Io.Dir.cwd().readFileAlloc(io, TEST_FONT_PATH, gpa, .unlimited) catch return null;
 }
 
 test "FONT: rasterize Latin and Cyrillic glyphs" {

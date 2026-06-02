@@ -163,9 +163,9 @@ test "reset empties the scene and presentation arrays in lockstep" {
 // Measure pass (font-dependent — skip if absent)
 // ---------------------------------------------------------------------------
 test "FONT: measurePass fills measured size on text elements" {
-    const file = std.fs.cwd().openFile(TEST_FONT_PATH, .{}) catch return error.SkipZigTest;
-    const bytes = try file.readToEndAlloc(testing.allocator, 16 * 1024 * 1024);
-    file.close();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    const io = threaded.io();
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, TEST_FONT_PATH, testing.allocator, .unlimited) catch return error.SkipZigTest;
     defer testing.allocator.free(bytes);
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);

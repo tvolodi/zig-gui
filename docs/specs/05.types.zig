@@ -3,7 +3,7 @@
 //! Contract (INV-5.1). The struct shapes (Color, Palette, Tokens, ComputedStyle) and all
 //! public signatures are the contract — match them exactly. `Color.hex` and `Palette.default`
 //! are implemented here (they are data/definitions); `Tokens.light/dark`, the component-style
-//! builders, and `Theme.build` are stubbed — implement per spec.md. Do not change signatures.
+//! builders, and `Theme.build` are implemented per spec.md. Do not change signatures.
 //!
 //! Depends on std and module 03 (for Insets). 03 < 05 in the corrected build order (see
 //! spec.md "Build-order correction"), so this import is legal.
@@ -141,14 +141,72 @@ pub const Tokens = struct {
 
     /// Map palette stops to roles for LIGHT mode (see spec.md "Light vs dark mapping").
     pub fn light(p: Palette) Tokens {
-        _ = p;
-        @compileError("not implemented — implement per spec.md; do not change this signature");
+        return .{
+            .bg_canvas = p.gray_50,
+            .bg_surface = p.gray_100,
+            .bg_raised = p.white,
+
+            .text_body = p.gray_900,
+            .text_muted = p.gray_600,
+            .text_disabled = p.gray_400,
+
+            .border_subtle = p.gray_100,
+            .border_default = p.gray_200,
+            .border_strong = p.gray_400,
+
+            .accent = p.accent_400,
+            .accent_hover = p.accent_600,
+            .accent_text = p.white,
+
+            .sp_xs = 4,
+            .sp_sm = 8,
+            .sp_md = 16,
+            .sp_lg = 24,
+            .sp_xl = 32,
+
+            .radius_sm = 4,
+            .radius_md = 8,
+            .radius_lg = 16,
+
+            .text_sm = 12,
+            .text_base = 14,
+            .text_lg = 18,
+        };
     }
 
     /// Map palette stops to roles for DARK mode. `accent` MUST equal the light-mode accent.
     pub fn dark(p: Palette) Tokens {
-        _ = p;
-        @compileError("not implemented — implement per spec.md; do not change this signature");
+        return .{
+            .bg_canvas = p.gray_900,
+            .bg_surface = p.gray_800,
+            .bg_raised = p.gray_600,
+
+            .text_body = p.gray_50,
+            .text_muted = p.gray_200,
+            .text_disabled = p.gray_400,
+
+            .border_subtle = p.gray_800,
+            .border_default = p.gray_600,
+            .border_strong = p.gray_400,
+
+            .accent = p.accent_400,
+            .accent_hover = p.accent_200,
+            .accent_text = p.white,
+
+            .sp_xs = 4,
+            .sp_sm = 8,
+            .sp_md = 16,
+            .sp_lg = 24,
+            .sp_xl = 32,
+
+            .radius_sm = 4,
+            .radius_md = 8,
+            .radius_lg = 16,
+
+            .text_sm = 12,
+            .text_base = 14,
+            .text_lg = 18,
+        };
     }
 };
 
@@ -168,26 +226,58 @@ pub const ComputedStyle = struct {
 };
 
 /// Component-style builders. Each derives ENTIRELY from tokens (INV-4.3) — no palette values,
-/// no hex literals. Stubbed; implement per spec.md.
+/// no hex literals.
 
 pub fn buttonPrimary(t: Tokens) ComputedStyle {
-    _ = t;
-    @compileError("not implemented — implement per spec.md; do not change this signature");
+    return .{
+        .background = t.accent,
+        .text_color = t.accent_text,
+        .border_color = transparent,
+        .border_width = 0,
+        .radius = t.radius_md,
+        .padding = .{ .top = t.sp_sm, .bottom = t.sp_sm, .left = t.sp_md, .right = t.sp_md },
+        .gap = 0,
+        .font_size = t.text_base,
+    };
 }
 
 pub fn buttonGhost(t: Tokens) ComputedStyle {
-    _ = t;
-    @compileError("not implemented — implement per spec.md; do not change this signature");
+    return .{
+        .background = transparent,
+        .text_color = t.text_body,
+        .border_color = t.border_default,
+        .border_width = 1,
+        .radius = t.radius_md,
+        .padding = .{ .top = t.sp_sm, .bottom = t.sp_sm, .left = t.sp_md, .right = t.sp_md },
+        .gap = 0,
+        .font_size = t.text_base,
+    };
 }
 
 pub fn inputDefault(t: Tokens) ComputedStyle {
-    _ = t;
-    @compileError("not implemented — implement per spec.md; do not change this signature");
+    return .{
+        .background = t.bg_surface,
+        .text_color = t.text_body,
+        .border_color = t.border_default,
+        .border_width = 1,
+        .radius = t.radius_sm,
+        .padding = .{ .top = t.sp_sm, .bottom = t.sp_sm, .left = t.sp_sm, .right = t.sp_sm },
+        .gap = 0,
+        .font_size = t.text_base,
+    };
 }
 
 pub fn cardSurface(t: Tokens) ComputedStyle {
-    _ = t;
-    @compileError("not implemented — implement per spec.md; do not change this signature");
+    return .{
+        .background = t.bg_surface,
+        .text_color = t.text_body,
+        .border_color = t.border_subtle,
+        .border_width = 1,
+        .radius = t.radius_lg,
+        .padding = .{ .top = t.sp_md, .bottom = t.sp_md, .left = t.sp_md, .right = t.sp_md },
+        .gap = t.sp_md,
+        .font_size = t.text_base,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -198,8 +288,11 @@ pub const Theme = struct {
     tokens: Tokens,
 
     pub fn build(palette: Palette, mode: Mode) Theme {
-        _ = palette;
-        _ = mode;
-        @compileError("not implemented — implement per spec.md; do not change this signature");
+        return .{
+            .tokens = switch (mode) {
+                .light => Tokens.light(palette),
+                .dark => Tokens.dark(palette),
+            },
+        };
     }
 };

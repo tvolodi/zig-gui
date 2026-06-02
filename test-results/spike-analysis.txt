@@ -1,0 +1,28 @@
+Module 01 Spike Analysis
+========================
+
+Test exit code: 0
+Test elapsed: 0.92s
+Video frames: 12
+Video fps: 60.0
+
+Test stdout:
+
+
+Test stderr:
+test-01
++- run 01-smoke-test stderr
+[VK validation] Removing layer VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json) because it is a duplicate of VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json)
+[VK validation] Removing layer VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json) because it is a duplicate of VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json)
+[VK validation] Removing layer VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json) because it is a duplicate of VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json)
+[VK validation] Removing layer VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json) because it is a duplicate of VK_LAYER_EOS_Overlay (C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json)
+
+  [MANUAL VERIFICATION REQUIRED — both halves of "done"]
+  Run the spike app by hand on BOTH target OSes and confirm:
+    1. A window opens at the requested size.
+    2. It shows the clear color with a visible triangle.
+    3. Resizing the window does not crash and the image stays correct.
+    4. Closing the window exits cleanly (no validation errors on shutdown).
+  Record both OS confirmations in checklist.md. This module is NOT done until
+  the manual check passes on Windows and on Linux.
+

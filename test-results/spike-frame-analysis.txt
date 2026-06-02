@@ -1,0 +1,11 @@
+Module 01 Spike Window Analysis
+================================================================================
+
+Total frames: 3
+Frames with colors: 3
+Frames with triangle: 2
+
+Frame details:
+Frame 0: {'total_pixels': 287328, 'clear_bg_pixels': 721, 'non_bg_pixels': 286607, 'red_pixels': 32, 'green_pixels': 1805, 'blue_pixels': 4445, 'edge_pixels': 22657, 'has_triangle': True, 'triangle_count': 8, 'has_colors': True}
+Frame 1: {'total_pixels': 287328, 'clear_bg_pixels': 14, 'non_bg_pixels': 287314, 'red_pixels': 0, 'green_pixels': 123, 'blue_pixels': 408, 'edge_pixels': 3460, 'has_triangle': False, 'triangle_count': 0, 'has_colors': True}
+Frame 2: {'total_pixels': 287328, 'clear_bg_pixels': 7, 'non_bg_pixels': 287321, 'red_pixels': 0, 'green_pixels': 59, 'blue_pixels': 216, 'edge_pixels': 3041, 'has_triangle': True, 'triangle_count': 1, 'has_colors': True}
