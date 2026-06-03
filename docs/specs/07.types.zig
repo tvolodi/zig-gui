@@ -17,6 +17,7 @@ const markup = @import("../06_markup_style/types.zig");
 pub const ElementId = store.ElementId;
 pub const ElementStore = store.ElementStore;
 pub const LayoutNode = store.LayoutNode;
+pub const Display = store.Display;
 pub const Tokens = theme.Tokens;
 pub const ComputedStyle = theme.ComputedStyle;
 pub const NodeDesc = markup.NodeDesc;
@@ -182,6 +183,10 @@ pub const Scene = struct {
     _scroll_state: std.ArrayListUnmanaged(ScrollState) = .{},
     _pseudo: std.ArrayListUnmanaged(PseudoState) = .{},
     _image_state: std.ArrayListUnmanaged(ImageState) = .{},
+
+    // R52 — Hidden state parallel arrays
+    _hidden: std.ArrayListUnmanaged(bool) = .{},
+    _saved_display: std.ArrayListUnmanaged(Display) = .{},
 
     gpa: std.mem.Allocator,
 
@@ -450,6 +455,42 @@ pub const Scene = struct {
         _ = self;
         _ = idx;
         _ = tint;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- hidden state (R52) ---
+
+    pub fn isHidden(self: *const Scene, idx: u32) bool {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn setHidden(self: *Scene, idx: u32, hidden: bool) void {
+        _ = self;
+        _ = idx;
+        _ = hidden;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- children management (R53) ---
+
+    pub fn removeChildren(self: *Scene, parent_idx: u32) void {
+        _ = self;
+        _ = parent_idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn instantiateUnder(
+        self: *Scene,
+        parent_id: ElementId,
+        desc: NodeDesc,
+        tokens: Tokens,
+    ) InstantiateError!ElementId {
+        _ = self;
+        _ = parent_id;
+        _ = desc;
+        _ = tokens;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 };

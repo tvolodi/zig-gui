@@ -73,7 +73,17 @@ pub fn wrap(words: []const Word, space_w: f32, max_width: f32, out_lines: []Line
 
 pub const AtlasRect = struct { x: u32, y: u32, w: u32, h: u32 };
 
-pub const GlyphKey = struct { codepoint: u21, px: u16 };
+/// R60 — Discriminant for bold/italic atlas cache slots.
+pub const FontVariant = enum(u8) { regular, bold, italic };
+
+pub const GlyphKey = struct { codepoint: u21, px: u16, variant: FontVariant = .regular };
+
+/// Convert a font size in pixels to the integer key used in GlyphKey.
+/// Rounds to the nearest integer to minimize rasterization artifacts.
+pub fn fontSizePx(size: f32) u16 {
+    _ = size;
+    @compileError("not implemented — implement per spec.md; do not change this signature");
+}
 
 pub const AtlasError = error{ OutOfMemory, GlyphTooLarge };
 
@@ -139,6 +149,8 @@ pub const FontError = error{ InvalidFont, OutOfMemory, GlyphNotFound };
 
 pub const Font = struct {
     _impl: *anyopaque = undefined,
+    /// R60 — variant this font face represents (set by FontFamily.init; default .regular).
+    variant: FontVariant = .regular,
 
     pub fn initFromBytes(gpa: std.mem.Allocator, ttf: []const u8) FontError!Font {
         _ = gpa;

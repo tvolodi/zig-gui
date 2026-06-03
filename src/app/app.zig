@@ -10,6 +10,20 @@ const events_mod = @import("events.zig");
 const binding_mod = @import("binding.zig");
 const overlay_mod = @import("overlay.zig");
 const image_atlas_mod = @import("image_atlas.zig");
+const font_family_mod = @import("font_family.zig");
+
+// R56: hot-reload build option (comptime gate).
+// When build_options is not available (not a hot-reload build), default to false.
+const hot_reload: bool = if (@hasDecl(@import("root"), "build_options"))
+    @import("build_options").hot_reload
+else
+    false;
+
+// R56: FileWatcher is only imported when hot_reload is true.
+const file_watcher_mod = if (hot_reload) @import("file_watcher.zig") else void;
+const FileWatcher = if (hot_reload) file_watcher_mod.FileWatcher else void;
+const WatchEntry = if (hot_reload) file_watcher_mod.WatchEntry else void;
+const ParseDiagnostic = if (hot_reload) @import("../06/types.zig").ParseDiagnostic else void;
 
 const mod01 = @import("../01/types.zig");
 const mod02 = @import("../02/types.zig");
@@ -27,6 +41,9 @@ pub const AppOptions = struct {
     /// Path to a .ttf file; read with std.fs.cwd().readFileAlloc.
     font_path: []const u8,
     font_size_px: f32 = 16,
+    /// R60: optional bold and italic font face paths.
+    bold_font_path: ?[]const u8 = null,
+    italic_font_path: ?[]const u8 = null,
 };
 
 // Convenience aliases for the module types we need.
@@ -46,6 +63,7 @@ const OverlayLayer = overlay_mod.OverlayLayer;
 const ImageAtlas = image_atlas_mod.ImageAtlas;
 const Tokens = mod05.Tokens;
 const PseudoState = mod07.PseudoState;
+const FontFamily = font_family_mod.FontFamily;
 
 // Scratch buffer size for layout engine (1 MiB).
 const SCRATCH_SIZE: usize = 1024 * 1024;
@@ -65,7 +83,8 @@ pub const AppInner = struct {
     // Subsystems — init order matches R10 exactly.
     platform: Platform,
     backend: VulkanBackend,
-    font: Font,
+    /// R60: replaced font: Font with font_family: FontFamily.
+    font_family: FontFamily,
     atlas_cpu: GlyphAtlas,
     atlas_gpu: GpuAtlas,
     scene: Scene,
@@ -107,6 +126,13 @@ pub const AppInner = struct {
     // Theme tokens — needed for pseudo-state resolution in buildDrawList (R40).
     tokens: Tokens,
 
+    // R56 — Optional hook called after every successful hot-reload.
+    // The application sets this to re-register bindings after scene.reset().
+    rebind_fn: ?*const fn (*AppInner) anyerror!void = null,
+
+    // R56 — File watcher (only present when hot_reload = true).
+    watcher: if (hot_reload) FileWatcher else void = if (hot_reload) undefined else {},
+
     // -----------------------------------------------------------------------
     // Init
     // -----------------------------------------------------------------------
@@ -131,9 +157,19 @@ pub const AppInner = struct {
         };
         defer gpa.free(font_bytes);
 
-        // Step 5: Font.init.
-        var font = try Font.init(gpa, font_bytes, opts.font_size_px);
-        errdefer font.deinit();
+        // Step 5: FontFamily.init — load regular face; bold/italic are optional (R60).
+        const bold_bytes: ?[]const u8 = if (opts.bold_font_path) |bp|
+            std.fs.cwd().readFileAlloc(gpa, bp, 16 * 1024 * 1024) catch null
+        else
+            null;
+        defer if (bold_bytes) |b| gpa.free(b);
+        const italic_bytes: ?[]const u8 = if (opts.italic_font_path) |ip|
+            std.fs.cwd().readFileAlloc(gpa, ip, 16 * 1024 * 1024) catch null
+        else
+            null;
+        defer if (italic_bytes) |it| gpa.free(it);
+        var font_family = try FontFamily.init(gpa, font_bytes, bold_bytes, italic_bytes);
+        errdefer font_family.deinit();
 
         // Step 6: GlyphAtlas.init.
         var atlas_cpu = try GlyphAtlas.init(gpa, 1024, 1024);
@@ -182,7 +218,7 @@ pub const AppInner = struct {
             .gpa = gpa,
             .platform = platform,
             .backend = backend,
-            .font = font,
+            .font_family = font_family,
             .atlas_cpu = atlas_cpu,
             .atlas_gpu = atlas_gpu,
             .scene = scene,
@@ -201,6 +237,7 @@ pub const AppInner = struct {
             .image_atlas_generation_seen = 0,
             .gpu_image_atlas = GpuImageAtlas{},
             .tokens = default_tokens,
+            .watcher = if (hot_reload) FileWatcher.init(gpa) else {},
         };
 
         // Register GLFW event queue (R11).
@@ -248,6 +285,17 @@ pub const AppInner = struct {
                 continue;
             }
 
+            // R56: Poll watched .ui files for changes (hot-reload only).
+            if (comptime hot_reload) {
+                self.watcher.poll();
+                for (self.watcher.drainChanged()) |entry_idx| {
+                    const entry = &self.watcher.entries.items[entry_idx];
+                    self.reloadFile(entry.path) catch |err| {
+                        std.log.err("hot-reload: {}", .{err});
+                    };
+                }
+            }
+
             // M2-04: Copy current signal values into Scene arrays before layout.
             self.refreshBindings();
 
@@ -268,7 +316,7 @@ pub const AppInner = struct {
             if (!self.backend.beginFrame()) continue;
 
             // Measure text (module 07).
-            self.scene.measurePass(&self.font, &self.atlas_cpu) catch {};
+            self.scene.measurePass(&self.font_family, &self.atlas_cpu) catch {};
 
             // Re-upload GPU atlas if the CPU atlas changed (R10).
             if (self.atlas_cpu.generation != self.atlas_generation_seen) {
@@ -309,7 +357,7 @@ pub const AppInner = struct {
 
             // Build draw list (module 09).
             // Fire queued callbacks after layout, before render (INV-3.3).
-            self.scene.fireQueuedCallbacks();
+            self.scene.measurePass(&self.font_family, &self.atlas_cpu) catch {};
 
             // R40: Sync PseudoState from widget state before building draw list.
             self.syncPseudoStates();
@@ -320,7 +368,7 @@ pub const AppInner = struct {
                 &self.scene,
                 &self.atlas_cpu,
                 &self.image_atlas,
-                &self.font,
+                &self.font_family,
                 self.tokens,
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
@@ -363,6 +411,10 @@ pub const AppInner = struct {
     // -----------------------------------------------------------------------
 
     pub fn deinit(self: *AppInner) void {
+        // R56: deinit file watcher
+        if (comptime hot_reload) {
+            self.watcher.deinit();
+        }
         // 1. bindings (no GPU resources)
         self.bindings.deinit(self.gpa);
         // 1b. overlay (no GPU resources)
@@ -379,8 +431,8 @@ pub const AppInner = struct {
         }
         // 3. atlas_cpu
         self.atlas_cpu.deinit();
-        // 4. font
-        self.font.deinit();
+        // 4. font_family (R60)
+        self.font_family.deinit();
         // 5. scratch
         self.gpa.free(self.scratch);
         // 6. draw_list
@@ -399,7 +451,66 @@ pub const AppInner = struct {
     // -----------------------------------------------------------------------
 
     fn refreshBindings(self: *AppInner) void {
-        self.bindings.refresh(&self.scene);
+        self.bindings.refresh(&self.scene, self.tokens);
+    }
+
+    // -----------------------------------------------------------------------
+    // R56 — Hot-reload (comptime-gated; compiled out in production)
+    // -----------------------------------------------------------------------
+
+    fn reloadFile(self: *AppInner, path: [:0]const u8) !void {
+        if (comptime !hot_reload) return;
+
+        const markup_mod = @import("../06/types.zig");
+
+        // 1. Read the changed .ui file.
+        const source = try std.fs.cwd().readFileAllocOptions(
+            self.gpa, path, 1024 * 1024, null, @alignOf(u8), null
+        );
+        defer self.gpa.free(source);
+
+        // 2. Parse with diagnostics.
+        var arena = std.heap.ArenaAllocator.init(self.gpa);
+        var diag: markup_mod.ParseDiagnostic = undefined;
+        const root = markup_mod.parseWithDiag(arena.allocator(), source, &diag) catch |err| {
+            if (err != error.OutOfMemory) {
+                std.log.err("[hot-reload] {s}:{}:{}: {s}",
+                    .{ path, diag.loc.line, diag.loc.column, diag.message });
+            }
+            arena.deinit();
+            return; // Keep the old scene; do not reset on parse failure.
+        };
+
+        // 3. Reset scene and bindings.
+        self.scene.reset();
+        self.bindings.deinit(self.gpa);
+        self.bindings = BindingSet.init();
+
+        // 4. Re-instantiate.
+        const new_root_id = self.scene.instantiate(root, self.tokens) catch |err| {
+            std.log.err("[hot-reload] instantiate failed: {}", .{err});
+            arena.deinit();
+            return;
+        };
+        _ = new_root_id;
+
+        // 5. Re-run measure pass.
+        self.scene.measurePass(&self.font_family, &self.atlas_cpu) catch {};
+
+        // 6. Mark all elements dirty so the next frame paints the new tree.
+        self.scene.elements.markAllDirty();
+
+        // 7. Free the parse arena.
+        arena.deinit();
+
+        // 8. Call rebind hook if set.
+        if (self.rebind_fn) |rebind| {
+            rebind(self) catch |err| {
+                std.log.err("[hot-reload] rebind failed: {}", .{err});
+            };
+        }
+
+        std.log.info("[hot-reload] reloaded {s}", .{path});
     }
 
     // -----------------------------------------------------------------------

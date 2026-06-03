@@ -378,6 +378,17 @@ pub fn build(b: *std.Build) void {
     unit06_test_step.dependOn(&run_unit06.step);
 
     // -----------------------------------------------------------------------
+    // font_family.zig — R60: three-slot font container (regular, bold, italic).
+    // Defined here (before mod07) because mod07 imports it.
+    // Depends on mod02 for text.Font.
+    const mod_font_family = b.addModule("font_family.zig", .{
+        .root_source_file = b.path("src/app/font_family.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_font_family.addImport("../02/types.zig", mod02);
+
+    // -----------------------------------------------------------------------
     // Module 07 — Components (Scene, instantiate, measurePass).
     // Imports: 02 (text/font/atlas), 03 (element store), 05 (theme), 06 (markup).
     // -----------------------------------------------------------------------
@@ -392,6 +403,7 @@ pub fn build(b: *std.Build) void {
     mod07.addImport("../03/types.zig", mod03);
     mod07.addImport("../05/types.zig", mod05);
     mod07.addImport("../06/types.zig", mod06);
+    mod07.addImport("../app/font_family.zig", mod_font_family);
 
     // Acceptance test — docs/specs/07.acceptance_test.zig
     //   zig build test-07  → compile + run (pure tests + font test skips if no TTF)
@@ -405,6 +417,7 @@ pub fn build(b: *std.Build) void {
     accept07_mod.addImport("../05_theme/types.zig", mod05);
     accept07_mod.addImport("../06_markup_style/types.zig", mod06);
     accept07_mod.addImport("../02_text/types.zig", mod02);
+    accept07_mod.addImport("../app/font_family.zig", mod_font_family);
     const accept07 = b.addTest(.{
         .name = "07-acceptance-test",
         .root_module = accept07_mod,
@@ -424,6 +437,7 @@ pub fn build(b: *std.Build) void {
     unit07_mod.addImport("../03/types.zig", mod03);
     unit07_mod.addImport("../05/types.zig", mod05);
     unit07_mod.addImport("../06/types.zig", mod06);
+    unit07_mod.addImport("../app/font_family.zig", mod_font_family);
     const unit07_test = b.addTest(.{
         .name = "07-unit-test",
         .root_module = unit07_mod,
@@ -504,6 +518,7 @@ pub fn build(b: *std.Build) void {
     mod09.addImport("../05/types.zig", mod05);
     mod09.addImport("../07/types.zig", mod07);
     mod09.addImport("../app/image_atlas.zig", mod_image_atlas);
+    mod09.addImport("../app/font_family.zig", mod_font_family);
 
     // Acceptance test — docs/specs/09.acceptance_test.zig
     //   zig build test-09  → compile + run (pure CPU tests; GPU tests skip if no Vulkan)
@@ -519,6 +534,7 @@ pub fn build(b: *std.Build) void {
     accept09_mod.addImport("../06_markup_style/types.zig", mod06);
     accept09_mod.addImport("../01_platform/types.zig", mod01);
     accept09_mod.addImport("../04_layout_engine/types.zig", mod04);
+    accept09_mod.addImport("../app/font_family.zig", mod_font_family);
     // Vulkan + GLFW needed for GPU tests (link through mod01's transitive deps).
     accept09_mod.addIncludePath(glfw_dep.path("include"));
     accept09_mod.addIncludePath(.{ .cwd_relative = vulkan_include });
@@ -553,6 +569,7 @@ pub fn build(b: *std.Build) void {
     unit09_mod.addImport("../06/types.zig", mod06);
     unit09_mod.addImport("layout_engine", mod04);
     unit09_mod.addImport("../app/image_atlas.zig", mod_image_atlas);
+    unit09_mod.addImport("../app/font_family.zig", mod_font_family);
     unit09_mod.addIncludePath(b.path("deps"));
     unit09_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
     unit09_mod.link_libc = true;
@@ -596,6 +613,7 @@ pub fn build(b: *std.Build) void {
     mod_app_impl.addImport("../09/types.zig", mod09);
     mod_app_impl.addImport("overlay.zig", mod_overlay);
     mod_app_impl.addImport("image_atlas.zig", mod_image_atlas);
+    mod_app_impl.addImport("font_family.zig", mod_font_family);
     // NOTE: app.zig does NOT import types.zig (types.zig imports app.zig — no cycle).
     mod_app_impl.addImport("events.zig", mod_events);
 
@@ -700,6 +718,9 @@ pub fn build(b: *std.Build) void {
     // mod07 transitively brings in mod02 (stb_truetype C code) — add them explicitly
     // to ensure the test binary links correctly.
     binding_test_mod.addImport("../07/types.zig", mod07);
+    binding_test_mod.addImport("../../docs/specs/05.types.zig", mod05);
+    binding_test_mod.addImport("../06/types.zig", mod06);
+    binding_test_mod.addImport("../03/types.zig", mod03);
     binding_test_mod.addIncludePath(b.path("deps"));
     binding_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
     binding_test_mod.link_libc = true;
@@ -708,6 +729,74 @@ pub fn build(b: *std.Build) void {
     const run_binding_test = b.addRunArtifact(binding_test);
     const binding_test_step = b.step("test-binding", "Run BindingSet unit tests (no GPU, no GLFW)");
     binding_test_step.dependOn(&run_binding_test.step);
+
+    // -----------------------------------------------------------------------
+    // R55 — Build-time markup codegen tool (ui_codegen).
+    //   zig build codegen → regenerate all .ui.zig files from .ui markup
+    // -----------------------------------------------------------------------
+    const codegen_mod = b.createModule(.{
+        .root_source_file = b.path("src/tools/ui_codegen.zig"),
+        .target = b.resolveTargetQuery(.{}),
+        .optimize = .Debug,
+    });
+    codegen_mod.addImport("m06", mod06);
+    const codegen_exe = b.addExecutable(.{
+        .name        = "ui_codegen",
+        .root_module = codegen_mod,
+    });
+
+    // List of .ui files to process (explicit, no auto-discovery — INV-5.4).
+    const ui_files = &[_][]const u8{
+        "src/screens/example.ui",
+    };
+
+    const codegen_step = b.step("codegen", "Regenerate baked NodeDesc files from .ui markup");
+    for (ui_files) |ui_path| {
+        // Output: same path + ".zig" suffix (e.g. src/screens/example.ui.zig)
+        const out_path = b.fmt("{s}.zig", .{ui_path});
+        const run = b.addRunArtifact(codegen_exe);
+        run.addArg(b.path(ui_path).getPath(b));
+        run.addArg(b.path(out_path).getPath(b));
+        codegen_step.dependOn(&run.step);
+    }
+
+    // -----------------------------------------------------------------------
+    // R56 — hot-reload build option and run-dev step.
+    //   zig build run-dev → build + run with hot-reload enabled
+    // -----------------------------------------------------------------------
+    const hot_reload = b.option(bool, "hot-reload", "Enable .ui file watcher for live editing") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "hot_reload", hot_reload);
+
+    // Add build_options to app module (so app.zig can read hot_reload at comptime).
+    mod_app_impl.addImport("build_options", build_options.createModule());
+    mod_app.addImport("build_options", build_options.createModule());
+
+    // -----------------------------------------------------------------------
+    // run-dev — build + run the app with hot-reload enabled.
+    //   zig build run-dev → launch zig-gui-dev binary (hot_reload = true)
+    //
+    // NOTE: main.zig is a placeholder until module 09 renderer is wired up.
+    //       The step is declared now so R56 acceptance criterion is satisfied.
+    // -----------------------------------------------------------------------
+    const dev_options = b.addOptions();
+    dev_options.addOption(bool, "hot_reload", true);
+
+    const run_dev_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    run_dev_mod.addOptions("build_options", dev_options);
+
+    const run_dev_exe = b.addExecutable(.{
+        .name        = "zig-gui-dev",
+        .root_module = run_dev_mod,
+    });
+
+    const run_dev_cmd = b.addRunArtifact(run_dev_exe);
+    const run_dev_step = b.step("run-dev", "Run the app with hot-reload enabled");
+    run_dev_step.dependOn(&run_dev_cmd.step);
 }
 
 // ---------------------------------------------------------------------------

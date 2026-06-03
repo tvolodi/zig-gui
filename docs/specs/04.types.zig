@@ -25,6 +25,9 @@ pub const Display = store.Display;
 pub const FlexDirection = store.FlexDirection;
 pub const JustifyContent = store.JustifyContent;
 pub const AlignItems = store.AlignItems;
+pub const AlignSelf = store.AlignSelf;
+pub const MarginValue = store.MarginValue;
+pub const Margin = store.Margin;
 pub const LayoutNode = store.LayoutNode;
 
 // ---------------------------------------------------------------------------
@@ -89,6 +92,12 @@ fn solveNode(
     origin_x: f32,
     origin_y: f32,
 ) Size {
+    // R51: display = .none → zero rect, skip children entirely.
+    if (s.get(id).display == .none) {
+        s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = 0, .h = 0 };
+        return Size{ .w = 0, .h = 0 };
+    }
+
     // Resolve node's own size
     const node_w = resolveWidth(s.get(id), avail, avail.max_w);
     const node_h = resolveHeight(s.get(id), avail, avail.max_h);
@@ -103,6 +112,7 @@ fn solveNode(
         .block => solveBlock(s, id, w, h, origin_x, origin_y, avail),
         .flex => solveFlex(s, id, w, h, origin_x, origin_y, avail),
         .grid => solveGrid(s, id, w, h, origin_x, origin_y, avail),
+        .none => unreachable, // handled above
     };
 
     // Write computed rect for this node
@@ -119,6 +129,15 @@ fn solveNode(
 // ---------------------------------------------------------------------------
 // Block layout: children stacked vertically, full width
 // ---------------------------------------------------------------------------
+
+/// Resolve a MarginValue to a concrete pixel amount (auto → 0 here; auto is handled specially).
+fn resolveMarginPx(mv: MarginValue) f32 {
+    return switch (mv) {
+        .zero => 0.0,
+        .px => |v| v,
+        .auto => 0.0,
+    };
+}
 
 fn solveBlock(
     s: *ElementStore,
@@ -139,15 +158,43 @@ fn solveBlock(
     var it = s.childrenOf(id);
     while (it.next()) |child_id| {
         const content_h = @max(0.0, container_h - padding.top - padding.bottom);
+        const child = s.get(child_id);
+        const child_margin = child.margin;
+
+        // R51: margin.px — subtract from available width
+        const margin_left_px = resolveMarginPx(child_margin.left);
+        const margin_right_px = resolveMarginPx(child_margin.right);
+        const margin_top_px = resolveMarginPx(child_margin.top);
+        const margin_bottom_px = resolveMarginPx(child_margin.bottom);
+
+        // Available width for the child after its own margins
+        const child_content_w = @max(0.0, content_w - margin_left_px - margin_right_px);
+
         const child_avail = Constraints{
-            .min_w = content_w,
-            .max_w = content_w,
+            .min_w = child_content_w,
+            .max_w = child_content_w,
             .min_h = content_h,
             .max_h = if (content_h > 0) content_h else std.math.inf(f32),
         };
-        const child_size = solveNode(s, child_id, child_avail, origin_x + padding.left, cursor_y);
-        cursor_y += child_size.h;
-        total_content_h += child_size.h;
+
+        // Determine x offset: mx-auto centers the child
+        const child_offset_x = blk: {
+            if (child_margin.left == .auto and child_margin.right == .auto) {
+                // mx-auto: resolve child width first without placing
+                const cw = resolveWidth(s.get(child_id), child_avail, child_content_w);
+                break :blk (content_w - cw) / 2.0;
+            } else {
+                break :blk margin_left_px;
+            }
+        };
+
+        const child_size = solveNode(
+            s, child_id, child_avail,
+            origin_x + padding.left + child_offset_x,
+            cursor_y + margin_top_px,
+        );
+        cursor_y += child_size.h + margin_top_px + margin_bottom_px;
+        total_content_h += child_size.h + margin_top_px + margin_bottom_px;
     }
 
     // Height: if declared, use it; otherwise content-driven
@@ -244,8 +291,17 @@ fn solveFlex(
                 };
             };
 
+            // R51: align_self overrides parent's align_items for this child
+            const effective_align: AlignItems = switch (child.align_self) {
+                .auto => align_items_val,
+                .start => .start,
+                .center => .center,
+                .end => .end,
+                .stretch => .stretch,
+            };
+
             // stretch alignment overrides cross size to fill container
-            if (align_items_val == .stretch) {
+            if (effective_align == .stretch) {
                 cross = cross_size;
             }
 
@@ -359,9 +415,21 @@ fn solveFlex(
     for (children) |*c| {
         const child_main_pos = @round(cursor_main_f32);
 
-        // Determine cross position based on align_items
+        // R51: use child's align_self if not .auto, else parent's align_items
+        const child_node = s.get(c.id);
+        const effective_child_align: AlignItems = blk: {
+            break :blk switch (child_node.align_self) {
+                .auto => align_items_val,
+                .start => .start,
+                .center => .center,
+                .end => .end,
+                .stretch => .stretch,
+            };
+        };
+
+        // Determine cross position based on effective alignment
         const child_cross: f32 = c.cross_size;
-        const cross_pos: f32 = switch (align_items_val) {
+        const cross_pos: f32 = switch (effective_child_align) {
             .start => if (direction == .row) origin_y + padding.top else origin_x + padding.left,
             .center => blk: {
                 const offset = (cross_size - child_cross) / 2.0;
@@ -387,15 +455,15 @@ fn solveFlex(
             Constraints{
                 .min_w = c.final_size,
                 .max_w = c.final_size,
-                .min_h = if (align_items_val == .stretch) cross_size else 0.0,
-                .max_h = if (align_items_val == .stretch) cross_size else std.math.inf(f32),
+                .min_h = if (effective_child_align == .stretch) cross_size else 0.0,
+                .max_h = if (effective_child_align == .stretch) cross_size else std.math.inf(f32),
             }
         else
             Constraints{
                 .min_h = c.final_size,
                 .max_h = c.final_size,
-                .min_w = if (align_items_val == .stretch) cross_size else 0.0,
-                .max_w = if (align_items_val == .stretch) cross_size else std.math.inf(f32),
+                .min_w = if (effective_child_align == .stretch) cross_size else 0.0,
+                .max_w = if (effective_child_align == .stretch) cross_size else std.math.inf(f32),
             };
 
         // Recurse into child (lay out its subtree)

@@ -89,7 +89,16 @@ pub fn wrap(words: []const Word, space_w: f32, max_width: f32, out_lines: []Line
 
 pub const AtlasRect = struct { x: u32, y: u32, w: u32, h: u32 };
 
-pub const GlyphKey = struct { codepoint: u21, px: u16 };
+/// R60 — Discriminant for bold/italic atlas cache slots.
+pub const FontVariant = enum(u8) { regular, bold, italic };
+
+pub const GlyphKey = struct { codepoint: u21, px: u16, variant: FontVariant = .regular };
+
+/// Convert a font size in pixels to the integer key used in GlyphKey.
+/// Rounds to the nearest integer to minimize rasterization artifacts.
+pub fn fontSizePx(size: f32) u16 {
+    return @intCast(@as(u32, @intFromFloat(@round(size))));
+}
 
 pub const AtlasError = error{ OutOfMemory, GlyphTooLarge };
 
@@ -252,7 +261,7 @@ pub const GlyphAtlas = struct {
         // Rasterize "…" (U+2026) into the atlas.
         const ellipsis_cp: u21 = 0x2026;
         const px_u16: u16 = @intCast(fs_key);
-        const key = GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16 };
+        const key = GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16, .variant = font.variant };
 
         // Try to look up first (may already be in atlas from a prior rasterize call).
         const uv = if (self.lookup(key)) |existing| existing else blk: {
@@ -313,6 +322,8 @@ const FontImpl = struct {
 
 pub const Font = struct {
     _impl: *anyopaque = undefined,
+    /// R60 — variant this font face represents (set by FontFamily.init; default .regular).
+    variant: FontVariant = .regular,
 
     pub fn initFromBytes(gpa: std.mem.Allocator, ttf: []const u8) FontError!Font {
         const impl = try gpa.create(FontImpl);
@@ -425,7 +436,7 @@ pub fn layoutParagraph(
     const fm = font.metrics(px);
     const line_height = fm.ascent + fm.descent + fm.line_gap;
     const space_w = font.advance(' ', px);
-    const px_u16: u16 = @intFromFloat(px);
+    const px_u16: u16 = fontSizePx(px);
 
     // Tokenize into words (non-whitespace runs), measuring each word's width.
     var words: std.ArrayList(Word) = .empty;
@@ -516,7 +527,7 @@ pub fn layoutParagraph(
             const cps = codepoints_buf.items[span.start .. span.start + span.len];
 
             for (cps, 0..) |cp, ci| {
-                const key = GlyphKey{ .codepoint = cp, .px = px_u16 };
+                const key = GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
 
                 // Ensure glyph is in atlas.
                 const uv: AtlasRect = if (atlas.lookup(key)) |r| r else blk: {

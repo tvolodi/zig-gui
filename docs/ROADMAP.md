@@ -86,19 +86,19 @@ The renderer draws everything a real UI needs.
 
 ---
 
-## Milestone 5 — Markup and styling completeness `planned`
+## Milestone 5 — Markup and styling completeness `done`
 
 The authoring surface covers the common cases without forcing escape to raw Zig.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M5-01 | **Inline style attributes** — `style:background`, `style:color`, etc. on any markup node; overrides token-derived defaults for dynamic content | 06 |
-| M5-02 | **Missing Tailwind classes** — `hidden`, `overflow-hidden`, `min-w-*`, `max-w-*`, `w-{n}`, `h-{n}`, `mx-auto`, `shrink-0`, `grow-0`, `self-*`, `col-span-*`, `row-span-*`, `opacity-*` | 06 |
-| M5-03 | **Conditional rendering** — `if="{bind condition}"` attribute hides/shows a subtree | M2-04 |
-| M5-04 | **List rendering** — `for="{bind items}"` repeats a child template over a collection | M2-04 |
-| M5-05 | **Markup error reporting** — parse errors include line number and column, not just an enum variant | 06 |
-| M5-06 | **Build-time markup codegen tool** — `build.zig` step that runs `parse` over `.ui` files and emits `.zig` struct literals; no parser in the production binary (INV-4.4) | 06 |
-| M5-07 | **Hot-reload** — file watcher behind `-Dhot-reload` that re-parses changed `.ui` files and calls `scene.reset()` + `instantiate` without recompiling | 06, M1-01 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M5-01 | **Inline style attributes** — `style:background`, `style:color`, etc. on any markup node; overrides token-derived defaults for dynamic content | 06 | [R50](requirements/R50_inline_style_attributes.md) | `done` |
+| M5-02 | **Missing Tailwind classes** — `hidden`, `overflow-hidden`, `min-w-*`, `max-w-*`, `w-{n}`, `h-{n}`, `mx-auto`, `shrink-0`, `grow-0`, `self-*`, `col-span-*`, `row-span-*`, `opacity-*` | 06 | [R51](requirements/R51_missing_tailwind_classes.md) | `done` |
+| M5-03 | **Conditional rendering** — `if="{bind condition}"` attribute hides/shows a subtree | M2-04 | [R52](requirements/R52_conditional_rendering.md) | `done` |
+| M5-04 | **List rendering** — `for="{bind items}"` repeats a child template over a collection | M2-04 | [R53](requirements/R53_list_rendering.md) | `done` |
+| M5-05 | **Markup error reporting** — parse errors include line number and column, not just an enum variant | 06 | [R54](requirements/R54_markup_error_reporting.md) | `done` |
+| M5-06 | **Build-time markup codegen tool** — `build.zig` step that runs `parse` over `.ui` files and emits `.zig` struct literals; no parser in the production binary (INV-4.4) | 06 | [R55](requirements/R55_build_time_markup_codegen.md) | `done` |
+| M5-07 | **Hot-reload** — file watcher behind `-Dhot-reload` that re-parses changed `.ui` files and calls `scene.reset()` + `instantiate` without recompiling | 06, M1-01 | [R56](requirements/R56_hot_reload.md) | `done` |
 
 ---
 

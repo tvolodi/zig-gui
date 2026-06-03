@@ -354,6 +354,120 @@ test "reuse multiple freed indices bumps generation each time" {
     try testing.expectEqual(@as(f32, 30), s.get(c).gap);
 }
 
+// ===========================================================================
+// R51 — New types in module 03: Display.none, AlignSelf, MarginValue, Margin
+// ===========================================================================
+
+test "R51: Display enum has none variant" {
+    // Verify Display.none compiles and equals itself (type check)
+    const d: S.Display = .none;
+    try testing.expectEqual(S.Display.none, d);
+    // Distinct from block/flex/grid
+    try testing.expect(d != .block);
+    try testing.expect(d != .flex);
+    try testing.expect(d != .grid);
+}
+
+test "R51: AlignSelf enum has all required variants" {
+    const variants = [_]S.AlignSelf{ .auto, .start, .center, .end, .stretch };
+    // Verify they are all distinct
+    try testing.expectEqual(S.AlignSelf.auto, variants[0]);
+    try testing.expectEqual(S.AlignSelf.start, variants[1]);
+    try testing.expectEqual(S.AlignSelf.center, variants[2]);
+    try testing.expectEqual(S.AlignSelf.end, variants[3]);
+    try testing.expectEqual(S.AlignSelf.stretch, variants[4]);
+}
+
+test "R51: MarginValue has zero, px and auto variants" {
+    const zero_val: S.MarginValue = .zero;
+    const px_val: S.MarginValue = .{ .px = 8.0 };
+    const auto_val: S.MarginValue = .auto;
+
+    try testing.expect(zero_val == .zero);
+    try testing.expect(px_val == .px);
+    try testing.expect(auto_val == .auto);
+    try testing.expectApproxEqAbs(@as(f32, 8.0), px_val.px, 0.001);
+}
+
+test "R51: Margin struct has top, right, bottom, left fields all MarginValue" {
+    var m: S.Margin = .{};
+    // Defaults are .zero
+    try testing.expect(m.top == .zero);
+    try testing.expect(m.right == .zero);
+    try testing.expect(m.bottom == .zero);
+    try testing.expect(m.left == .zero);
+    // Can set each independently
+    m.left = .auto;
+    m.right = .auto;
+    m.top = .{ .px = 4.0 };
+    m.bottom = .{ .px = 8.0 };
+    try testing.expect(m.left == .auto);
+    try testing.expect(m.right == .auto);
+    switch (m.top) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 4.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (m.bottom) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 8.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "R51: LayoutNode has margin field of type Margin" {
+    var node = S.LayoutNode{};
+    // Default margin is all zero
+    try testing.expect(node.margin.top == .zero);
+    try testing.expect(node.margin.right == .zero);
+    try testing.expect(node.margin.bottom == .zero);
+    try testing.expect(node.margin.left == .zero);
+    // Can apply mx-auto pattern
+    node.margin.left = .auto;
+    node.margin.right = .auto;
+    try testing.expect(node.margin.left == .auto);
+    try testing.expect(node.margin.right == .auto);
+}
+
+test "R51: LayoutNode has align_self field with default .auto" {
+    const node = S.LayoutNode{};
+    try testing.expectEqual(S.AlignSelf.auto, node.align_self);
+}
+
+test "R51: LayoutNode with display=.none stores value correctly" {
+    const node = S.LayoutNode{ .display = .none };
+    try testing.expectEqual(S.Display.none, node.display);
+}
+
+test "R51: LayoutNode stored in ElementStore can have display=.none" {
+    var s = try S.ElementStore.testInit(testing.allocator);
+    defer s.deinit();
+
+    const id = try s.addRoot(.{ .display = .none });
+    try testing.expectEqual(S.Display.none, s.get(id).display);
+}
+
+test "R51: LayoutNode margin round-trips through ElementStore" {
+    var s = try S.ElementStore.testInit(testing.allocator);
+    defer s.deinit();
+
+    const node = S.LayoutNode{
+        .margin = .{
+            .top    = .{ .px = 4.0 },
+            .right  = .auto,
+            .bottom = .zero,
+            .left   = .auto,
+        },
+    };
+    const id = try s.addRoot(node);
+    const stored = s.get(id);
+    switch (stored.margin.top) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 4.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    try testing.expect(stored.margin.right == .auto);
+    try testing.expect(stored.margin.bottom == .zero);
+    try testing.expect(stored.margin.left == .auto);
+}
+
 // ---------------------------------------------------------------------------
 // 10. addChild to a non-root (multi-level tree): childrenOf correct at each level.
 // ---------------------------------------------------------------------------

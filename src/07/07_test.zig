@@ -1038,3 +1038,335 @@ test "R35: scrollview defaultLayoutFor has display=block and overflow=hidden" {
 // is computed and applied in app.zig's wheel-scroll handler, not in Scene.setScrollOffset.
 // Verify manually: attempting to scroll below 0 or past max_scroll via the app
 // should clamp to the valid range.
+
+// ===========================================================================
+// R50 — Inline style:* attributes applied via instantiate
+//
+// NOTE: The parser's isNameChar does not allow ':' in attribute names, so
+// style:* NodeDescs cannot be built via markup_mod.parse. We construct
+// NodeDesc structs directly to exercise the instantiateNode code path.
+// ===========================================================================
+
+test "R50: style:background sets ComputedStyle.background from hex color" {
+    // Construct NodeDesc directly — parser cannot handle ':' in attr names.
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:background", .value = .{ .literal = "#FF0000" } },
+        .{ .name = "text",             .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+    };
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const s = scene.styleOf(id);
+    try testing.expectEqual(@as(u8, 255), s.background.r);
+    try testing.expectEqual(@as(u8, 0),   s.background.g);
+    try testing.expectEqual(@as(u8, 0),   s.background.b);
+    try testing.expectEqual(@as(u8, 255), s.background.a);
+}
+
+test "R50: style:opacity sets ComputedStyle.opacity" {
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:opacity", .value = .{ .literal = "0.5" } },
+        .{ .name = "text",          .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+    };
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const s = scene.styleOf(id);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), s.opacity, 0.001);
+}
+
+test "R50: unknown style:foo attribute does not crash and style is unchanged" {
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:foo", .value = .{ .literal = "bar" } },
+        .{ .name = "text",      .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+    };
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    // Must not error; style is unchanged (unknown prop silently ignored)
+    const id = try scene.instantiate(desc, testTokens());
+    _ = id;
+}
+
+test "R50: malformed style:radius retains class-derived value" {
+    // rounded-md sets a class-derived radius; style:radius="abc" is silently ignored
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:radius", .value = .{ .literal = "abc" } },
+        .{ .name = "text",         .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "rounded-md", .attrs = &attrs, .children = &.{},
+    };
+    const t = testTokens();
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, t);
+    // The class-derived radius_md value should still be there (malformed ignored)
+    try testing.expectApproxEqAbs(t.radius_md, scene.styleOf(id).radius, 0.001);
+}
+
+test "R50: inline style:background overrides class-derived background" {
+    // bg-canvas sets a theme-derived background; style:background="#AABBCC" must win
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:background", .value = .{ .literal = "#AABBCC" } },
+        .{ .name = "text",             .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "bg-canvas", .attrs = &attrs, .children = &.{},
+    };
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const s = scene.styleOf(id);
+    try testing.expectEqual(@as(u8, 0xAA), s.background.r);
+    try testing.expectEqual(@as(u8, 0xBB), s.background.g);
+    try testing.expectEqual(@as(u8, 0xCC), s.background.b);
+    try testing.expectEqual(@as(u8, 255),  s.background.a);
+}
+
+test "R50: style:opacity clamped to 0.0-1.0 range (value above 1)" {
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:opacity", .value = .{ .literal = "2.0" } },
+        .{ .name = "text",          .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+    };
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // applyInlineStyle clamps opacity to [0.0, 1.0]
+    try testing.expectApproxEqAbs(@as(f32, 1.0), scene.styleOf(id).opacity, 0.001);
+}
+
+test "R50: style:background with bind value is silently skipped" {
+    // A bind value in a style:* attribute must be silently ignored (non-goal per R50)
+    const attrs = [_]markup_mod.Attr{
+        .{ .name = "style:background", .value = .{ .bind = "user.color" } },
+        .{ .name = "text",             .value = .{ .literal = "x" } },
+    };
+    const desc = markup_mod.NodeDesc{
+        .tag = "Text", .classes = "bg-canvas", .attrs = &attrs, .children = &.{},
+    };
+    const t = testTokens();
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, t);
+    // Background from bg-canvas class should survive (bind not evaluated)
+    const s = scene.styleOf(id);
+    try testing.expectEqual(t.bg_canvas.r, s.background.r);
+    try testing.expectEqual(t.bg_canvas.g, s.background.g);
+    try testing.expectEqual(t.bg_canvas.b, s.background.b);
+}
+
+// ===========================================================================
+// R52 — Conditional rendering: isHidden, setHidden, if= attribute
+// ===========================================================================
+
+test "R52: if=false literal starts element hidden" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Text if="false" text="x"/>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(scene.isHidden(id.index));
+}
+
+test "R52: if=true literal starts element visible" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Text if="true" text="x"/>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.isHidden(id.index));
+}
+
+test "R52: setHidden true sets display to none" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(), "<Text text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // Initially not hidden
+    try testing.expect(!scene.isHidden(id.index));
+    scene.setHidden(id.index, true);
+    try testing.expect(scene.isHidden(id.index));
+    // display should be .none
+    try testing.expectEqual(store_mod.Display.none, scene.elements.layout.items[id.index].display);
+}
+
+test "R52: setHidden false restores original display value" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(), "<Row text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // Row has display=.flex by default
+    const orig_display = scene.elements.layout.items[id.index].display;
+    try testing.expectEqual(store_mod.Display.flex, orig_display);
+
+    scene.setHidden(id.index, true);
+    try testing.expectEqual(store_mod.Display.none, scene.elements.layout.items[id.index].display);
+
+    scene.setHidden(id.index, false);
+    try testing.expect(!scene.isHidden(id.index));
+    // display is restored
+    try testing.expectEqual(orig_display, scene.elements.layout.items[id.index].display);
+}
+
+test "R52: setHidden marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(), "<Text text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+
+    scene.setHidden(id.index, true);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+test "R52: setHidden false also marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(), "<Text text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setHidden(id.index, true);
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+
+    scene.setHidden(id.index, false);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+test "R52: setHidden no-op when state already matches" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(), "<Text text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // Already not hidden; calling setHidden(false) again should be a no-op (no panic)
+    scene.elements.clearDirty();
+    scene.setHidden(id.index, false);
+    // No dirty set because state didn't change
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+}
+
+// ===========================================================================
+// R53 — removeChildren and instantiateUnder
+// ===========================================================================
+
+test "R53: removeChildren removes all direct children and their subtrees" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Text text="a"/>
+        \\  <Text text="b"/>
+        \\  <Row><Text text="c"/></Row>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const root_id = try scene.instantiate(desc, testTokens());
+    // Column(0) + Text(1) + Text(2) + Row(3) + Text(4) = 5 live
+    try testing.expectEqual(@as(u32, 5), scene.count());
+
+    scene.removeChildren(root_id.index);
+
+    // All children removed; only the Column root remains
+    try testing.expectEqual(@as(u32, 1), scene.count());
+    // Column itself is still valid
+    try testing.expect(scene.elements.isValid(root_id));
+    // No children left
+    var it = scene.elements.childrenOf(root_id);
+    try testing.expect(it.next() == null);
+}
+
+test "R53: instantiateUnder appends new element as child of given parent" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Create a container first
+    const container_desc = try markup_mod.parse(arena.allocator(), "<Column/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const container_id = try scene.instantiate(container_desc, testTokens());
+    try testing.expectEqual(@as(u32, 1), scene.count());
+
+    // Instantiate a child under it
+    const child_desc = try markup_mod.parse(arena.allocator(), "<Text text=\"item\"/>");
+    const child_id = try scene.instantiateUnder(container_id, child_desc, testTokens());
+
+    try testing.expectEqual(@as(u32, 2), scene.count());
+    // Child's parent is the container
+    const parent = scene.elements.parentOf(child_id).?;
+    try testing.expectEqual(container_id.index, parent.index);
+    // Container has exactly one child
+    var it = scene.elements.childrenOf(container_id);
+    const first = it.next().?;
+    try testing.expect(it.next() == null);
+    try testing.expectEqual(child_id.index, first.index);
+}
+
+test "R53: removeChildren followed by instantiateUnder produces correct child count" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Text text="old1"/>
+        \\  <Text text="old2"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const root_id = try scene.instantiate(desc, testTokens());
+    try testing.expectEqual(@as(u32, 3), scene.count());
+
+    // Remove children
+    scene.removeChildren(root_id.index);
+    try testing.expectEqual(@as(u32, 1), scene.count());
+
+    // Add new children
+    const item_desc = try markup_mod.parse(arena.allocator(), "<Text text=\"new\"/>");
+    _ = try scene.instantiateUnder(root_id, item_desc, testTokens());
+    _ = try scene.instantiateUnder(root_id, item_desc, testTokens());
+    _ = try scene.instantiateUnder(root_id, item_desc, testTokens());
+
+    try testing.expectEqual(@as(u32, 4), scene.count());
+    // Exactly 3 children under root
+    var it = scene.elements.childrenOf(root_id);
+    var count: u32 = 0;
+    while (it.next()) |_| count += 1;
+    try testing.expectEqual(@as(u32, 3), count);
+}

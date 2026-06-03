@@ -1,0 +1,4 @@
+<Column class="p-4 gap-4">
+  <Text text="Hello" />
+  <Button class="bg-accent px-4 py-2" text="Click me" />
+</Column>

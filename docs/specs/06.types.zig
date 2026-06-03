@@ -39,6 +39,8 @@ pub const NodeDesc = struct {
     children: []const NodeDesc = &.{},
 };
 
+/// Error variants returned by `parse` on failure.
+/// Also used as the error-kind field in ParseDiagnostic.
 pub const ParseError = error{
     UnexpectedToken,
     UnclosedTag,
@@ -47,24 +49,51 @@ pub const ParseError = error{
     OutOfMemory,
 };
 
+/// Error kind enum for ParseDiagnostic (mirrors ParseError variants). (R54)
+pub const ParseErrorKind = enum {
+    UnexpectedToken,
+    UnclosedTag,
+    MismatchedTag,
+    MalformedAttribute,
+};
+
+/// Source location within a `.ui` file (1-based, matching editor conventions). (R54)
+pub const SourceLoc = struct {
+    line:   u32,  // 1-based line number
+    column: u32,  // 1-based byte column on that line
+};
+
+/// Diagnostic emitted by `parse` on failure. (R54)
+pub const ParseDiagnostic = struct {
+    err:     ParseErrorKind,
+    loc:     SourceLoc,
+    /// A human-readable description of the error. Points into static string storage (no allocation).
+    message: []const u8,
+};
+
 // ---------------------------------------------------------------------------
 // Parser — recursive descent over bytes
 // ---------------------------------------------------------------------------
 
-/// Internal parser state.
+/// Internal parse error set used only within the parser.
+const InternalParseError = error{ UnexpectedToken, UnclosedTag, MismatchedTag, MalformedAttribute, OutOfMemory };
+
+/// Internal parser state. (R54: adds line/column tracking)
 const Parser = struct {
     src: []const u8,
     pos: usize,
     alloc: std.mem.Allocator,
+    line: u32 = 1,   // NEW (R54): current line (1-based)
+    column: u32 = 1, // NEW (R54): current byte column (1-based)
 
     fn init(alloc: std.mem.Allocator, src: []const u8) Parser {
         return .{ .src = src, .pos = 0, .alloc = alloc };
     }
 
-    /// Skip ASCII whitespace.
+    /// Skip ASCII whitespace. Goes through consume() for line/col tracking.
     fn skipWs(p: *Parser) void {
         while (p.pos < p.src.len and isWs(p.src[p.pos])) {
-            p.pos += 1;
+            _ = p.consume();
         }
     }
 
@@ -73,40 +102,53 @@ const Parser = struct {
         return p.src[p.pos];
     }
 
+    /// Consume one byte, updating line/column. (R54)
     fn consume(p: *Parser) ?u8 {
         if (p.pos >= p.src.len) return null;
         const c = p.src[p.pos];
         p.pos += 1;
+        if (c == '\n') {
+            p.line   += 1;
+            p.column  = 1;
+        } else {
+            p.column += 1;
+        }
         return c;
     }
 
-    fn expect(p: *Parser, c: u8) ParseError!void {
-        if (p.pos >= p.src.len or p.src[p.pos] != c) return ParseError.UnexpectedToken;
-        p.pos += 1;
+    fn expect(p: *Parser, c: u8, diag: ?*ParseDiagnostic) InternalParseError!void {
+        if (p.pos >= p.src.len or p.src[p.pos] != c) {
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken,
+                "unexpected character; expected '<', '/', '>', '=', or a name");
+            return error.UnexpectedToken;
+        }
+        _ = p.consume();
     }
 
-    /// Read a NAME (tag name or attribute name): starts at current pos, ends at first
-    /// character that is not alphanumeric, '-', '_', or '.'.
-    fn readName(p: *Parser) ParseError![]const u8 {
+    /// Read a NAME (tag name or attribute name).
+    fn readName(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError![]const u8 {
         const start = p.pos;
         while (p.pos < p.src.len and isNameChar(p.src[p.pos])) {
-            p.pos += 1;
+            _ = p.consume();
         }
-        if (p.pos == start) return ParseError.UnexpectedToken;
+        if (p.pos == start) {
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken,
+                "unexpected character; expected '<', '/', '>', '=', or a name");
+            return error.UnexpectedToken;
+        }
         return p.src[start..p.pos];
     }
 
     /// Parse the content of a double-quoted attribute value.
-    /// Handles `{bind path}` as a bind value; everything else is literal.
-    fn readAttrValue(p: *Parser) ParseError!AttrValue {
-        try p.expect('"');
+    fn readAttrValue(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError!AttrValue {
+        try p.expect('"', diag);
         const start = p.pos;
         // Find the closing quote
         while (p.pos < p.src.len and p.src[p.pos] != '"') {
-            p.pos += 1;
+            _ = p.consume();
         }
         const raw = p.src[start..p.pos];
-        try p.expect('"');
+        try p.expect('"', diag);
         // Check for {bind ...}
         if (std.mem.startsWith(u8, raw, "{bind ") and std.mem.endsWith(u8, raw, "}")) {
             const path = raw[6 .. raw.len - 1];
@@ -115,12 +157,21 @@ const Parser = struct {
         return AttrValue{ .literal = raw };
     }
 
-    /// Parse a single node starting from '<'. Returns the parsed NodeDesc.
-    fn parseNode(p: *Parser) ParseError!NodeDesc {
-        p.skipWs();
-        try p.expect('<');
+    /// Construct a ParseDiagnostic from current parser state. (R54)
+    fn makeDiag(p: *const Parser, err: ParseErrorKind, message: []const u8) ParseDiagnostic {
+        return .{
+            .err     = err,
+            .loc     = .{ .line = p.line, .column = p.column },
+            .message = message,
+        };
+    }
 
-        const tag = try p.readName();
+    /// Parse a single node starting from '<'. Returns the parsed NodeDesc.
+    fn parseNode(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError!NodeDesc {
+        p.skipWs();
+        try p.expect('<', diag);
+
+        const tag = try p.readName(diag);
         p.skipWs();
 
         // Collect attributes
@@ -129,19 +180,21 @@ const Parser = struct {
 
         while (true) {
             p.skipWs();
-            const ch = p.peek() orelse return ParseError.UnclosedTag;
+            const ch = p.peek() orelse {
+                if (diag) |d| d.* = p.makeDiag(.UnclosedTag, "tag was opened but never closed");
+                return error.UnclosedTag;
+            };
             if (ch == '/' or ch == '>') break;
             // Parse attribute: NAME '=' '"' value '"'
-            const name = try p.readName();
+            const name = try p.readName(diag);
             p.skipWs();
-            try p.expect('=');
+            try p.expect('=', diag);
             p.skipWs();
-            const val = try p.readAttrValue();
+            const val = try p.readAttrValue(diag);
             if (std.mem.eql(u8, name, "class")) {
-                // class attr: capture into classes; value must be literal
                 switch (val) {
                     .literal => |s| classes = s,
-                    .bind => |s| classes = s, // unlikely but handle gracefully
+                    .bind => |s| classes = s,
                 }
             } else {
                 try attrs_list.append(p.alloc, Attr{ .name = name, .value = val });
@@ -152,9 +205,8 @@ const Parser = struct {
 
         // Self-closing or container?
         if (p.peek() == '/') {
-            // Self-closing: />
-            p.pos += 1; // '/'
-            try p.expect('>');
+            _ = p.consume(); // '/'
+            try p.expect('>', diag);
             return NodeDesc{
                 .tag = tag,
                 .classes = classes,
@@ -164,7 +216,7 @@ const Parser = struct {
         }
 
         // Container: '>' children* '</' TAG '>'
-        try p.expect('>');
+        try p.expect('>', diag);
 
         var children_list: std.ArrayListUnmanaged(NodeDesc) = .empty;
         while (true) {
@@ -173,19 +225,25 @@ const Parser = struct {
             if (p.pos + 1 < p.src.len and p.src[p.pos] == '<' and p.src[p.pos + 1] == '/') {
                 break;
             }
-            if (p.pos >= p.src.len) return ParseError.UnclosedTag;
-            const child = try p.parseNode();
+            if (p.pos >= p.src.len) {
+                if (diag) |d| d.* = p.makeDiag(.UnclosedTag, "tag was opened but never closed");
+                return error.UnclosedTag;
+            }
+            const child = try p.parseNode(diag);
             try children_list.append(p.alloc, child);
         }
 
         // Consume '</'
-        try p.expect('<');
-        try p.expect('/');
-        const close_tag = try p.readName();
+        try p.expect('<', diag);
+        try p.expect('/', diag);
+        const close_tag = try p.readName(diag);
         p.skipWs();
-        try p.expect('>');
+        try p.expect('>', diag);
 
-        if (!std.mem.eql(u8, tag, close_tag)) return ParseError.MismatchedTag;
+        if (!std.mem.eql(u8, tag, close_tag)) {
+            if (diag) |d| d.* = p.makeDiag(.MismatchedTag, "closing tag does not match the opening tag");
+            return error.MismatchedTag;
+        }
 
         const children = try children_list.toOwnedSlice(p.alloc);
         return NodeDesc{
@@ -206,14 +264,26 @@ fn isNameChar(c: u8) bool {
 }
 
 /// Parse `.ui` markup into a descriptor tree rooted at the returned NodeDesc.
-/// One function, two uses (spec refinement 1): run at build time by the codegen step to emit
-/// baked struct literals, and at app runtime behind `-Dhot-reload` for live editing. Keep it
-/// free of constructs that would prevent build-time use.
-pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!NodeDesc {
+/// Backward-compatible 2-arg version (used by existing tests). Internally uses null diag.
+pub fn parse(
+    allocator: std.mem.Allocator,
+    source:    []const u8,
+) ParseError!NodeDesc {
+    return parseWithDiag(allocator, source, null);
+}
+
+/// Parse `.ui` markup with error diagnostics. (R54)
+/// On success returns the root NodeDesc. On failure, writes a ParseDiagnostic to
+/// `*diag` (if non-null) and returns the ParseError variant.
+/// One function, two uses: build-time codegen and hot-reload (INV-4.4).
+pub fn parseWithDiag(
+    allocator: std.mem.Allocator,
+    source:    []const u8,
+    diag:      ?*ParseDiagnostic,
+) ParseError!NodeDesc {
     var p = Parser.init(allocator, source);
     p.skipWs();
-    const node = try p.parseNode();
-    return node;
+    return p.parseNode(diag);
 }
 
 // ---------------------------------------------------------------------------
@@ -254,8 +324,16 @@ pub fn resolveClasses(classes: []const u8, tokens: Tokens) Resolved {
 }
 
 fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
+    // --- R51 Group A: Visibility ---
+    if (std.mem.eql(u8, cls, "hidden")) {
+        r.layout.display = .none;
+
+    // --- R51 Group B: Overflow ---
+    } else if (std.mem.eql(u8, cls, "overflow-hidden")) {
+        r.layout.overflow = .hidden;
+
     // --- Layout display ---
-    if (std.mem.eql(u8, cls, "flex")) {
+    } else if (std.mem.eql(u8, cls, "flex")) {
         r.layout.display = .flex;
     } else if (std.mem.eql(u8, cls, "grid")) {
         r.layout.display = .grid;
@@ -288,11 +366,41 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
     } else if (std.mem.eql(u8, cls, "items-stretch")) {
         r.layout.align_items = .stretch;
 
-        // --- Sizing ---
-    } else if (std.mem.eql(u8, cls, "w-full")) {
-        r.layout.width = .{ .percent = 100 };
-    } else if (std.mem.eql(u8, cls, "h-full")) {
-        r.layout.height = .{ .percent = 100 };
+        // --- R51 Group C: Sizing constraints ---
+    } else if (std.mem.startsWith(u8, cls, "min-w-")) {
+        if (parseUint(cls[6..])) |n| r.layout.min_size.w = @as(f32, @floatFromInt(n)) * 4.0;
+    } else if (std.mem.startsWith(u8, cls, "max-w-")) {
+        if (std.mem.eql(u8, cls[6..], "none")) {
+            r.layout.max_size.w = std.math.inf(f32);
+        } else if (parseUint(cls[6..])) |n| {
+            r.layout.max_size.w = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+    } else if (std.mem.startsWith(u8, cls, "min-h-")) {
+        if (parseUint(cls[6..])) |n| r.layout.min_size.h = @as(f32, @floatFromInt(n)) * 4.0;
+    } else if (std.mem.startsWith(u8, cls, "max-h-")) {
+        if (std.mem.eql(u8, cls[6..], "none")) {
+            r.layout.max_size.h = std.math.inf(f32);
+        } else if (parseUint(cls[6..])) |n| {
+            r.layout.max_size.h = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+
+        // --- Sizing: w-{n}, h-{n} (absorbs old w-full/h-full) ---
+    } else if (std.mem.startsWith(u8, cls, "w-")) {
+        if (std.mem.eql(u8, cls[2..], "full")) {
+            r.layout.width = .{ .percent = 100 };
+        } else if (std.mem.eql(u8, cls[2..], "auto")) {
+            r.layout.width = .auto;
+        } else if (parseUint(cls[2..])) |n| {
+            r.layout.width = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+    } else if (std.mem.startsWith(u8, cls, "h-")) {
+        if (std.mem.eql(u8, cls[2..], "full")) {
+            r.layout.height = .{ .percent = 100 };
+        } else if (std.mem.eql(u8, cls[2..], "auto")) {
+            r.layout.height = .auto;
+        } else if (parseUint(cls[2..])) |n| {
+            r.layout.height = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
 
         // --- Flex shorthand ---
     } else if (std.mem.eql(u8, cls, "flex-1")) {
@@ -363,6 +471,57 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
             r.style.padding.left = @as(f32, @floatFromInt(n)) * 4.0;
         }
 
+        // --- R51 Group D: Margin / horizontal centering ---
+    } else if (std.mem.eql(u8, cls, "mx-auto")) {
+        r.layout.margin.left  = .auto;
+        r.layout.margin.right = .auto;
+    } else if (std.mem.startsWith(u8, cls, "m-")) {
+        if (parseUint(cls[2..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin = .{ .top = v, .right = v, .bottom = v, .left = v };
+        }
+    } else if (std.mem.startsWith(u8, cls, "mx-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin.left  = v;
+            r.layout.margin.right = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "my-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin.top    = v;
+            r.layout.margin.bottom = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "mt-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.top    = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "mr-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.right  = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "mb-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.bottom = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "ml-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.left   = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+
+        // --- R51 Group E: Flex modifiers ---
+    } else if (std.mem.eql(u8, cls, "shrink-0")) {
+        r.layout.flex_shrink = 0;
+    } else if (std.mem.eql(u8, cls, "grow-0")) {
+        r.layout.flex_grow = 0;
+    } else if (std.mem.eql(u8, cls, "grow")) {
+        r.layout.flex_grow = 1;
+    } else if (std.mem.eql(u8, cls, "shrink")) {
+        r.layout.flex_shrink = 1;
+    } else if (std.mem.eql(u8, cls, "self-auto"))    { r.layout.align_self = .auto;
+    } else if (std.mem.eql(u8, cls, "self-start"))   { r.layout.align_self = .start;
+    } else if (std.mem.eql(u8, cls, "self-center"))  { r.layout.align_self = .center;
+    } else if (std.mem.eql(u8, cls, "self-end"))     { r.layout.align_self = .end;
+    } else if (std.mem.eql(u8, cls, "self-stretch")) { r.layout.align_self = .stretch;
+
+        // --- R51 Group F: Grid span ---
+    } else if (std.mem.startsWith(u8, cls, "col-span-")) {
+        if (parseUint(cls[9..])) |n| r.layout.col_span = @intCast(@min(n, 12));
+    } else if (std.mem.startsWith(u8, cls, "row-span-")) {
+        if (parseUint(cls[9..])) |n| r.layout.row_span = @intCast(@min(n, 12));
+
         // --- Background colors ---
     } else if (std.mem.eql(u8, cls, "bg-canvas")) {
         r.style.background = tokens.bg_canvas;
@@ -384,12 +543,26 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.text_color = tokens.accent;
 
         // --- Font sizes ---
+    } else if (std.mem.eql(u8, cls, "text-xs")) {
+        r.style.font_size = tokens.text_xs;
     } else if (std.mem.eql(u8, cls, "text-sm")) {
         r.style.font_size = tokens.text_sm;
     } else if (std.mem.eql(u8, cls, "text-base")) {
         r.style.font_size = tokens.text_base;
     } else if (std.mem.eql(u8, cls, "text-lg")) {
         r.style.font_size = tokens.text_lg;
+    } else if (std.mem.eql(u8, cls, "text-xl")) {
+        r.style.font_size = tokens.text_xl;
+
+        // --- Font weight/style (R60) ---
+    } else if (std.mem.eql(u8, cls, "font-bold")) {
+        r.style.font_bold = true;
+    } else if (std.mem.eql(u8, cls, "font-normal")) {
+        r.style.font_bold = false;
+    } else if (std.mem.eql(u8, cls, "font-italic") or std.mem.eql(u8, cls, "italic")) {
+        r.style.font_italic = true;
+    } else if (std.mem.eql(u8, cls, "not-italic")) {
+        r.style.font_italic = false;
 
         // --- Borders ---
     } else if (std.mem.eql(u8, cls, "border")) {
@@ -460,6 +633,38 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
     }
     // Unknown classes: silently ignore (last-wins via sequential application)
+}
+
+// ---------------------------------------------------------------------------
+// R50 — Inline style helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a #RRGGBB or #RRGGBBAA hex color string.
+/// Returns null if the string is not a valid hex color.
+pub fn parseHexColor(s: []const u8) ?theme.Color {
+    if (s.len == 0 or s[0] != '#') return null;
+    const digits = s[1..];
+    switch (digits.len) {
+        6 => {
+            const rgb = std.fmt.parseInt(u24, digits, 16) catch return null;
+            return theme.Color.hex(rgb);
+        },
+        8 => {
+            const rgba = std.fmt.parseInt(u32, digits, 16) catch return null;
+            return theme.Color{
+                .r = @intCast((rgba >> 24) & 0xFF),
+                .g = @intCast((rgba >> 16) & 0xFF),
+                .b = @intCast((rgba >> 8)  & 0xFF),
+                .a = @intCast(rgba & 0xFF),
+            };
+        },
+        else => return null,
+    }
+}
+
+/// Parse a decimal float string (e.g. "12", "1.5"). Returns null on failure.
+pub fn parseFloat(s: []const u8) ?f32 {
+    return std.fmt.parseFloat(f32, s) catch null;
 }
 
 /// Parse an unsigned integer from a string. Returns null on failure.

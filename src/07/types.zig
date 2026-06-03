@@ -15,6 +15,7 @@ const text = @import("../02/types.zig");
 const store_mod = @import("../03/types.zig");
 const theme = @import("../05/types.zig");
 const markup = @import("../06/types.zig");
+const font_family_mod = @import("../app/font_family.zig");
 
 // ---------------------------------------------------------------------------
 // Re-exports used by the acceptance test
@@ -26,6 +27,9 @@ pub const LayoutNode = store_mod.LayoutNode;
 pub const Tokens = theme.Tokens;
 pub const ComputedStyle = theme.ComputedStyle;
 pub const NodeDesc = markup.NodeDesc;
+
+/// R60 — Re-export FontFamily so callers only need to import this module.
+pub const FontFamily = font_family_mod.FontFamily;
 
 // ---------------------------------------------------------------------------
 // Widget kinds + registry
@@ -203,6 +207,10 @@ pub const Scene = struct {
     // R43 — Image state parallel array
     _image_state: std.ArrayListUnmanaged(ImageState) = .empty,
 
+    // R52 — Hidden state parallel arrays
+    _hidden: std.ArrayListUnmanaged(bool) = .empty,
+    _saved_display: std.ArrayListUnmanaged(store_mod.Display) = .empty,
+
     gpa: std.mem.Allocator,
 
     pub fn init(gpa: std.mem.Allocator) Scene {
@@ -228,6 +236,8 @@ pub const Scene = struct {
         self._scroll_state.deinit(self.gpa);
         self._pseudo.deinit(self.gpa);
         self._image_state.deinit(self.gpa);
+        self._hidden.deinit(self.gpa);
+        self._saved_display.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -246,6 +256,8 @@ pub const Scene = struct {
         self._scroll_state.clearRetainingCapacity();
         self._pseudo.clearRetainingCapacity();
         self._image_state.clearRetainingCapacity();
+        self._hidden.clearRetainingCapacity();
+        self._saved_display.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -271,11 +283,13 @@ pub const Scene = struct {
     }
 
     /// Measure every text-bearing element and fill its LayoutNode.measured.
-    pub fn measurePass(self: *Scene, font: *text.Font, atlas: *text.GlyphAtlas) text.FontError!void {
+    /// R60: accepts FontFamily so each element uses the correct bold/italic face.
+    pub fn measurePass(self: *Scene, family: *font_family_mod.FontFamily, atlas: *text.GlyphAtlas) text.FontError!void {
         for (self._text.items, 0..) |maybe_str, i| {
             const str = maybe_str orelse continue;
-            const font_size = self._style.items[i].font_size;
-            const para = try text.layoutParagraph(self.gpa, font, atlas, str, font_size, 1e6);
+            const style = self._style.items[i];
+            const font = family.face(style.font_bold, style.font_italic);
+            const para = try text.layoutParagraph(self.gpa, font, atlas, str, style.font_size, 1e6);
             defer self.gpa.free(para.glyphs);
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
         }
@@ -553,7 +567,118 @@ pub const Scene = struct {
         if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
     }
 
+    // -----------------------------------------------------------------------
+    // Hidden state (R52)
+    // -----------------------------------------------------------------------
+
+    /// Return whether element `idx` is currently hidden.
+    pub fn isHidden(self: *const Scene, idx: u32) bool {
+        if (idx >= self._hidden.items.len) return false;
+        return self._hidden.items[idx];
+    }
+
+    /// Set the hidden state for element `idx` and mark it dirty.
+    /// When hidden, saves the current display value and sets display = .none.
+    /// When shown, restores the original display value.
+    pub fn setHidden(self: *Scene, idx: u32, hidden: bool) void {
+        if (idx >= self._hidden.items.len) return;
+        const was_hidden = self._hidden.items[idx];
+        if (was_hidden == hidden) return;
+        self._hidden.items[idx] = hidden;
+        if (hidden) {
+            self._saved_display.items[idx] = self.elements.layout.items[idx].display;
+            self.elements.layout.items[idx].display = .none;
+        } else {
+            self.elements.layout.items[idx].display = self._saved_display.items[idx];
+        }
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Children management (R53)
+    // -----------------------------------------------------------------------
+
+    /// Remove all direct children of `parent_idx` (and their subtrees) from the scene.
+    /// Recycles element indices. Called before re-instantiating a `for=` list.
+    pub fn removeChildren(self: *Scene, parent_idx: u32) void {
+        const parent_id = ElementId{
+            .index = parent_idx,
+            .gen   = self.elements.gen.items[parent_idx],
+        };
+        // Collect all direct children first (iterator is invalidated by remove)
+        var children_buf: [256]ElementId = undefined;
+        var n: usize = 0;
+        var it = self.elements.childrenOf(parent_id);
+        while (it.next()) |child_id| {
+            if (n < children_buf.len) {
+                children_buf[n] = child_id;
+                n += 1;
+            }
+        }
+        // Remove each child subtree recursively
+        for (children_buf[0..n]) |child_id| {
+            self.removeSubtree(child_id.index);
+        }
+    }
+
+    /// Recursively remove element `idx` and all its descendants.
+    fn removeSubtree(self: *Scene, idx: u32) void {
+        const id = ElementId{
+            .index = idx,
+            .gen   = self.elements.gen.items[idx],
+        };
+        // Remove children first (depth-first)
+        var children_buf: [256]ElementId = undefined;
+        var n: usize = 0;
+        var it = self.elements.childrenOf(id);
+        while (it.next()) |child_id| {
+            if (n < children_buf.len) {
+                children_buf[n] = child_id;
+                n += 1;
+            }
+        }
+        for (children_buf[0..n]) |child_id| {
+            self.removeSubtree(child_id.index);
+        }
+        // Now remove this element
+        self.elements.remove(id);
+    }
+
+    /// Instantiate `desc` as a child of `parent_id`. Like `instantiate` but appends
+    /// the result as a child of `parent_id` in the element store.
+    pub fn instantiateUnder(
+        self: *Scene,
+        parent_id: ElementId,
+        desc: NodeDesc,
+        tokens: Tokens,
+    ) InstantiateError!ElementId {
+        return self.instantiateNode(desc, tokens, parent_id);
+    }
+
     // --- private helpers ---
+
+    /// Apply inline style:* attributes to a ComputedStyle. (R50)
+    fn applyInlineStyle(prop: []const u8, value: []const u8, style: *ComputedStyle) void {
+        const eql = std.mem.eql;
+        if (eql(u8, prop, "background")) {
+            if (markup.parseHexColor(value)) |c| style.background = c;
+        } else if (eql(u8, prop, "color")) {
+            if (markup.parseHexColor(value)) |c| style.text_color = c;
+        } else if (eql(u8, prop, "border-color")) {
+            if (markup.parseHexColor(value)) |c| style.border_color = c;
+        } else if (eql(u8, prop, "border-width")) {
+            if (markup.parseFloat(value)) |v| style.border_width = v;
+        } else if (eql(u8, prop, "radius")) {
+            if (markup.parseFloat(value)) |v| style.radius = v;
+        } else if (eql(u8, prop, "font-size")) {
+            if (markup.parseFloat(value)) |v| style.font_size = v;
+        } else if (eql(u8, prop, "opacity")) {
+            if (markup.parseFloat(value)) |v| style.opacity = std.math.clamp(v, 0.0, 1.0);
+        } else if (eql(u8, prop, "shadow-blur")) {
+            if (markup.parseFloat(value)) |v| style.shadow_blur = v;
+        }
+        // Unknown property: silently ignore.
+    }
 
     fn instantiateNode(
         self: *Scene,
@@ -646,6 +771,18 @@ pub const Scene = struct {
         if (resolved.layout.grid_template_rows.len != empty.layout.grid_template_rows.len)
             final_layout.grid_template_rows = resolved.layout.grid_template_rows;
 
+        // R51: align_self
+        if (resolved.layout.align_self != empty.layout.align_self)
+            final_layout.align_self = resolved.layout.align_self;
+
+        // R51: margin (compare each field)
+        const emm = empty.layout.margin;
+        const rm = resolved.layout.margin;
+        if (!std.meta.eql(rm.top, emm.top))    final_layout.margin.top    = rm.top;
+        if (!std.meta.eql(rm.right, emm.right)) final_layout.margin.right  = rm.right;
+        if (!std.meta.eql(rm.bottom, emm.bottom)) final_layout.margin.bottom = rm.bottom;
+        if (!std.meta.eql(rm.left, emm.left))   final_layout.margin.left   = rm.left;
+
         // Sync layout padding from the resolved style (style padding drives layout spacing).
         // Only apply if the layout hasn't been explicitly set via a Tailwind class.
         if (resolved.layout.padding.top == empty.layout.padding.top)
@@ -657,14 +794,39 @@ pub const Scene = struct {
         if (resolved.layout.padding.left == empty.layout.padding.left)
             final_layout.padding.left = final_style.padding.left;
 
+        // R50: Apply inline style:* attributes (override class-derived values)
+        for (desc.attrs) |attr| {
+            if (!std.mem.startsWith(u8, attr.name, "style:")) continue;
+            const prop = attr.name[6..];
+            const raw_value: []const u8 = switch (attr.value) {
+                .literal => |s| s,
+                .bind    => continue, // bind paths are not evaluated during instantiate
+            };
+            applyInlineStyle(prop, raw_value, &final_style);
+        }
+
         // --- Extract text attr ---
         var text_val: ?[]const u8 = null;
+        // R52: check for if= attribute (start hidden until signal resolves)
+        var start_hidden: bool = false;
         for (desc.attrs) |attr| {
             if (std.mem.eql(u8, attr.name, "text")) {
                 text_val = switch (attr.value) {
                     .literal => |s| s,
                     .bind => |s| s,
                 };
+            } else if (std.mem.eql(u8, attr.name, "if")) {
+                switch (attr.value) {
+                    .literal => |s| {
+                        if (!std.mem.eql(u8, s, "true")) {
+                            start_hidden = true;
+                        }
+                    },
+                    .bind => {
+                        // Start hidden until CondBinding resolves the signal
+                        start_hidden = true;
+                    },
+                }
             }
         }
 
@@ -736,6 +898,24 @@ pub const Scene = struct {
             self._image_state.items.len = needed;
         }
         self._image_state.items[id.index] = .{};
+
+        // R52: hidden state arrays
+        try self._hidden.ensureTotalCapacity(self.gpa, needed);
+        if (self._hidden.items.len <= id.index) {
+            self._hidden.items.len = needed;
+        }
+        self._hidden.items[id.index] = false;
+
+        try self._saved_display.ensureTotalCapacity(self.gpa, needed);
+        if (self._saved_display.items.len <= id.index) {
+            self._saved_display.items.len = needed;
+        }
+        self._saved_display.items[id.index] = final_layout.display;
+
+        // Apply if= hidden state after element is registered
+        if (start_hidden) {
+            self.setHidden(id.index, true);
+        }
 
         // --- Recurse into children ---
         for (desc.children) |child| {

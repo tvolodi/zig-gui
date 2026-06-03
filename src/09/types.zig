@@ -11,6 +11,7 @@ const store_mod = @import("../03/types.zig");
 const theme_mod = @import("../05/types.zig");
 const comp_mod = @import("../07/types.zig");
 const image_atlas_mod = @import("../app/image_atlas.zig");
+const font_family_mod = @import("../app/font_family.zig");
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -309,7 +310,7 @@ pub fn buildDrawList(
     scene: *Scene,
     atlas: *GlyphAtlas,
     image_atlas: *const ImageAtlas,
-    font: *text_mod.Font,
+    family: *font_family_mod.FontFamily,
     tokens: Tokens,
 ) error{OutOfMemory}![]DrawCommand {
     var list: std.ArrayListUnmanaged(DrawCommand) = .empty;
@@ -471,7 +472,8 @@ pub fn buildDrawList(
         // 3. Text glyphs
         if (scene.textOf(id)) |str| {
             if (str.len > 0) {
-                try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, font, effective_alpha);
+                const elem_font = family.face(style.font_bold, style.font_italic);
+                try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, elem_font, effective_alpha);
             }
         }
 
@@ -592,7 +594,8 @@ pub fn buildDrawList(
             if (opt.label.len > 0) {
                 const opt_style = scene.styleOf(id);
                 const opt_computed = store_mod.Rect{ .x = panel_x + 4.0, .y = oy, .w = panel_w - 8.0, .h = item_h };
-                try emitGlyphs(&list, alloc, id, opt.label, opt_computed, opt_style, atlas, font, 1.0);
+                const opt_font = family.face(opt_style.font_bold, opt_style.font_italic);
+                try emitGlyphs(&list, alloc, id, opt.label, opt_computed, opt_style, atlas, opt_font, 1.0);
             }
         }
     }
@@ -609,7 +612,7 @@ fn computeTextX(base_x: f32, text_bytes: []const u8, cursor_pos: u32, px: u16, a
         const cp = iter.nextCodepoint() orelse break;
         const cp_len = std.unicode.utf8CodepointSequenceLength(cp) catch 1;
         byte_pos += @as(u32, @intCast(cp_len));
-        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px };
+        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px, .variant = .regular };
         if (atlas.lookup(key)) |uv_rect| {
             x += @as(f32, @floatFromInt(uv_rect.w));
         }
@@ -686,7 +689,7 @@ fn emitGlyphs(
         var last_x_end: f32 = pen_x;
         var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
         while (iter.nextCodepoint()) |cp| {
-            const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16 };
+            const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
             const uv_rect = atlas.lookup(key) orelse continue;
 
             const gw = @as(f32, @floatFromInt(uv_rect.w));
@@ -719,7 +722,7 @@ fn emitGlyphs(
             // Emit ellipsis glyph.
             if (em) |e| {
                 const ellipsis_cp: u21 = 0x2026;
-                const key = text_mod.GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16 };
+                const key = text_mod.GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16, .variant = font.variant };
                 if (atlas.lookup(key)) |uv_rect| {
                     const gw = @as(f32, @floatFromInt(uv_rect.w));
                     const gh = @as(f32, @floatFromInt(uv_rect.h));
@@ -748,7 +751,7 @@ fn emitGlyphs(
     // Normal (non-truncated) path.
     var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
     while (iter.nextCodepoint()) |cp| {
-        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16 };
+        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
         const uv_rect = atlas.lookup(key) orelse continue;
 
         const gw = @as(f32, @floatFromInt(uv_rect.w));

@@ -286,3 +286,154 @@ See: R45 (M4-06), `src/05/types.zig` `ComputedStyle.opacity`, `src/09/types.zig`
 A single-level drop shadow rendered as `N=5` concentric `filled_rect` commands drawn behind an element's background. Approximates Gaussian blur without GPU compute. Parameters (`shadow_blur`, `shadow_offset_x`, `shadow_offset_y`, `shadow_color`) are stored on `ComputedStyle`. Enabled by `shadow-{sm,md,lg,xl}` Tailwind classes. Shadow rects are emitted before the element's background rect in `buildDrawList` (painter's algorithm ensures shadow is behind element).
 
 See: R46 (M4-07), `src/05/types.zig` `ComputedStyle.shadow_blur`, `src/09/types.zig` `emitShadow`.
+
+---
+
+## parseHexColor
+
+A public helper function in `src/06/types.zig` (R50). Parses a `#RRGGBB` or `#RRGGBBAA` hex
+color string into a `theme.Color`. Returns `null` if the string is not a valid hex color
+(wrong length, non-hex digits, missing `#` prefix). Allocation-free; operates on the input
+slice directly. Used by `applyInlineStyle` in module 07 to resolve `style:color`,
+`style:background`, and `style:border-color` inline attributes.
+
+See: R50 (M5-01), `src/06/types.zig`.
+
+---
+
+## parseFloat
+
+A public helper function in `src/06/types.zig` (R50). Parses a decimal float string (e.g.
+`"12"`, `"1.5"`) into an `f32`. Returns `null` on parse failure. Thin wrapper over
+`std.fmt.parseFloat`. Used by `applyInlineStyle` in module 07 to resolve numeric inline style
+attributes such as `style:radius`, `style:font-size`, `style:border-width`, `style:opacity`.
+
+See: R50 (M5-01), `src/06/types.zig`.
+
+---
+
+## AlignSelf
+
+An enum added to `src/03/types.zig` (R51) with variants `auto`, `start`, `center`, `end`,
+`stretch`. A new field `align_self: AlignSelf = .auto` on `LayoutNode` allows a flex child
+to override its parent's `align_items` setting for its own cross-axis placement. `.auto` means
+"use the parent's `align_items` value." Set by Tailwind classes `self-auto`, `self-start`,
+`self-center`, `self-end`, `self-stretch`.
+
+See: R51 (M5-02), `src/03/types.zig`.
+
+---
+
+## MarginValue
+
+A tagged union added to `src/03/types.zig` (R51). Variants: `zero` (0 px, the default),
+`px: f32` (fixed pixel margin), `auto` (fill remaining space — used for `mx-auto` centering).
+Replaces the flat `f32` margin fields previously in `Insets`. Used as the type of each field
+in `Margin`.
+
+See: R51 (M5-02), `src/03/types.zig`.
+
+---
+
+## Margin
+
+A struct added to `src/03/types.zig` (R51) with four `MarginValue` fields: `top`, `right`,
+`bottom`, `left`, all defaulting to `.zero`. Replaces `margin: Insets` on `LayoutNode`.
+Supports `auto` margins for horizontal centering (`mx-auto`) in addition to fixed-pixel and
+zero margins.
+
+See: R51 (M5-02), `src/03/types.zig`.
+
+---
+
+## CondBinding
+
+A struct in `src/app/binding.zig` (R52) representing a registered connection between one
+`Signal(bool)` field and one element index. When the signal is `true` the element is shown;
+when `false` the element is hidden (`setHidden(idx, true)`). Stored in `BindingSet.cond`
+(a parallel array alongside `BindingSet.text`). Created by `BindingSet.bindCond()`, which
+enforces at compile time that the bound field is exactly `Signal(bool)`.
+
+See: R52 (M5-03), `src/app/binding.zig`.
+
+---
+
+## ListBinding
+
+A struct in `src/app/binding.zig` (R53) representing a registered `for=` binding between a
+`Signal([]T)` field and a container element. Stores the container element index, a `NodeDesc`
+template for one item, type-erased signal pointer, and a `refresh_fn` closure that
+re-instantiates the child subtree when the signal's version changes. Created by
+`BindingSet.bindList()`. On each `BindingSet.refresh()` call, if the signal version has
+changed, the container's children are cleared (`Scene.removeChildren`) and one subtree per
+item is instantiated (`Scene.instantiateUnder`).
+
+See: R53 (M5-04), `src/app/binding.zig`.
+
+---
+
+## SourceLoc
+
+A struct in `src/06/types.zig` (R54) carrying a 1-based line and column number within a
+`.ui` source file. Used inside `ParseDiagnostic` to point the developer to the exact
+character position of a parse error. Column is a byte offset from the line start, not a
+Unicode code-point count (Latin+Cyrillic scope, INV-1.3).
+
+See: R54 (M5-05), `src/06/types.zig`.
+
+---
+
+## ParseDiagnostic
+
+A struct in `src/06/types.zig` (R54) emitted by `parse` on failure. Contains a `ParseError`
+variant (`err`), a `SourceLoc` (`loc`), and a static `message: []const u8` string literal.
+No heap allocation is required; the message is always a string literal. Passed as an optional
+out-parameter (`?*ParseDiagnostic`) to `parse`; callers that do not need location info pass
+`null`. The hot-reload path and the codegen tool both log the diagnostic to stderr.
+
+See: R54 (M5-05), `src/06/types.zig`.
+
+---
+
+## FileWatcher
+
+A struct in `src/app/file_watcher.zig` (R56, hot-reload only). Holds a list of `WatchEntry`
+items and a list of changed entry indices since the last `poll()`. `poll()` stats each watched
+file and records those whose mtime has advanced. `drainChanged()` returns the changed-index
+slice and resets it for the next poll. Present in the binary only when `-Dhot-reload=true` is
+set; compiled out in production builds.
+
+See: R56 (M5-07), `src/app/file_watcher.zig`.
+
+---
+
+## WatchEntry
+
+A struct in `src/app/file_watcher.zig` (R56, hot-reload only). Stores the null-terminated
+path of a watched `.ui` file and the nanosecond-precision mtime (`i128`) as seen on the last
+`FileWatcher.poll()` call. When `poll()` sees a newer mtime, the entry's index is appended to
+`FileWatcher.changed`.
+
+See: R56 (M5-07), `src/app/file_watcher.zig`.
+
+---
+
+## FontVariant
+
+An `enum(u8) { regular, bold, italic }` discriminant stored in `GlyphKey.variant` and `Font.variant`.
+Ensures glyphs from different font faces (regular vs bold vs italic) occupy distinct atlas cache entries
+even when sharing the same codepoint and pixel size. Set at `FontFamily.init` time; never changed after.
+
+See: R60, `src/02/types.zig`, `src/app/font_family.zig`.
+
+---
+
+## FontFamily
+
+A three-slot font container (regular, bold, italic) defined in `src/app/font_family.zig`.
+Owns up to three `Font` instances initialised from TTF bytes. `face(bold, italic)` returns a `*Font`
+pointer to the best-matching slot with fallback to regular when a variant is absent.
+Bold+italic falls back to bold (no synthesised bold-italic). Each slot's `Font.variant` is fixed
+at init time so `layoutParagraph` can construct correct atlas keys without a signature change.
+
+See: R60, `src/app/font_family.zig`.

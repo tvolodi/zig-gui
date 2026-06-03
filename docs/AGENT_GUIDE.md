@@ -211,7 +211,8 @@ constitution and is a flag for human review.
 - **Focus state:** `focused_idx: u32` (maxInt(u32) = no focus) + `focusable_indices: []u32`
   rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox (B2).
 - **Two passes:** `instantiate` (no font, fully testable), then `measurePass` (font-dependent,
-  fills `LayoutNode.measured`).
+  fills `LayoutNode.measured`). **R60:** `measurePass` takes `*FontFamily` instead of `*Font`;
+  uses `family.face(style.font_bold, style.font_italic)` per element.
 - All element creation/removal goes through `Scene`, never the store directly.
 - **Callback firing:** `Scene.fireQueuedCallbacks()` called ONCE per frame by the app layer,
   after layout solve, before `buildDrawList` (INV-3.3).
@@ -235,14 +236,19 @@ constitution and is a flag for human review.
 - **R44 — Text truncation:** `buildDrawList` checks `style.truncate`; clips glyph commands and appends ellipsis glyph sequence when text overflows element width.
 - **R45 — `applyOpacity(col, factor)`:** Multiplies `col.a` by `factor`; called for every color emitted when `effective_alpha < 1.0`.
 - **R46 — `emitShadow(...)`:** Emits 5 concentric `filled_rect` commands before the element background; skipped when `style.shadow_blur == 0`.
+- **R60 — Font variants (bold/italic):** `buildDrawList` now receives `family: *FontFamily` instead of `font: *Font`. Call `family.face(style.font_bold, style.font_italic)` per element before `emitGlyphs`. `computeTextX` has no style context — uses `.variant = .regular`.
 
 ### App layer — Milestone 1 (src/app/)
 - **Goal:** Single `App.run()` entry point that owns and drives all modules. Wires together
   modules 01-09 into a runnable application.
 - **Key types:** `App`, `AppOptions`, `EventQueue`, `Event`, `Key`, `MouseButton`, `Action`,
   `Modifiers` — all in `src/app/types.zig`.
-- **Init order (must be exact):** Platform → VulkanBackend → initQuadPipeline → Font →
+- **Init order (must be exact):** Platform → VulkanBackend → initQuadPipeline → FontFamily →
   GlyphAtlas → GpuAtlas → Scene. Deinit is exact reverse.
+- **R60:** `AppOptions` gains `bold_font_path` / `italic_font_path` (both optional). `AppInner`
+  holds `font_family: FontFamily` instead of `font: Font`. `FontFamily` is defined in
+  `src/app/font_family.zig`; its `face(bold, italic)` method returns `*Font` with fallback to
+  regular when a variant is not loaded.
 - **Frame loop order:** poll events → drain EventQueue → apply pending resize → beginFrame →
   measurePass → re-upload GPU atlas if generation changed → layout solve → buildDrawList →
   clear → drawFrame → endFrame.

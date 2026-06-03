@@ -269,3 +269,335 @@ test "resolve gap-0 sets gap to zero" {
     const r = M.resolveClasses("flex gap-0", tokens());
     try testing.expectEqual(@as(f32, 0), r.layout.gap);
 }
+
+// ===========================================================================
+// R50 — parseHexColor
+// ===========================================================================
+
+test "R50: parseHexColor #FF0000 returns opaque red" {
+    const c = M.parseHexColor("#FF0000");
+    try testing.expect(c != null);
+    try testing.expectEqual(@as(u8, 255), c.?.r);
+    try testing.expectEqual(@as(u8, 0),   c.?.g);
+    try testing.expectEqual(@as(u8, 0),   c.?.b);
+    try testing.expectEqual(@as(u8, 255), c.?.a);
+}
+
+test "R50: parseHexColor #FF000080 returns red with alpha 128" {
+    const c = M.parseHexColor("#FF000080");
+    try testing.expect(c != null);
+    try testing.expectEqual(@as(u8, 255), c.?.r);
+    try testing.expectEqual(@as(u8, 0),   c.?.g);
+    try testing.expectEqual(@as(u8, 0),   c.?.b);
+    try testing.expectEqual(@as(u8, 128), c.?.a);
+}
+
+test "R50: parseHexColor empty string returns null" {
+    try testing.expect(M.parseHexColor("") == null);
+}
+
+test "R50: parseHexColor word red returns null" {
+    try testing.expect(M.parseHexColor("red") == null);
+}
+
+test "R50: parseHexColor without leading hash returns null" {
+    try testing.expect(M.parseHexColor("FF0000") == null);
+}
+
+test "R50: parseHexColor with invalid hex digit returns null" {
+    try testing.expect(M.parseHexColor("#GGGGGG") == null);
+}
+
+test "R50: parseHexColor #000000 returns black" {
+    const c = M.parseHexColor("#000000");
+    try testing.expect(c != null);
+    try testing.expectEqual(@as(u8, 0),   c.?.r);
+    try testing.expectEqual(@as(u8, 0),   c.?.g);
+    try testing.expectEqual(@as(u8, 0),   c.?.b);
+    try testing.expectEqual(@as(u8, 255), c.?.a);
+}
+
+test "R50: parseHexColor #FFFFFF returns white" {
+    const c = M.parseHexColor("#FFFFFF");
+    try testing.expect(c != null);
+    try testing.expectEqual(@as(u8, 255), c.?.r);
+    try testing.expectEqual(@as(u8, 255), c.?.g);
+    try testing.expectEqual(@as(u8, 255), c.?.b);
+    try testing.expectEqual(@as(u8, 255), c.?.a);
+}
+
+test "R50: parseHexColor #AABBCC returns correct RGB" {
+    const c = M.parseHexColor("#AABBCC");
+    try testing.expect(c != null);
+    try testing.expectEqual(@as(u8, 0xAA), c.?.r);
+    try testing.expectEqual(@as(u8, 0xBB), c.?.g);
+    try testing.expectEqual(@as(u8, 0xCC), c.?.b);
+    try testing.expectEqual(@as(u8, 255),  c.?.a);
+}
+
+test "R50: parseHexColor wrong length five digits returns null" {
+    try testing.expect(M.parseHexColor("#FFFFF") == null);
+}
+
+test "R50: parseHexColor wrong length three digits returns null" {
+    try testing.expect(M.parseHexColor("#FFF") == null);
+}
+
+// ===========================================================================
+// R50 — parseFloat
+// ===========================================================================
+
+test "R50: parseFloat 12 returns 12.0" {
+    const v = M.parseFloat("12");
+    try testing.expect(v != null);
+    try testing.expectApproxEqAbs(@as(f32, 12.0), v.?, 0.001);
+}
+
+test "R50: parseFloat 1.5 returns 1.5" {
+    const v = M.parseFloat("1.5");
+    try testing.expect(v != null);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), v.?, 0.001);
+}
+
+test "R50: parseFloat abc returns null" {
+    try testing.expect(M.parseFloat("abc") == null);
+}
+
+test "R50: parseFloat empty string returns null" {
+    try testing.expect(M.parseFloat("") == null);
+}
+
+test "R50: parseFloat 0.0 returns 0.0" {
+    const v = M.parseFloat("0.0");
+    try testing.expect(v != null);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), v.?, 0.001);
+}
+
+test "R50: parseFloat negative value returns negative float" {
+    const v = M.parseFloat("-1.5");
+    try testing.expect(v != null);
+    try testing.expectApproxEqAbs(@as(f32, -1.5), v.?, 0.001);
+}
+
+// ===========================================================================
+// R51 — resolveClasses: new Tailwind classes added in M5
+// ===========================================================================
+
+test "R51: hidden sets display to none" {
+    const r = M.resolveClasses("hidden", tokens());
+    try testing.expectEqual(store.Display.none, r.layout.display);
+}
+
+test "R51: overflow-hidden sets overflow to hidden" {
+    const r = M.resolveClasses("overflow-hidden", tokens());
+    try testing.expectEqual(store.Overflow.hidden, r.layout.overflow);
+}
+
+test "R51: w-12 sets width to 48px (12 * 4)" {
+    const r = M.resolveClasses("w-12", tokens());
+    try testing.expect(r.layout.width == .px);
+    try testing.expectApproxEqAbs(@as(f32, 48.0), r.layout.width.px, 0.001);
+}
+
+test "R51: h-auto sets height to auto" {
+    const r = M.resolveClasses("h-auto", tokens());
+    try testing.expect(r.layout.height == .auto);
+}
+
+test "R51: min-w-4 sets min_size.w to 16px (4 * 4)" {
+    const r = M.resolveClasses("min-w-4", tokens());
+    try testing.expectApproxEqAbs(@as(f32, 16.0), r.layout.min_size.w, 0.001);
+}
+
+test "R51: max-w-none sets max_size.w to infinity" {
+    const r = M.resolveClasses("max-w-none", tokens());
+    try testing.expect(std.math.isInf(r.layout.max_size.w));
+}
+
+test "R51: mx-auto sets margin left and right to auto" {
+    const r = M.resolveClasses("mx-auto", tokens());
+    try testing.expect(r.layout.margin.left == .auto);
+    try testing.expect(r.layout.margin.right == .auto);
+}
+
+test "R51: m-2 sets all four margin sides to 8px (2 * 4)" {
+    const r = M.resolveClasses("m-2", tokens());
+    // All four sides should be .px = 8
+    switch (r.layout.margin.top) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 8.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (r.layout.margin.right) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 8.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (r.layout.margin.bottom) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 8.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (r.layout.margin.left) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 8.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "R51: shrink-0 sets flex_shrink to 0" {
+    const r = M.resolveClasses("shrink-0", tokens());
+    try testing.expectApproxEqAbs(@as(f32, 0.0), r.layout.flex_shrink, 0.001);
+}
+
+test "R51: self-center sets align_self to center" {
+    const r = M.resolveClasses("self-center", tokens());
+    try testing.expectEqual(store.AlignSelf.center, r.layout.align_self);
+}
+
+test "R51: col-span-3 sets col_span to 3" {
+    const r = M.resolveClasses("col-span-3", tokens());
+    try testing.expectEqual(@as(u16, 3), r.layout.col_span);
+}
+
+test "R51: row-span-2 sets row_span to 2" {
+    const r = M.resolveClasses("row-span-2", tokens());
+    try testing.expectEqual(@as(u16, 2), r.layout.row_span);
+}
+
+test "R51: self-start sets align_self to start" {
+    const r = M.resolveClasses("self-start", tokens());
+    try testing.expectEqual(store.AlignSelf.start, r.layout.align_self);
+}
+
+test "R51: self-end sets align_self to end" {
+    const r = M.resolveClasses("self-end", tokens());
+    try testing.expectEqual(store.AlignSelf.end, r.layout.align_self);
+}
+
+test "R51: self-stretch sets align_self to stretch" {
+    const r = M.resolveClasses("self-stretch", tokens());
+    try testing.expectEqual(store.AlignSelf.stretch, r.layout.align_self);
+}
+
+test "R51: min-h-4 sets min_size.h to 16px" {
+    const r = M.resolveClasses("min-h-4", tokens());
+    try testing.expectApproxEqAbs(@as(f32, 16.0), r.layout.min_size.h, 0.001);
+}
+
+test "R51: max-h-none sets max_size.h to infinity" {
+    const r = M.resolveClasses("max-h-none", tokens());
+    try testing.expect(std.math.isInf(r.layout.max_size.h));
+}
+
+test "R51: mt-3 sets only margin top to 12px" {
+    const r = M.resolveClasses("mt-3", tokens());
+    switch (r.layout.margin.top) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 12.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    // Other sides should be zero (default)
+    try testing.expect(r.layout.margin.right == .zero);
+    try testing.expect(r.layout.margin.bottom == .zero);
+    try testing.expect(r.layout.margin.left == .zero);
+}
+
+test "R51: mx-4 sets left and right margin to 16px, top and bottom zero" {
+    const r = M.resolveClasses("mx-4", tokens());
+    switch (r.layout.margin.left) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 16.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (r.layout.margin.right) {
+        .px => |v| try testing.expectApproxEqAbs(@as(f32, 16.0), v, 0.001),
+        else => return error.TestUnexpectedResult,
+    }
+    try testing.expect(r.layout.margin.top == .zero);
+    try testing.expect(r.layout.margin.bottom == .zero);
+}
+
+// ===========================================================================
+// R54 — parseWithDiag
+// ===========================================================================
+
+test "R54: parseWithDiag on unclosed tag returns UnclosedTag error and sets diag" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var diag: M.ParseDiagnostic = undefined;
+    const result = M.parseWithDiag(arena.allocator(), "<Text", &diag);
+    try testing.expectError(M.ParseError.UnclosedTag, result);
+    try testing.expectEqual(M.ParseErrorKind.UnclosedTag, diag.err);
+}
+
+test "R54: parseWithDiag on mismatched tag returns MismatchedTag error" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var diag: M.ParseDiagnostic = undefined;
+    // <Column> opened but </Row> closes it
+    const result = M.parseWithDiag(arena.allocator(), "<Column></Row>", &diag);
+    try testing.expectError(M.ParseError.MismatchedTag, result);
+    try testing.expectEqual(M.ParseErrorKind.MismatchedTag, diag.err);
+    // Line 1 (single-line input)
+    try testing.expectEqual(@as(u32, 1), diag.loc.line);
+}
+
+test "R54: parseWithDiag on mismatched tag with child reports line 1" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var diag: M.ParseDiagnostic = undefined;
+    const result = M.parseWithDiag(arena.allocator(), "<Column><Text/></Row>", &diag);
+    try testing.expectError(M.ParseError.MismatchedTag, result);
+    try testing.expectEqual(M.ParseErrorKind.MismatchedTag, diag.err);
+    try testing.expectEqual(@as(u32, 1), diag.loc.line);
+}
+
+test "R54: parseWithDiag multi-line error on line 3 reports line 3" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Lines 1-2 are valid content inside Column, line 3 has the mismatched close tag
+    const src =
+        \\<Column>
+        \\  <Text text="a"/>
+        \\</Row>
+    ;
+    var diag: M.ParseDiagnostic = undefined;
+    const result = M.parseWithDiag(arena.allocator(), src, &diag);
+    try testing.expectError(M.ParseError.MismatchedTag, result);
+    try testing.expectEqual(M.ParseErrorKind.MismatchedTag, diag.err);
+    try testing.expectEqual(@as(u32, 3), diag.loc.line);
+}
+
+test "R54: parseWithDiag with null diag on invalid input returns error without crashing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Passing null diag must not crash even on error
+    const result = M.parseWithDiag(arena.allocator(), "<Text", null);
+    try testing.expectError(M.ParseError.UnclosedTag, result);
+}
+
+test "R54: parseWithDiag on valid markup returns successfully" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var diag: M.ParseDiagnostic = undefined;
+    const node = try M.parseWithDiag(arena.allocator(), "<Column><Text text=\"hi\"/></Column>", &diag);
+    try testing.expectEqualStrings("Column", node.tag);
+    try testing.expectEqual(@as(usize, 1), node.children.len);
+    try testing.expectEqualStrings("Text", node.children[0].tag);
+}
+
+test "R54: parseWithDiag column tracking — error on line 2 reports column within line 2" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Line 1 is "<Column>", line 2 starts with "</Row>" — mismatch triggers at column > 1
+    const src = "<Column>\n</Row>";
+    var diag: M.ParseDiagnostic = undefined;
+    const result = M.parseWithDiag(arena.allocator(), src, &diag);
+    try testing.expectError(M.ParseError.MismatchedTag, result);
+    // Must be on line 2
+    try testing.expectEqual(@as(u32, 2), diag.loc.line);
+    // Column must be >= 1 (1-based)
+    try testing.expect(diag.loc.column >= 1);
+}

@@ -69,20 +69,108 @@ const desc = try markup.parse(arena.allocator(),
 | `flex-col` | flex direction = column (default for `Column`) |
 | `gap-N` | gap = N × 4 px (e.g. `gap-2` = 8 px) |
 | `grow` | `flex_grow: 1` |
+| `grow-0` | `flex_grow: 0` (no grow, even in flex container) |
 | `shrink` | `flex_shrink: 1` |
+| `shrink-0` | `flex_shrink: 0` (no shrink) |
+| `self-start` / `self-center` / `self-end` / `self-stretch` / `self-auto` | align-self for this element |
 | `bg-canvas` | background = `tokens.bg_canvas` |
 | `bg-surface` | background = `tokens.bg_surface` |
 | `bg-accent` | background = `tokens.accent` |
 | `text-body` | text color = `tokens.text_body` |
 | `text-muted` | text color = `tokens.text_muted` |
 | `text-sm` / `text-base` / `text-lg` | font size = 12 / 14 / 16 px |
+| `font-bold` | `font_bold = true` (use bold face from FontFamily) |
+| `font-normal` | `font_bold = false` |
+| `font-italic` / `italic` | `font_italic = true` (use italic face from FontFamily) |
+| `not-italic` | `font_italic = false` |
 | `p-N` | padding all sides = N × 4 px |
 | `rounded` / `rounded-lg` | border radius = 4 / 8 px |
 | `w-full` | width = 100% |
 | `h-full` | height = 100% |
+| `w-N`, `h-N` | width/height = N px (e.g. `w-100` = 100px) |
+| `min-w-N`, `max-w-N` | min/max width = N px |
+| `hidden` | `display: none` |
+| `overflow-hidden` | clip children to bounds |
+| `mx-auto` | horizontal auto margin (center) |
+| `m-N` | margin all sides = N × 4 px |
+| `col-span-N` | grid column span = N |
+| `row-span-N` | grid row span = N |
+| `opacity-0` through `opacity-100` | alpha = N / 100 |
 
 **Attribute bindings:** `text="{bind some.path}"` records the path as a `bind` variant of
 `AttrValue`; it is NOT evaluated by the parser or scene — evaluation is the caller's job.
+
+### Step 2b — Inline style attributes (M5-01)
+
+For dynamic styling on individual elements, use `style:*` attributes to override token-derived defaults:
+
+```zig
+const markup_str = 
+    \\<Column class="gap-2">
+    \\  <Text text="Dynamic color" style:color="#FF5733"/>
+    \\  <Button text="Custom BG" style:background="#0088FF" class="text-body"/>
+    \\  <Row class="gap-4" style:opacity="0.8"/>
+    \\</Column>
+;
+```
+
+Supported `style:*` attributes:
+- `style:color` — hex color override for text (`#RRGGBB` or `#RRGGBBAA`)
+- `style:background` — hex color override for background
+- `style:opacity` — alpha value as float in `[0.0, 1.0]`; clamped if out of range
+
+Style attributes take precedence over class-derived styles. Unknown `style:*` properties are silently ignored.
+
+### Step 2c — Conditional rendering (M5-03)
+
+Hide or show a subtree based on a binding:
+
+```zig
+const markup_str = 
+    \\<Column class="gap-2">
+    \\  <Text text="Always visible"/>
+    \\  <Row if="false">
+    \\    <Text text="Never shown (literal false)"/>
+    \\  </Row>
+    \\  <Button text="Show if verbose" if="{bind settings.verbose}"/>
+    \\</Column>
+;
+```
+
+- `if="true"` — element always shown
+- `if="false"` — element always hidden (hidden at instantiation; cannot be shown without rebuilding)
+- `if="{bind path}"` — element initially hidden; shown/hidden dynamically when the binding is updated via `refreshBindings()`
+
+The hidden state is saved separately from the element's display CSS property, so toggling visibility does not lose the original computed style.
+
+### Step 2d — List rendering (M5-04)
+
+Repeat a child template over a collection:
+
+```zig
+const markup_str = 
+    \\<Column class="gap-2">
+    \\  <Text text="Item list:"/>
+    \\  <Column for="{bind items}">
+    \\    <Row class="gap-2">
+    \\      <Text text="{bind .name}"/>
+    \\      <Text text="{bind .count}" class="text-muted"/>
+    \\    </Row>
+    \\  </Column>
+    \\</Column>
+;
+```
+
+- `for="{bind path.to.collection}"` — the container becomes a list binding; its one child (the template) is repeated once per item in the collection
+- Inside the template, `.fieldname` bindings are relative to the current item
+- Calling `refreshBindings()` will re-instantiate the list if its length or content changes
+- Notes: No virtual DOM diffing (always re-instantiates); no nested `for=` (one level only); no `key=` attribute (order-based identity)
+
+### Step 2e — Conditional and list attributes work with signals
+
+Both `if=` and `for=` accept binding paths. After instantiation, changes to the bound signal automatically trigger:
+- For `if=`: `refreshBindings()` evaluates the signal and calls `scene.setHidden()` accordingly
+- For `for=`: `refreshBindings()` detects length changes and re-instantiates the list
 
 ### Step 3 — Instantiate a Scene
 
@@ -146,17 +234,21 @@ Only needed when you have a font file loaded. The `measurePass` fills
 `LayoutNode.measured` for every text-bearing element, which `layout.solve` then uses
 as the intrinsic size for text nodes.
 
-Call `measurePass` **before** `layout.solve`.
+Call `measurePass` **before** `layout.solve`. **R60:** `measurePass` now takes a
+`*FontFamily` instead of a bare `*Font` so each element can use its own bold/italic face.
 
 ```zig
 const text_mod = @import("02/types.zig");
+const font_family_mod = @import("app/font_family.zig");
 
-var font  = try text_mod.Font.initFromBytes(allocator, font_bytes);
-defer font.deinit();
+const regular_bytes = try std.fs.cwd().readFileAlloc(allocator, "Regular.ttf", 16*1024*1024);
+defer allocator.free(regular_bytes);
+var family = try font_family_mod.FontFamily.init(allocator, regular_bytes, null, null);
+defer family.deinit();
 var atlas = try text_mod.GlyphAtlas.init(allocator, 512, 512);
 defer atlas.deinit();
 
-try scene.measurePass(&font, &atlas);
+try scene.measurePass(&family, &atlas);
 // Now call layout_mod.solve(...)
 ```
 
@@ -509,11 +601,50 @@ zig build test-07
 # Run GPU tests (needs Vulkan display)
 zig build test-01
 
+# Build-time markup codegen (M5-06)
+# Processes all .ui files in src/screens/ and emits .ui.zig struct literals
+zig build codegen
+
+# Run the app with hot-reload enabled (M5-07)
+# Watches for changes to .ui files and re-parses them without recompiling
+zig build run-dev
+
+# Alternative: Run the app with hot-reload via flag (same as run-dev)
+zig build --help | grep run-dev    # verify the step exists
+
 # Required env var (or pass -Dvulkan_sdk=<path>)
 # $env:VULKAN_SDK = "C:\VulkanSDK\1.x.y.z"
+
+# Build with dev-time hot-reload support
+zig build -Dhot-reload=true
+
+# Compile to release (no hot-reload parser in binary)
+zig build -Doptimize=ReleaseFast
 ```
 
----
+**Hot-reload notes (M5-07):**
+- Hot-reload is a **dev-only** feature, enabled via the `-Dhot-reload` build flag
+- It allows you to edit `.ui` files in `src/screens/` and see changes **without recompiling**
+- The file watcher re-parses changed `.ui` files and calls `scene.reset()` + `instantiate()` automatically
+- Production binaries shipped with `-Doptimize=ReleaseFast` have no parser in the binary (INV-4.4)
+
+**Markup error reporting (M5-05):**
+When parsing fails, errors now include line number and column information:
+
+```
+Error: Unclosed tag at line 5, column 12: expected '>' after tag name
+```
+
+Errors are available via the `parseWithDiag` function for custom error handling:
+
+```zig
+var diag: markup.ParseDiagnostic = undefined;
+const desc = markup.parseWithDiag(allocator, source, &diag) catch {
+    std.debug.print("Parse error at {d}:{d}: {s}\n", 
+        .{ diag.loc.line, diag.loc.column, diag.message });
+    return error.ParseFailed;
+};
+```
 
 ## 6. Renderer bridge (module 09)
 
@@ -741,6 +872,8 @@ pub fn main() !void {
 | `window` | `WindowOptions` | `{ title="spike", w=960, h=600 }` | Passed to `Platform.init` |
 | `font_path` | `[]const u8` | — | Required. Path to a `.ttf` file; read from disk at init. |
 | `font_size_px` | `f32` | `16` | Default glyph rasterization size. |
+| `bold_font_path` | `?[]const u8` | `null` | Optional. Path to the bold `.ttf` face. Used by `font-bold` class. Falls back to regular if null. |
+| `italic_font_path` | `?[]const u8` | `null` | Optional. Path to the italic `.ttf` face. Used by `font-italic` / `italic` class. Falls back to regular if null. |
 
 ### Frame loop (what `App.run` does every frame)
 

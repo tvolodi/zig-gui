@@ -135,9 +135,11 @@ pub const Tokens = struct {
     radius_lg: f32,
 
     // type sizes (strictly increasing)
+    text_xs: f32,
     text_sm: f32,
     text_base: f32,
     text_lg: f32,
+    text_xl: f32,
 
     /// Map palette stops to roles for LIGHT mode (see spec.md "Light vs dark mapping").
     pub fn light(p: Palette) Tokens {
@@ -168,9 +170,11 @@ pub const Tokens = struct {
             .radius_md = 8,
             .radius_lg = 16,
 
+            .text_xs = 10,
             .text_sm = 12,
             .text_base = 14,
             .text_lg = 18,
+            .text_xl = 24,
         };
     }
 
@@ -203,9 +207,11 @@ pub const Tokens = struct {
             .radius_md = 8,
             .radius_lg = 16,
 
+            .text_xs = 10,
             .text_sm = 12,
             .text_base = 14,
             .text_lg = 18,
+            .text_xl = 24,
         };
     }
 };
@@ -229,6 +235,9 @@ pub const ComputedStyle = struct {
     shadow_offset_x: f32 = 0,
     shadow_offset_y: f32 = 4,
     shadow_color: Color = .{ .r = 0, .g = 0, .b = 0, .a = 64 },
+    /// R60 — bold/italic font variant flags.
+    font_bold: bool = false,
+    font_italic: bool = false,
 };
 
 // ---------------------------------------------------------------------------

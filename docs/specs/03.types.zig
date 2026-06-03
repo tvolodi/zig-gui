@@ -50,11 +50,27 @@ pub const TrackSize = union(enum) {
     auto,
 };
 
-pub const Display = enum { block, flex, grid };
+pub const Display = enum { block, flex, grid, none }; // none added (R51)
 pub const FlexDirection = enum { row, column };
 pub const JustifyContent = enum { start, center, end, space_between, space_around };
 pub const AlignItems = enum { start, center, end, stretch };
+pub const AlignSelf = enum { auto, start, center, end, stretch }; // new (R51)
 pub const Overflow = enum { visible, hidden };
+
+/// Margin value that supports auto (for centering) in addition to fixed px. (R51)
+pub const MarginValue = union(enum) {
+    zero,     // 0 px
+    px: f32,  // fixed pixel amount
+    auto,     // fill remaining space (used for centering)
+};
+
+/// Per-element margin (replaces Insets for margin field). (R51)
+pub const Margin = struct {
+    top:    MarginValue = .zero,
+    right:  MarginValue = .zero,
+    bottom: MarginValue = .zero,
+    left:   MarginValue = .zero,
+};
 
 /// One LayoutNode per element index. Module 03 stores these in `ElementStore.layout`.
 /// Module 04 (layout engine) reads every field except `computed`, which it writes.
@@ -66,7 +82,8 @@ pub const LayoutNode = struct {
     min_size: Size = .{},
     max_size: Size = .{ .w = std.math.inf(f32), .h = std.math.inf(f32) },
     padding: Insets = .{},
-    margin: Insets = .{},
+    margin: Margin = .{},         // CHANGED from Insets to Margin (R51)
+    align_self: AlignSelf = .auto, // NEW (R51)
 
     direction: FlexDirection = .row,
     justify_content: JustifyContent = .start,
