@@ -410,6 +410,54 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.radius = tokens.radius_lg;
     } else if (std.mem.eql(u8, cls, "rounded-full")) {
         r.style.radius = 9999;
+
+        // --- Opacity (R45) ---
+    } else if (std.mem.eql(u8, cls, "opacity-0")) {
+        r.style.opacity = 0.0;
+    } else if (std.mem.eql(u8, cls, "opacity-25")) {
+        r.style.opacity = 0.25;
+    } else if (std.mem.eql(u8, cls, "opacity-50")) {
+        r.style.opacity = 0.5;
+    } else if (std.mem.eql(u8, cls, "opacity-75")) {
+        r.style.opacity = 0.75;
+    } else if (std.mem.eql(u8, cls, "opacity-100")) {
+        r.style.opacity = 1.0;
+
+        // --- Text truncation (R44) ---
+    } else if (std.mem.eql(u8, cls, "truncate")) {
+        r.style.truncate = true;
+
+        // --- Box shadow (R46) ---
+    } else if (std.mem.eql(u8, cls, "shadow-sm")) {
+        r.style.shadow_blur = 4;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 1;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 20 };
+    } else if (std.mem.eql(u8, cls, "shadow")) {
+        r.style.shadow_blur = 6;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 2;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 30 };
+    } else if (std.mem.eql(u8, cls, "shadow-md")) {
+        r.style.shadow_blur = 8;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 4;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 45 };
+    } else if (std.mem.eql(u8, cls, "shadow-lg")) {
+        r.style.shadow_blur = 16;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 8;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 50 };
+    } else if (std.mem.eql(u8, cls, "shadow-xl")) {
+        r.style.shadow_blur = 24;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 10;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 55 };
+    } else if (std.mem.eql(u8, cls, "shadow-none")) {
+        r.style.shadow_blur = 0;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 0;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
     }
     // Unknown classes: silently ignore (last-wins via sequential application)
 }

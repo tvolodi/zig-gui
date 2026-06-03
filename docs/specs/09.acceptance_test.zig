@@ -30,6 +30,16 @@ fn makeScene(alloc: std.mem.Allocator) comp_mod.Scene {
     return comp_mod.Scene.init(alloc);
 }
 
+fn makeDummyImageAtlas(alloc: std.mem.Allocator) !C.ImageAtlas {
+    return C.ImageAtlas.init(alloc);
+}
+
+/// Stub Font: no-op font for tests that don't perform real text rendering.
+/// Only safe to pass when truncate=false or when no glyphs are rasterized.
+fn stubFont() C.text.Font {
+    return .{ ._impl = undefined };
+}
+
 // Manually solve a single-element scene with the given available size.
 fn solve(scene: *comp_mod.Scene, root: store_mod.ElementId, w: f32, h: f32) void {
     var scratch: [4096]u8 = undefined;
@@ -53,8 +63,11 @@ test "invisible element (transparent bg, no border, no text) emits no commands" 
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -74,8 +87,11 @@ test "zero-size element emits no commands" {
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -94,8 +110,11 @@ test "button with solid background emits filled_rect with correct color and rect
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
     defer testing.allocator.free(cmds);
 
     // Must contain at least one filled_rect (background).
@@ -132,8 +151,11 @@ test "element with border emits border_rect command" {
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     var found_border = false;
@@ -157,8 +179,11 @@ test "painter order: parent filled_rect comes before child filled_rect" {
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     // Find index of parent (card) bg and child (button) bg.
@@ -252,7 +277,10 @@ test "text element emits glyph commands (font present, else skip)" {
     try scene.measurePass(&font, &atlas);
     solve(&scene, root, 800, 600);
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     var glyph_count: usize = 0;
@@ -284,8 +312,11 @@ test "empty draw list is valid (no commands emitted, no crash)" {
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
+    var img_atlas = try makeDummyImageAtlas(testing.allocator);
+    defer img_atlas.deinit();
+    var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);

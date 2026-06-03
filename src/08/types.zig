@@ -485,6 +485,10 @@ pub const Form = struct {
                 .text => "Text",
                 .row => "Row",
                 .column => "Column",
+                .checkbox => "Checkbox",
+                .scrollview => "ScrollView",
+                .image => "Image",
+                .icon => "Icon",
             };
             children[i] = comp.NodeDesc{ .tag = tag, .classes = "" };
         }

@@ -28,61 +28,61 @@ schema forms, renderer. Modules are numbered in `docs/specs/`.
 
 ---
 
-## Milestone 1 — It runs `planned`
+## Milestone 1 — It runs `done`
 
 The framework produces pixels and responds to the user.
 
-| ID | Feature | Depends on | Requirements |
-|---|---|---|---|
-| M1-01 | **App main loop** — single `App.run()` entry point that owns platform, backend, scene, font, and drives the frame lifecycle in the correct order | 09 | [R10](requirements/R10_app_main_loop.md) |
-| M1-02 | **Event delivery** — expose mouse position, mouse buttons, scroll wheel, keyboard keys, and text-input characters from GLFW to app code | 01 | [R11](requirements/R11_event_delivery.md) |
-| M1-03 | **Window resize handling** — propagate framebuffer resize to layout and renderer automatically | 01, 09 | [R12](requirements/R12_window_resize.md) |
-| M1-04 | **Frame pacing** — vsync / present-mode selection; don't spin at 100% CPU when idle | 01 | [R13](requirements/R13_frame_pacing.md) |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M1-01 | **App main loop** — single `App.run()` entry point that owns platform, backend, scene, font, and drives the frame lifecycle in the correct order | 09 | [R10](requirements/R10_app_main_loop.md) | `done` |
+| M1-02 | **Event delivery** — expose mouse position, mouse buttons, scroll wheel, keyboard keys, and text-input characters from GLFW to app code | 01 | [R11](requirements/R11_event_delivery.md) | `done` |
+| M1-03 | **Window resize handling** — propagate framebuffer resize to layout and renderer automatically | 01, 09 | [R12](requirements/R12_window_resize.md) | `done` |
+| M1-04 | **Frame pacing** — vsync / present-mode selection; don't spin at 100% CPU when idle | 01 | [R13](requirements/R13_frame_pacing.md) | `done` |
 
 ---
 
-## Milestone 2 — State and reactivity `planned`
+## Milestone 2 — State and reactivity `done`
 
 The UI reflects changing data without rebuilding everything from scratch every frame.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M2-01 | **Signal type** — `Signal(T)` with `get` / `set`; `set` marks affected elements dirty | M1 |
-| M2-02 | **Dirty bitset scan** — per-frame linear scan over dirty indices; re-layout and re-paint only dirty subtrees | M2-01 |
-| M2-03 | **Computed / derived signals** — a signal whose value is a pure function of other signals; invalidated automatically | M2-01 |
-| M2-04 | **Static screen data binding** — comptime field-offset binding for static `.ui` screens (INV-4.1); typed, zero-runtime-path-resolution | M2-01 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M2-01 | **Signal type** — `Signal(T)` with `get` / `set`; `set` marks affected elements dirty | M1 | [R20](requirements/R20_signal_type.md) | `done` |
+| M2-02 | **Dirty bitset scan** — per-frame linear scan over dirty indices; re-layout and re-paint only dirty subtrees | M2-01 | [R21](requirements/R21_dirty_scan.md) | `done` |
+| M2-03 | **Computed / derived signals** — a signal whose value is a pure function of other signals; invalidated automatically | M2-01 | [R22](requirements/R22_computed_signals.md) | `done` |
+| M2-04 | **Static screen data binding** — comptime field-offset binding for static `.ui` screens (INV-4.1); typed, zero-runtime-path-resolution | M2-01 | [R23](requirements/R23_static_binding.md) | `done` |
 
 ---
 
-## Milestone 3 — Interactive widgets `planned`
+## Milestone 3 — Interactive widgets `done`
 
 Widgets respond to input. A form can actually be filled out.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M3-01 | **Focus model** — focused-element index, Tab/Shift-Tab navigation, visual focus ring | M1-02 |
-| M3-02 | **Button interaction** — hover, pressed, disabled visual states; `on_click` callback | M1-02, M3-01 |
-| M3-03 | **Text input editing** — cursor, selection, insert/delete, clipboard paste; stores state in a parallel array in `Scene` | M1-02, M3-01 |
-| M3-04 | **Dropdown open/close** — overlay list, keyboard navigation, value selection | M1-02, M3-01, M4-02 |
-| M3-05 | **Checkbox widget** — boolean toggle; replaces the Dropdown workaround in schema forms | M1-02, M3-01 |
-| M3-06 | **Scroll container** — per-element scroll offset stored in `Scene`; mouse wheel + drag scrollbar | M1-02 |
-| M3-07 | **Clipboard** — read/write via `glfwGetClipboardString` / `glfwSetClipboardString` | M1-02 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M3-01 | **Focus model** — focused-element index, Tab/Shift-Tab navigation, visual focus ring | M1-02 | [R30](requirements/R30_focus_model.md) | `done` |
+| M3-02 | **Button interaction** — hover, pressed, disabled visual states; `on_click` callback | M1-02, M3-01 | [R31](requirements/R31_button_interaction.md) | `done` |
+| M3-03 | **Text input editing** — cursor, selection, insert/delete, clipboard paste; stores state in a parallel array in `Scene` | M1-02, M3-01 | [R32](requirements/R32_text_input_editing.md) | `done` |
+| M3-04 | **Dropdown open/close** — overlay list, keyboard navigation, value selection | M1-02, M3-01, M4-02 | [R33](requirements/R33_dropdown_open_close.md) | `done` |
+| M3-05 | **Checkbox widget** — boolean toggle; replaces the Dropdown workaround in schema forms | M1-02, M3-01 | [R34](requirements/R34_checkbox_widget.md) | `done` |
+| M3-06 | **Scroll container** — per-element scroll offset stored in `Scene`; mouse wheel + drag scrollbar | M1-02 | [R35](requirements/R35_scroll_container.md) | `done` |
+| M3-07 | **Clipboard** — read/write via `glfwGetClipboardString` / `glfwSetClipboardString` | M1-02 | [R36](requirements/R36_clipboard.md) | `done` |
 
 ---
 
-## Milestone 4 — Rendering completeness `planned`
+## Milestone 4 — Rendering completeness `done`
 
 The renderer draws everything a real UI needs.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M4-01 | **Pseudo-state styling** — hover / focus / active / disabled style variants stored as token overrides; applied by the renderer based on widget state | 09, M3-01 |
-| M4-02 | **Overlay / z-layer** — a second draw pass for popups, dropdowns, and tooltips rendered above the main layer | 09 |
-| M4-03 | **Clipping / overflow-hidden** — scissor rect per scroll container; clip children to parent bounds | 09 |
-| M4-04 | **Image / icon rendering** — RGBA texture tiles in the draw command list; `GlyphAtlas` or a separate `ImageAtlas` | 09 |
-| M4-05 | **Text truncation with ellipsis** — `text-overflow: ellipsis` when text exceeds container width | 02, 09 |
-| M4-06 | **Opacity** — per-element alpha multiplier applied at paint time | 09 |
-| M4-07 | **Box shadow** — single-level drop shadow as a blurred rect drawn behind the element | 09 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M4-01 | **Pseudo-state styling** — hover / focus / active / disabled style variants stored as token overrides; applied by the renderer based on widget state | 09, M3-01 | [R40](requirements/R40_pseudo_state_styling.md) | `done` |
+| M4-02 | **Overlay / z-layer** — a second draw pass for popups, dropdowns, and tooltips rendered above the main layer | 09 | [R41](requirements/R41_overlay_z_layer.md) | `done` |
+| M4-03 | **Clipping / overflow-hidden** — scissor rect per scroll container; clip children to parent bounds | 09 | [R42](requirements/R42_clipping_overflow_hidden.md) | `done` |
+| M4-04 | **Image / icon rendering** — RGBA texture tiles in the draw command list; `GlyphAtlas` or a separate `ImageAtlas` | 09 | [R43](requirements/R43_image_icon_rendering.md) | `done` |
+| M4-05 | **Text truncation with ellipsis** — `text-overflow: ellipsis` when text exceeds container width | 02, 09 | [R44](requirements/R44_text_truncation_ellipsis.md) | `done` |
+| M4-06 | **Opacity** — per-element alpha multiplier applied at paint time | 09 | [R45](requirements/R45_opacity.md) | `done` |
+| M4-07 | **Box shadow** — single-level drop shadow as a blurred rect drawn behind the element | 09 | [R46](requirements/R46_box_shadow.md) | `done` |
 
 ---
 

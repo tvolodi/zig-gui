@@ -223,7 +223,73 @@ pub const ComputedStyle = struct {
     padding: Insets = .{},
     gap: f32 = 0,
     font_size: f32 = 14,
+    truncate: bool = false,
+    opacity: f32 = 1.0,
+    shadow_blur: f32 = 0,
+    shadow_offset_x: f32 = 0,
+    shadow_offset_y: f32 = 4,
+    shadow_color: Color = .{ .r = 0, .g = 0, .b = 0, .a = 64 },
 };
+
+// ---------------------------------------------------------------------------
+// R40 — Pseudo-state styling types
+// ---------------------------------------------------------------------------
+
+/// Style deltas applied when a widget is in a given pseudo-state.
+/// Only fields that differ from the base style need to be set;
+/// a null field means "inherit from base".
+pub const PseudoOverride = struct {
+    background: ?Color = null,
+    text_color: ?Color = null,
+    border_color: ?Color = null,
+    border_width: ?f32 = null,
+    radius: ?f32 = null,
+};
+
+/// All pseudo-state overrides for one widget kind (button, input, etc.).
+/// Built entirely from tokens (INV-4.3).
+pub const PseudoStyleSet = struct {
+    hover: PseudoOverride = .{},
+    focus: PseudoOverride = .{},
+    active: PseudoOverride = .{},
+    disabled: PseudoOverride = .{},
+};
+
+pub fn buttonPseudo(t: Tokens) PseudoStyleSet {
+    return .{
+        .hover = .{ .background = t.accent_hover },
+        .focus = .{ .border_color = Color.hex(0x0066FF), .border_width = 2 },
+        .active = .{ .background = t.accent_hover },
+        .disabled = .{ .background = t.bg_surface, .text_color = t.text_disabled },
+    };
+}
+
+pub fn inputPseudo(t: Tokens) PseudoStyleSet {
+    return .{
+        .hover = .{ .border_color = t.border_strong },
+        .focus = .{ .border_color = Color.hex(0x0066FF), .border_width = 2 },
+        .active = .{},
+        .disabled = .{ .background = t.bg_canvas, .text_color = t.text_disabled },
+    };
+}
+
+pub fn dropdownPseudo(t: Tokens) PseudoStyleSet {
+    return .{
+        .hover = .{ .border_color = t.border_strong },
+        .focus = .{ .border_color = Color.hex(0x0066FF), .border_width = 2 },
+        .active = .{},
+        .disabled = .{ .background = t.bg_canvas, .text_color = t.text_disabled },
+    };
+}
+
+pub fn checkboxPseudo(t: Tokens) PseudoStyleSet {
+    return .{
+        .hover = .{ .border_color = t.border_strong },
+        .focus = .{ .border_color = Color.hex(0x0066FF), .border_width = 2 },
+        .active = .{},
+        .disabled = .{ .text_color = t.text_disabled },
+    };
+}
 
 /// Component-style builders. Each derives ENTIRELY from tokens (INV-4.3) — no palette values,
 /// no hex literals.

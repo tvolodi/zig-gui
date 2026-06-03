@@ -370,3 +370,49 @@ test "zero-frame loop: init then immediate deinit reports zero validation issues
     // No beginFrame/endFrame at all — validation must still be clean.
     try testing.expectEqual(@as(u32, 0), backend.validationIssueCount());
 }
+
+// ===========================================================================
+// R36 — Clipboard (verify manually — requires live GLFW window)
+// ===========================================================================
+//
+// Platform.setClipboard and Platform.getClipboard call glfwSetClipboardString
+// / glfwGetClipboardString respectively, which require an initialised GLFW
+// context and a real OS window. They cannot be exercised in the headless unit
+// test environment.
+//
+// Status: R36 (M3-07) — Platform clipboard methods not yet implemented in
+//         src/01/types.zig. Once implemented, verify the following manually
+//         (or in an integration test that skips when no display is available):
+//
+//   1. setClipboard + getClipboard round-trip with short text:
+//        platform.setClipboard("hello");
+//        const text = platform.getClipboard(gpa) orelse return error.Unexpected;
+//        defer gpa.free(text);
+//        assert(std.mem.eql(u8, text, "hello"));
+//
+//   2. getClipboard returns null when the clipboard is empty or non-UTF-8:
+//        // (implementation must guard against glfwGetClipboardString returning null)
+//        const maybe = platform.getClipboard(gpa);
+//        assert(maybe == null);  // after clearing clipboard via OS
+//
+//   3. Returned slice must be caller-owned and heap-allocated (no use-after-free):
+//        const s = platform.getClipboard(gpa).?;
+//        defer gpa.free(s);
+//        // Accessing s after free must be caught by the allocator leak detector.
+//
+//   4. Large clipboard round-trip (10 KB of text):
+//        const big = try gpa.alloc(u8, 10 * 1024);
+//        defer gpa.free(big);
+//        @memset(big, 'A');
+//        platform.setClipboard(big);
+//        const back = platform.getClipboard(gpa).?;
+//        defer gpa.free(back);
+//        assert(std.mem.eql(u8, back, big));
+//
+//   5. Non-UTF-8 clipboard content returns null (if GLFW exposes raw bytes):
+//        // Paste 0xFF bytes via OS → getClipboard must return null, not garbage.
+//
+// Once Platform.getClipboard / setClipboard are implemented, add compile-time
+// checks here:
+//   comptime std.debug.assert(@hasDecl(P.Platform, "setClipboard"));
+//   comptime std.debug.assert(@hasDecl(P.Platform, "getClipboard"));

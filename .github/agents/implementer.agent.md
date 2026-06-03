@@ -66,6 +66,27 @@ Read the failure report (from Tester) carefully:
 zig build
 ```
 
+## Documentation step (Workflow 1 Step 7 — mandatory)
+
+When the Orchestrator routes you to Step 7, execute all four sub-tasks below.
+This step is not optional and cannot be skipped regardless of how small the change is.
+
+1. **AGENT_GUIDE.md** — Read it. Add any new pattern this module introduced. If
+   nothing new, record "no new patterns" as an explicit confirmed finding in your output.
+
+2. **00_constitution.md** — Check the module spec for "Action: update constitution"
+   items. Apply each one. If none, record "no constitution updates required" explicitly.
+
+3. **HOW_TO_USE.md** — Read the whole file. Update it to reflect every new public API,
+   build command, tag, class, or widget kind this module added. If nothing changed,
+   record "HOW_TO_USE.md is current" explicitly in your output.
+
+4. **Completion summary** — Write one paragraph to
+   `docs/.agent-context/YYYYMMDD_HHMMSS_<module>_complete.md` describing what was
+   built, what tests pass, and what documentation was updated.
+
+Do not tell the Orchestrator Step 7 is done until all four sub-tasks are complete.
+
 ## Escalation
 
 Write `docs/.agent-context/YYYYMMDD_HHMMSS_implementer_escalation.md` when:

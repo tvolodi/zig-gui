@@ -71,6 +71,14 @@ pub const Platform = struct {
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 
+    /// Block the calling thread until the OS delivers at least one windowing or
+    /// input event, then return. Wraps glfwWaitEvents.
+    /// Call only from the main thread (GLFW requirement).
+    pub fn waitEvents(self: *Platform) void {
+        _ = self;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
     pub fn framebufferSize(self: *Platform) Extent2D {
         _ = self;
         @compileError("not implemented — implement per spec.md; do not change this signature");
@@ -89,6 +97,23 @@ pub const Platform = struct {
     pub fn createSurface(self: *Platform, instance: *anyopaque) PlatformError!*anyopaque {
         _ = self;
         _ = instance;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    /// Set the system clipboard to the given text (R36).
+    /// Text is copied; ownership remains with the caller. `text` must be valid UTF-8.
+    pub fn setClipboard(self: *Platform, text: []const u8) void {
+        _ = self;
+        _ = text;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    /// Get the current system clipboard content as a UTF-8 string (R36).
+    /// Returns an allocated string (owned by caller), or null if clipboard is empty or
+    /// contains non-UTF-8 data. Caller must free with `allocator.free()`.
+    pub fn getClipboard(self: *Platform, allocator: std.mem.Allocator) ?[]u8 {
+        _ = self;
+        _ = allocator;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 };

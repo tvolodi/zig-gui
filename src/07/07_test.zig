@@ -268,3 +268,773 @@ test "dropdown default style has border and bg_surface background" {
     try testing.expectEqual(t.bg_surface.g, s.background.g);
     try testing.expect(s.border_width > 0);
 }
+
+// ===========================================================================
+// R30 — Focus model
+// ===========================================================================
+
+test "R30: initial focused_idx is no-focus (maxInt u32)" {
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    try testing.expectEqual(std.math.maxInt(u32), scene.getFocus());
+}
+
+test "R30: setFocus and getFocus round-trip" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setFocus(id.index);
+    try testing.expectEqual(id.index, scene.getFocus());
+}
+
+test "R30: setFocus(maxInt) clears focus" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setFocus(id.index);
+    try testing.expectEqual(id.index, scene.getFocus());
+    scene.setFocus(std.math.maxInt(u32));
+    try testing.expectEqual(std.math.maxInt(u32), scene.getFocus());
+}
+
+test "R30: isFocusable true for button, input, dropdown, checkbox" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Input(2), Dropdown(3), Checkbox(4)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="b"/>
+        \\  <Input/>
+        \\  <Dropdown/>
+        \\  <Checkbox/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    try testing.expect(scene.isFocusable(1)); // button
+    try testing.expect(scene.isFocusable(2)); // input
+    try testing.expect(scene.isFocusable(3)); // dropdown
+    try testing.expect(scene.isFocusable(4)); // checkbox
+}
+
+test "R30: isFocusable false for column, text, row, card, scrollview" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Text(1), Row(2), Card(3), ScrollView(4)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Text text="label"/>
+        \\  <Row/>
+        \\  <Card/>
+        \\  <ScrollView/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.isFocusable(0)); // column
+    try testing.expect(!scene.isFocusable(1)); // text
+    try testing.expect(!scene.isFocusable(2)); // row
+    try testing.expect(!scene.isFocusable(3)); // card
+    try testing.expect(!scene.isFocusable(4)); // scrollview
+}
+
+test "R30: focusNext advances through focusable_indices in order" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Button(2), Button(3)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="a"/>
+        \\  <Button text="b"/>
+        \\  <Button text="c"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [1, 2, 3]
+    scene.setFocus(1);
+    scene.focusNext();
+    try testing.expectEqual(@as(u32, 2), scene.getFocus());
+    scene.focusNext();
+    try testing.expectEqual(@as(u32, 3), scene.getFocus());
+}
+
+test "R30: focusNext wraps from last to first" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Button(2), Button(3)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="a"/>
+        \\  <Button text="b"/>
+        \\  <Button text="c"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [1, 2, 3]
+    scene.setFocus(3); // last focusable
+    scene.focusNext();
+    try testing.expectEqual(@as(u32, 1), scene.getFocus()); // wraps to first
+}
+
+test "R30: focusNext with single focusable element and no prior focus focuses it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [0]; no focus initially
+    try testing.expectEqual(std.math.maxInt(u32), scene.getFocus());
+    scene.focusNext();
+    try testing.expectEqual(id.index, scene.getFocus());
+}
+
+test "R30: focusPrev goes backward through focusable_indices" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Button(2), Button(3)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="a"/>
+        \\  <Button text="b"/>
+        \\  <Button text="c"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [1, 2, 3]
+    scene.setFocus(3);
+    scene.focusPrev();
+    try testing.expectEqual(@as(u32, 2), scene.getFocus());
+    scene.focusPrev();
+    try testing.expectEqual(@as(u32, 1), scene.getFocus());
+}
+
+test "R30: focusPrev wraps from first to last" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Button(2), Button(3)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="a"/>
+        \\  <Button text="b"/>
+        \\  <Button text="c"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [1, 2, 3]
+    scene.setFocus(1); // first focusable
+    scene.focusPrev();
+    try testing.expectEqual(@as(u32, 3), scene.getFocus()); // wraps to last
+}
+
+test "R30: focusPrev with no prior focus focuses last element" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Button(1), Button(2), Button(3)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Button text="a"/>
+        \\  <Button text="b"/>
+        \\  <Button text="c"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // focusable_indices = [1, 2, 3]; no focus
+    scene.focusPrev();
+    try testing.expectEqual(@as(u32, 3), scene.getFocus());
+}
+
+test "R30: setFocus marks the focused element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+    scene.setFocus(id.index);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+// ===========================================================================
+// R31 — Button interaction
+// ===========================================================================
+
+test "R31: newly instantiated button state is not hovered, pressed, or disabled" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"click\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const state = scene.buttonStateOf(id.index);
+    try testing.expect(!state.hovered);
+    try testing.expect(!state.pressed);
+    try testing.expect(!state.disabled);
+}
+
+test "R31: buttonStateOf pressed field round-trips" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.buttonStateOf(id.index).pressed = true;
+    try testing.expect(scene.buttonStateOf(id.index).pressed);
+    scene.buttonStateOf(id.index).pressed = false;
+    try testing.expect(!scene.buttonStateOf(id.index).pressed);
+}
+
+test "R31: buttonStateOf hovered field round-trips" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.buttonStateOf(id.index).hovered = true;
+    try testing.expect(scene.buttonStateOf(id.index).hovered);
+    scene.buttonStateOf(id.index).hovered = false;
+    try testing.expect(!scene.buttonStateOf(id.index).hovered);
+}
+
+test "R31: queueCallback + fireQueuedCallbacks fires callback exactly once then clears" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+
+    var fired: u32 = 0;
+    const cb = C.CallbackFn{
+        .ptr = &fired,
+        .call = struct {
+            fn f(ptr: *anyopaque) void {
+                const p: *u32 = @ptrCast(@alignCast(ptr));
+                p.* += 1;
+            }
+        }.f,
+    };
+
+    // Append to the queue directly (app.zig populates this during mouse events).
+    try scene._queued_callbacks.append(scene.gpa, cb);
+    // Not fired yet — fire only happens via fireQueuedCallbacks.
+    try testing.expectEqual(@as(u32, 0), fired);
+    scene.fireQueuedCallbacks();
+    try testing.expectEqual(@as(u32, 1), fired);
+    // Queue is cleared: a second fire does nothing.
+    scene.fireQueuedCallbacks();
+    try testing.expectEqual(@as(u32, 1), fired);
+}
+
+test "R31: multiple queued callbacks all fire in a single fireQueuedCallbacks call" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+
+    var counter: u32 = 0;
+    const cb = C.CallbackFn{
+        .ptr = &counter,
+        .call = struct {
+            fn f(ptr: *anyopaque) void {
+                const p: *u32 = @ptrCast(@alignCast(ptr));
+                p.* += 1;
+            }
+        }.f,
+    };
+    try scene._queued_callbacks.append(scene.gpa, cb);
+    try scene._queued_callbacks.append(scene.gpa, cb);
+    try scene._queued_callbacks.append(scene.gpa, cb);
+    scene.fireQueuedCallbacks();
+    try testing.expectEqual(@as(u32, 3), counter);
+}
+
+test "R31: disabled flag is false by default and can be set true" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.buttonStateOf(id.index).disabled);
+    scene.buttonStateOf(id.index).disabled = true;
+    try testing.expect(scene.buttonStateOf(id.index).disabled);
+    // Verify manually: app.zig checks `!state.disabled` before setting hovered or pressed.
+}
+
+test "R31: setButtonCallback stores on_click in button state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    var dummy: u32 = 0;
+    const cb = C.CallbackFn{
+        .ptr = &dummy,
+        .call = struct {
+            fn f(_: *anyopaque) void {}
+        }.f,
+    };
+    try scene.setButtonCallback(id.index, cb);
+    try testing.expect(scene.buttonStateOf(id.index).on_click != null);
+}
+
+// ===========================================================================
+// R32 — Text input editing
+// ===========================================================================
+
+test "R32: inputStateOf initial state has empty text, cursor=0, selection_start=0, active=false" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const state = scene.inputStateOf(id.index);
+    try testing.expectEqual(@as(usize, 0), state.text.items.len);
+    try testing.expectEqual(@as(u32, 0), state.cursor);
+    try testing.expectEqual(@as(u32, 0), state.selection_start);
+    try testing.expect(!state.active);
+}
+
+test "R32: setInputText stores text; getInputText returns it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try scene.setInputText(id.index, "hello");
+    try testing.expectEqualStrings("hello", scene.getInputText(id.index));
+}
+
+test "R32: setInputText places cursor at end of text" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try scene.setInputText(id.index, "hello");
+    try testing.expectEqual(@as(u32, 5), scene.inputStateOf(id.index).cursor);
+    try testing.expectEqual(@as(u32, 5), scene.inputStateOf(id.index).selection_start);
+}
+
+test "R32: setInputText replaces prior text and resets cursor" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try scene.setInputText(id.index, "first");
+    try scene.setInputText(id.index, "second");
+    try testing.expectEqualStrings("second", scene.getInputText(id.index));
+    try testing.expectEqual(@as(u32, 6), scene.inputStateOf(id.index).cursor);
+}
+
+test "R32: no selection initially (selection_start equals cursor)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try scene.setInputText(id.index, "hello");
+    const state = scene.inputStateOf(id.index);
+    try testing.expectEqual(state.selection_start, state.cursor);
+}
+
+test "R32: selection exists when selection_start differs from cursor" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try scene.setInputText(id.index, "hello");
+    const state = scene.inputStateOf(id.index);
+    // Simulate Shift+Left selection: cursor at 5, selection_start at 2
+    state.cursor = 5;
+    state.selection_start = 2;
+    try testing.expect(state.selection_start != state.cursor);
+    try testing.expectEqual(@as(u32, 2), state.selection_start);
+    try testing.expectEqual(@as(u32, 5), state.cursor);
+}
+
+test "R32: setFocus on input sets active=true; clearing focus sets active=false" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Input/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.inputStateOf(id.index).active);
+    scene.setFocus(id.index);
+    try testing.expect(scene.inputStateOf(id.index).active);
+    scene.setFocus(std.math.maxInt(u32));
+    try testing.expect(!scene.inputStateOf(id.index).active);
+}
+
+test "R32: switching focus from one input to another deactivates the old one" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Input(1), Input(2)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Input/>
+        \\  <Input/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    scene.setFocus(1);
+    try testing.expect(scene.inputStateOf(1).active);
+    try testing.expect(!scene.inputStateOf(2).active);
+    scene.setFocus(2);
+    try testing.expect(!scene.inputStateOf(1).active); // deactivated
+    try testing.expect(scene.inputStateOf(2).active);
+}
+
+// Verify manually: key-event handling (cursor movement, selection, insert, delete)
+// lives in app.zig's event loop and is not part of the Scene API.
+//   - handleInputKey .right: cursor += 1 (if cursor < text.len)
+//   - handleInputKey .left: cursor -= 1 (if cursor > 0)
+//   - Shift+Right/Left: selection_start stays, cursor moves
+//   - Right without shift with active selection: cursor = max(cursor, selection_start)
+//   - Left without shift with active selection: cursor = min(cursor, selection_start)
+//   - char event: inserts byte at cursor, increments cursor
+//   - Delete key: removes byte at cursor (if cursor < text.len)
+//   - Backspace key: removes byte before cursor (if cursor > 0)
+//   - Inserting with selection active: replaces [min..max] then inserts at min
+//   - Ctrl+A: selection_start = 0, cursor = text.len
+
+// ===========================================================================
+// R33 — Dropdown open/close
+// ===========================================================================
+
+test "R33: newly created dropdown has is_open=false and selected_idx=0" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const dd = scene.dropdownStateOf(id.index);
+    try testing.expect(!dd.open);
+    try testing.expectEqual(@as(u32, 0), dd.selected_idx);
+}
+
+test "R33: openDropdown sets is_open=true" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.openDropdown(id.index);
+    try testing.expect(scene.dropdownStateOf(id.index).open);
+}
+
+test "R33: closeDropdown sets is_open=false" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.openDropdown(id.index);
+    scene.closeDropdown(id.index);
+    try testing.expect(!scene.dropdownStateOf(id.index).open);
+}
+
+test "R33: toggleDropdown flips open state each call" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.dropdownStateOf(id.index).open);
+    scene.toggleDropdown(id.index);
+    try testing.expect(scene.dropdownStateOf(id.index).open);
+    scene.toggleDropdown(id.index);
+    try testing.expect(!scene.dropdownStateOf(id.index).open);
+}
+
+test "R33: selectDropdownOption updates selected_idx and closes dropdown" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    var val0: u32 = 10;
+    var val1: u32 = 20;
+    const options = [_]C.DropdownOption{
+        .{ .label = "A", .value = @ptrCast(&val0) },
+        .{ .label = "B", .value = @ptrCast(&val1) },
+    };
+    try scene.setDropdownOptions(id.index, &options);
+    scene.openDropdown(id.index);
+    try scene.selectDropdownOption(id.index, 1);
+    try testing.expectEqual(@as(u32, 1), scene.dropdownStateOf(id.index).selected_idx);
+    try testing.expect(!scene.dropdownStateOf(id.index).open); // closed after select
+}
+
+test "R33: getDropdownValue returns value at selected_idx" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Dropdown/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    var val0: u32 = 42;
+    var val1: u32 = 99;
+    const options = [_]C.DropdownOption{
+        .{ .label = "first", .value = @ptrCast(&val0) },
+        .{ .label = "second", .value = @ptrCast(&val1) },
+    };
+    try scene.setDropdownOptions(id.index, &options);
+    // Default selected_idx = 0 → value is 42
+    const v0: *u32 = @ptrCast(@alignCast(scene.getDropdownValue(id.index)));
+    try testing.expectEqual(@as(u32, 42), v0.*);
+    // Select index 1 → value is 99
+    try scene.selectDropdownOption(id.index, 1);
+    const v1: *u32 = @ptrCast(@alignCast(scene.getDropdownValue(id.index)));
+    try testing.expectEqual(@as(u32, 99), v1.*);
+}
+
+test "R33: setFocus on a different element closes the previously open dropdown" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Column(0), Dropdown(1), Button(2)
+    const desc = try markup_mod.parse(arena.allocator(),
+        \\<Column>
+        \\  <Dropdown/>
+        \\  <Button text="x"/>
+        \\</Column>
+    );
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, testTokens());
+    // Focus the dropdown first, then open it.
+    scene.setFocus(1);
+    scene.openDropdown(1);
+    try testing.expect(scene.dropdownStateOf(1).open);
+    // Moving focus away from a focused dropdown closes it.
+    scene.setFocus(2);
+    try testing.expect(!scene.dropdownStateOf(1).open);
+}
+
+// ===========================================================================
+// R34 — Checkbox widget
+// ===========================================================================
+
+test "R34: newly created checkbox has checked=false" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(!scene.isCheckboxChecked(id.index));
+}
+
+test "R34: setCheckboxChecked(true) and isCheckboxChecked round-trip" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setCheckboxChecked(id.index, true);
+    try testing.expect(scene.isCheckboxChecked(id.index));
+}
+
+test "R34: setCheckboxChecked(false) clears checked state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setCheckboxChecked(id.index, true);
+    scene.setCheckboxChecked(id.index, false);
+    try testing.expect(!scene.isCheckboxChecked(id.index));
+}
+
+test "R34: toggle via checkboxStateOf pointer flips checked twice returning to original" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const state = scene.checkboxStateOf(id.index);
+    state.checked = !state.checked; // first toggle → true
+    try testing.expect(scene.isCheckboxChecked(id.index));
+    state.checked = !state.checked; // second toggle → false
+    try testing.expect(!scene.isCheckboxChecked(id.index));
+}
+
+test "R34: setCheckboxChecked marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+    scene.setCheckboxChecked(id.index, true);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+test "R34: checkbox is included in focusable_indices (Tab order)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    try testing.expect(scene.isFocusable(id.index));
+}
+
+test "R34: checkbox initial state has hovered=false, pressed=false, disabled=false" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Checkbox/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const state = scene.checkboxStateOf(id.index);
+    try testing.expect(!state.hovered);
+    try testing.expect(!state.pressed);
+    try testing.expect(!state.disabled);
+}
+
+// ===========================================================================
+// R35 — Scroll container
+// ===========================================================================
+
+test "R35: newly created scrollview has scroll_y=0 and scroll_x=0" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const off = scene.getScrollOffset(id.index);
+    try testing.expectEqual(@as(f32, 0), off.y);
+    try testing.expectEqual(@as(f32, 0), off.x);
+}
+
+test "R35: setScrollOffset and getScrollOffset round-trip both axes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.setScrollOffset(id.index, 50.0, 25.0);
+    const off = scene.getScrollOffset(id.index);
+    try testing.expectEqual(@as(f32, 50.0), off.y);
+    try testing.expectEqual(@as(f32, 25.0), off.x);
+}
+
+test "R35: scrollBy(50) equivalent: offset increases by 50 from zero" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const before_y = scene.getScrollOffset(id.index).y;
+    scene.setScrollOffset(id.index, before_y + 50.0, 0);
+    try testing.expectEqual(@as(f32, 50.0), scene.getScrollOffset(id.index).y);
+}
+
+test "R35: scrollStateOf exposes all fields with correct initial values" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    const ss = scene.scrollStateOf(id.index);
+    try testing.expectEqual(@as(f32, 0), ss.scroll_y);
+    try testing.expectEqual(@as(f32, 0), ss.scroll_x);
+    try testing.expectEqual(@as(f32, 0), ss.content_height);
+    try testing.expectEqual(@as(f32, 0), ss.content_width);
+    try testing.expect(!ss.dragging_v_scrollbar);
+    try testing.expect(!ss.dragging_h_scrollbar);
+}
+
+test "R35: setScrollOffset marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+    scene.setScrollOffset(id.index, 10.0, 0.0);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+test "R35: multiple scroll operations accumulate correctly" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<ScrollView/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    // Simulate three app-layer scrollBy(50) calls
+    var y: f32 = 0;
+    y += 50;
+    scene.setScrollOffset(id.index, y, 0);
+    y += 50;
+    scene.setScrollOffset(id.index, y, 0);
+    y += 50;
+    scene.setScrollOffset(id.index, y, 0);
+    try testing.expectEqual(@as(f32, 150.0), scene.getScrollOffset(id.index).y);
+}
+
+test "R35: scrollview defaultLayoutFor has display=block and overflow=hidden" {
+    const layout = C.defaultLayoutFor(.scrollview);
+    try testing.expectEqual(store_mod.Display.block, layout.display);
+    try testing.expectEqual(store_mod.Overflow.hidden, layout.overflow);
+}
+
+// Note: Clamping (scroll offset bounded by [0, content_height - container_height])
+// is computed and applied in app.zig's wheel-scroll handler, not in Scene.setScrollOffset.
+// Verify manually: attempting to scroll below 0 or past max_scroll via the app
+// should clamp to the valid range.

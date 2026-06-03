@@ -84,7 +84,20 @@ to the human.
 
 ---
 
-## 2. Core operating principle — do → validate → redo
+## 2. Workflow routing table
+
+| Prompt meaning | Workflow |
+|---|---|
+| Implement / build module NN (has `NN.spec.md` + `NN.types.zig`) | **Workflow: Modules** — Module implementation |
+| Implement requirement RNN / implement Milestone N (has R-file in `docs/requirements/`) | **Workflow: Requirements** — Requirement implementation |
+| Fix bug / resolve failing test / error reported | **Workflow 2** — Issue resolution |
+| Run all tests / check test status / pre-release | **Workflow 3** — Full test run |
+| Build config / dependency / build.zig / toolchain | **Workflow 4** — Infrastructure |
+
+---
+
+## 3. Core operating principle — do → validate → redo
+
 
 Every step in every workflow follows this loop:
 
@@ -114,7 +127,7 @@ constitution invariants.
 
 ---
 
-## 3. Agent roster
+## 4. Agent roster
 
 | Agent | File | Role |
 |---|---|---|
@@ -127,7 +140,7 @@ constitution invariants.
 
 ---
 
-## 4. Workflow 1 — Module implementation
+## 5. Workflow: Modules — Module implementation
 
 **Trigger:** "Implement module NN" / "Build module NN" / new module spec exists and code doesn't.
 
@@ -251,16 +264,11 @@ DO:
   - If the module introduced a new pattern not in AGENT_GUIDE.md, add it
   - If the module corrects the constitution (as some specs do), apply the update to
     00_constitution.md per the spec's explicit instruction
-  - Update docs/HOW_TO_USE.md to reflect any new public API, new tags, new class names,
-    new widget kinds, new form keywords, or changes to the build command list introduced
-    by this module. If the module completes the renderer bridge (post-v1), remove or
-    update the "What is NOT wired yet" section accordingly.
   - Write a one-paragraph completion summary to docs/.agent-context/
 
 VALIDATE — pass criteria:
   ✓ No new pattern is undocumented
   ✓ Any constitution updates listed in the spec's "action" items are applied
-  ✓ docs/HOW_TO_USE.md reflects the current public API (no stale entries, no missing entries)
   ✓ Completion summary written
 
 PASS → module complete. Orchestrator marks done.
@@ -268,7 +276,175 @@ PASS → module complete. Orchestrator marks done.
 
 ---
 
-## 5. Workflow 2 — Issue resolution
+## 6. Workflow: Requirements — Requirement implementation
+
+**Trigger:** "Implement requirement RNN" / "Implement Milestone N" / a requirement file exists
+in `docs/requirements/` and the feature is not yet coded.
+
+**Difference from Workflow: Modules:** Requirements (R-files) are milestone features that extend
+existing modules or add new `src/app/` files. They have **no** `NN.acceptance_test.zig`,
+**no** `NN.checklist.md`, and **no** `NN.types.zig` contract. The R-file itself is both spec
+and acceptance criteria. The roadmap row is the done-marker.
+
+**Owner:** Orchestrator routes → Validator → Implementer → Test Designer → Tester → Validator → Implementer (docs)
+
+```
+STEP 1 — Validate requirement           [Validator]
+────────────────────────────────────────────────────
+DO:
+  - Read 00_constitution.md in full
+  - Read the R-file(s) (e.g. docs/requirements/R20_signal_type.md)
+  - Read any existing code the requirement modifies (current module files, app.zig, etc.)
+  - Check: does any R-file instruction contradict a constitution invariant?
+  - Check: does any new term lack a glossary entry in docs/specs/glossary.md?
+  - Check: does the requirement reference a dependency that does not yet exist?
+  - Check: do multiple R-files in the same batch contradict each other?
+    Pay special attention to call-order descriptions (where refreshBindings() goes, etc.)
+
+VALIDATE — pass criteria:
+  ✓ No constitution contradiction found
+  ✓ All terms in glossary.md (add missing entries — do NOT defer to implementer)
+  ✓ All dependencies exist in the codebase
+  ✓ No inter-requirement conflicts
+
+FAIL → document each issue; resolve non-blocking issues in place (e.g. add glossary entries);
+       escalate blocking issues (invariant contradictions, missing dependencies) before
+       proceeding.
+PASS → produce an explicit list of: files to create, files to modify, and validator-resolved
+       clarifications. Hand this list to Implementer.
+
+────────────────────────────────────────────────────
+STEP 2 — Plan implementation            [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Read the R-file(s) and the validator's clarification list from step 1
+  - Read every existing file that will be modified
+  - Map each R-file "What to build" section to a concrete edit task:
+      { file, action (create/add/modify), change description }
+  - Verify: no upward module imports (app/ may import numbered modules; numbered
+    modules must NOT import higher-numbered modules — INV-3.4)
+  - Verify: no non-goals in the R-file non-goals list are planned
+
+VALIDATE — pass criteria:
+  ✓ Every "What to build" item has a corresponding edit task
+  ✓ Every R-file acceptance criterion is covered by at least one edit task
+  ✓ No upward imports planned
+  ✓ No non-goals planned
+
+FAIL → refine plan.
+PASS → proceed to step 3.
+
+────────────────────────────────────────────────────
+STEP 3 — Develop code                   [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Implement each edit task from the plan
+  - For NEW files: create at the path specified in the R-file
+  - For MODIFIED files: read the current file first, then apply the narrowest
+    possible change — do not reformat unrelated lines
+  - Run `zig build` after each meaningful change
+  - For each R-file that modifies a contract file (docs/specs/NN.types.zig or
+    docs/specs/01.types.zig), also update the contract file — INV-5.1 requires
+    the contract to match the implementation
+  - Add INV-compliance comments wherever the R-file calls for them
+    (e.g. StaleFn comment citing INV-3.3)
+
+VALIDATE — pass criteria:
+  ✓ `zig build` compiles without errors
+  ✓ All R-file "What to build" sections are implemented
+  ✓ Every R-file acceptance criterion is verifiable in the code
+  ✓ No non-goal implemented
+  ✓ No upward imports
+
+FAIL → diagnose compiler errors, fix, re-validate. Max 3 cycles → escalate.
+PASS → proceed to step 4.
+
+────────────────────────────────────────────────────
+STEP 4 — Design unit tests              [Test Designer]
+────────────────────────────────────────────────────
+DO:
+  - Read the R-file acceptance criteria section
+  - Determine the test file location:
+      New src/app/ feature   → src/app/<feature>_test.zig
+      Extension to module NN → src/NN/NN_test.zig (or add to existing test file)
+  - Write tests that directly exercise each acceptance criterion
+  - Verify: each test is deterministic (no random, no wall-clock)
+  - Verify: tests do NOT require GPU, GLFW, or a running window (use testing.allocator)
+  - For compile-error checks (e.g. bindText wrong type): document as a comment
+    ("verify manually — should cause a compile error") rather than a runtime test
+
+VALIDATE — pass criteria:
+  ✓ At least one test per R-file acceptance criterion
+  ✓ Test file(s) compile (zig build succeeds)
+  ✓ No tests require GPU/GLFW/window
+
+FAIL → revise tests until they compile.
+PASS → proceed to step 5.
+
+────────────────────────────────────────────────────
+STEP 5 — Run all tests                  [Tester]
+────────────────────────────────────────────────────
+DO:
+  - Run the new unit test target(s) added in step 4
+  - Run ALL existing test targets (regression check):
+      zig build test-app, test-signal, test-binding, test-events, etc.
+      Run .\tools\run-tests.ps1 -TestType smoke for a full sweep
+  - Collect full output (pass count, fail count, error messages)
+  - For each failure: identify test name and the assertion that failed
+
+VALIDATE — pass criteria:
+  ✓ All new tests pass (0 failures)
+  ✓ All previously passing tests still pass (0 regressions)
+
+FAIL → write failure report with exact test name, assertion message, and
+       root-cause hypothesis; route back to Implementer (step 3). Max 3 cycles → escalate.
+PASS → proceed to step 6.
+
+────────────────────────────────────────────────────
+STEP 6 — Validate against R-file criteria  [Validator]
+────────────────────────────────────────────────────
+DO:
+  - Read the actual implementation files (not summaries)
+  - For each R-file acceptance criterion: confirm it is satisfied by code or test
+  - Check each R-file non-goal: confirm it was NOT implemented
+  - Check INV-compliance comments are present where the R-file requires them
+  - Check: are there any architecture violations introduced?
+    (upward imports, per-widget heap, callbacks as propagation path, etc.)
+
+VALIDATE — pass criteria:
+  ✓ Every R-file acceptance criterion is satisfied
+  ✓ No non-goal is implemented
+  ✓ No architecture invariant violated
+  ✓ All required INV-compliance comments present
+
+FAIL → list unsatisfied criteria or violations; route back to Implementer.
+PASS → proceed to step 7.
+
+────────────────────────────────────────────────────
+STEP 7 — Update documentation           [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Update docs/ROADMAP.md: change each completed R-file's roadmap row from
+    `planned` → `done`; update the milestone header status if all rows are done
+  - If the requirement adds new user-facing features: update docs/HOW_TO_USE.md with
+    usage examples and API reference for the new feature
+  - If any R-file introduced a new internal pattern not yet in AGENT_GUIDE.md, add it
+  - If any R-file required updating 00_constitution.md, apply that update now
+  - Write a one-paragraph completion summary to docs/.agent-context/
+
+VALIDATE — pass criteria:
+  ✓ All completed roadmap rows marked `done`
+  ✓ Milestone header marked `done` if all rows complete
+  ✓ New user-facing features documented in HOW_TO_USE.md with usage examples
+  ✓ No new internal undocumented pattern
+  ✓ Completion summary written
+
+PASS → requirement(s) complete. Orchestrator marks done.
+```
+
+---
+
+## 7. Workflow 2 — Issue resolution
 
 **Trigger:** A failing test, a reported bug, a contradiction surfaced during another workflow.
 
@@ -351,7 +527,7 @@ PASS → Orchestrator marks issue closed. Write completion note.
 
 ---
 
-## 7. Workflow 3 — Full test run
+## 8. Workflow 3 — Full test run
 
 **Trigger:** "Run all tests" / pre-release check / after a series of changes.
 
@@ -390,8 +566,8 @@ VALIDATE — pass criteria:
 STEP 3 — Route failures                 [Orchestrator]
 ────────────────────────────────────────────────────
   - For each failing module: invoke Implementer with the triage report
-  - Implementer fixes (see Workflow 1, Step 3)
-  - After fixes: re-run that module's tests (Workflow 1, Step 4)
+  - Implementer fixes (see Workflow: Modules, Step 3)
+  - After fixes: re-run that module's tests (Workflow: Modules, Step 4)
   - Repeat until all modules pass
 
 ────────────────────────────────────────────────────
@@ -412,7 +588,7 @@ PASS → Orchestrator marks run complete.
 
 ---
 
-## 8. Workflow 4 — Infrastructure / config / plumbing
+## 9. Workflow 4 — Infrastructure / config / plumbing
 
 **Trigger:** build system changes, new approved dependency, `build.zig` modifications,
 environment config, toolchain updates.
@@ -493,7 +669,7 @@ PASS → Orchestrator marks infra change complete.
 
 ---
 
-## 9. Escalation protocol
+## 10. Escalation protocol
 
 Any agent may escalate at any time. Do NOT work around a blocker by guessing or violating
 an invariant.
@@ -525,7 +701,7 @@ After writing the file: stop all work on this task. Do NOT attempt further steps
 
 ---
 
-## 10. Corrections to the user's original proposal
+## 11. Corrections to the user's original proposal
 
 | Original idea | Correction |
 |---|---|

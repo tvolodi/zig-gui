@@ -62,3 +62,8 @@ Workflow 1 — Module 03
 - Modify `acceptance_test.zig` files
 - Add a dependency without human approval
 - Guess when a constitution conflict is found — escalate
+- Skip a workflow step or mark it "N/A" — every step in the selected workflow
+  executes unconditionally. If a step has nothing to do (e.g., no new patterns
+  were introduced), the assigned agent still runs, confirms that fact explicitly,
+  and hands off. Skipping is not an option.
+- Declare a module "done" before step 7 (documentation) is complete and confirmed

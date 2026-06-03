@@ -203,12 +203,21 @@ constitution and is a flag for human review.
 ### Module 07 — Components
 - **Goal:** Turn `NodeDesc` tree into a live element tree. Map tags to widget kinds, resolve
   classes, write arrays, build elements.
-- **Seven widget kinds:** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`.
-- **`Scene`** owns the `ElementStore` AND the parallel `kind[]`, `style[]`, `text[]` arrays
-  (which cannot live in module 03 due to build-order — `ComputedStyle` is from module 05).
+- **Eleven widget kinds (M4):** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`,
+  `checkbox`, `scrollview`, `image`, `icon`.
+- **`Scene`** owns the `ElementStore` AND all parallel arrays: `kind[]`, `style[]`, `text[]`,
+  `_button_state[]`, `_input_state[]`, `_dropdown_state[]`, `_checkbox_state[]`,
+  `_scroll_state[]`, `_queued_callbacks`, `_pseudo[]`, `_image_state[]` (INV-3.1: no per-widget heap objects).
+- **Focus state:** `focused_idx: u32` (maxInt(u32) = no focus) + `focusable_indices: []u32`
+  rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox (B2).
 - **Two passes:** `instantiate` (no font, fully testable), then `measurePass` (font-dependent,
   fills `LayoutNode.measured`).
 - All element creation/removal goes through `Scene`, never the store directly.
+- **Callback firing:** `Scene.fireQueuedCallbacks()` called ONCE per frame by the app layer,
+  after layout solve, before `buildDrawList` (INV-3.3).
+- **R40 — Pseudo-state:** `PseudoState` parallel array `_pseudo[]`; `setPseudo(idx, state)` marks dirty.
+- **R43 — Image state:** `ImageState` parallel array `_image_state[]`; `setImage(idx, id)` / `setImageTint(idx, color)`.
+- **Style fields (M4):** `ComputedStyle` gains `truncate: bool`, `opacity: f32`, `shadow_blur: f32`, `shadow_offset_x/y: f32`, `shadow_color: Color`; resolved by `resolveClasses` from Tailwind `truncate`/`opacity-*`/`shadow-*` classes.
 
 ### Module 08 — Schema forms
 - **Goal:** JSON Schema (runtime) → working form. Walk schema → `FormModel`, map fields to
@@ -218,6 +227,44 @@ constitution and is a flag for human review.
 - **v1 keyword subset:** type, format (date/email/uri), enum, required, properties, items,
   minLength/maxLength, minimum/maximum, title, x-widget. Pattern, if/then/else, $ref,
   combinators are deferred.
+
+### Module 09 — Renderer
+- **R40 — `resolveStyle(base, overrides, state)`:** Layers `PseudoStyleSet` onto `ComputedStyle` in priority order (focus < hover < active < disabled). Called per-element during `buildDrawList`.
+- **R42 — `intersectScissor(a, b)`:** Computes intersection of two `ScissorRect`s; used to nest scissor regions for scrollviews.
+- **R43 — `GpuImageAtlas`:** Stub GPU atlas for RGBA image tiles; mirrors `GpuAtlas.upload` pattern; real Vulkan upload deferred to GPU integration step.
+- **R44 — Text truncation:** `buildDrawList` checks `style.truncate`; clips glyph commands and appends ellipsis glyph sequence when text overflows element width.
+- **R45 — `applyOpacity(col, factor)`:** Multiplies `col.a` by `factor`; called for every color emitted when `effective_alpha < 1.0`.
+- **R46 — `emitShadow(...)`:** Emits 5 concentric `filled_rect` commands before the element background; skipped when `style.shadow_blur == 0`.
+
+### App layer — Milestone 1 (src/app/)
+- **Goal:** Single `App.run()` entry point that owns and drives all modules. Wires together
+  modules 01-09 into a runnable application.
+- **Key types:** `App`, `AppOptions`, `EventQueue`, `Event`, `Key`, `MouseButton`, `Action`,
+  `Modifiers` — all in `src/app/types.zig`.
+- **Init order (must be exact):** Platform → VulkanBackend → initQuadPipeline → Font →
+  GlyphAtlas → GpuAtlas → Scene. Deinit is exact reverse.
+- **Frame loop order:** poll events → drain EventQueue → apply pending resize → beginFrame →
+  measurePass → re-upload GPU atlas if generation changed → layout solve → buildDrawList →
+  clear → drawFrame → endFrame.
+- **Present mode:** always `VK_PRESENT_MODE_FIFO_KHR`. No mailbox, no immediate. Changed in
+  `src/01/types.zig:chooseSwapPresentMode`.
+- **GLFW user pointer:** `glfwSetWindowUserPointer` is called exactly once per window and
+  always points to `PlatformImpl.callback_ctx` (a `GlfwCallbackContext` struct). Both the
+  event queue and the resize callback share this single pointer. Never add a second call.
+- **Event types live in module 01** (`src/01/types.zig`) to avoid an upward import from the
+  app layer into itself. `src/app/types.zig` re-exports them under the R11 names.
+- **`dispatchEvents` is implemented (M3)** — handles Tab/Shift+Tab focus cycling,
+  click-based focus/button/checkbox/dropdown interaction, character input, clipboard
+  (Ctrl+C/V/X), scroll wheel. The `left_mouse_down: bool` and `last_cursor_x/y: f32`
+  fields track interaction state.
+- **R41 — `OverlayLayer` (`src/app/overlay.zig`):** Ordered list of named `DrawCommand` slices rendered after the main pass. `allocId` → `setSlot` → `flatten` → submit. `removeSlot` clears on dismiss.
+- **Frame loop order (updated M3):** poll events → drain EventQueue → dispatchEvents →
+  apply pending resize → beginFrame → measurePass → re-upload GPU atlas if generation changed
+  → layout solve → **`scene.fireQueuedCallbacks()`** → buildDrawList → clear → drawFrame →
+  endFrame → clear dirty bits.
+- **Viewport constraints:** stored as `AppInner.viewport_constraints: Constraints` and updated
+  on every resize. Passed to `layout.solve` each frame. No `LayoutEngine.setViewport` method
+  exists in module 04 — the App layer owns this state.
 
 ---
 
@@ -256,6 +303,25 @@ Newly added elements are always marked dirty. `markDirty` → bitset → `dirtyI
 `addRoot`/`addChild` pop from the `free` list when available. A reused index has its
 generation bumped, so all previously issued handles for that index become stale and
 `isValid` returns false.
+
+### Atlas generation tracking (App layer pattern)
+`GlyphAtlas.generation: u32` is bumped every time a new glyph is rasterized into the CPU
+atlas (i.e. after `scene.measurePass`). The App layer caches `atlas_generation_seen: u32`
+and re-uploads the GPU atlas with `GpuAtlas.upload` only when the generation changes. This
+avoids an expensive GPU upload every frame when the glyph set is stable.
+
+### GLFW single user-pointer rule
+GLFW allows exactly one `glfwSetWindowUserPointer` per window. All GLFW callbacks that need
+application state must share a single context struct (`GlfwCallbackContext` in `PlatformImpl`)
+pointed to by that one pointer. Never call `glfwSetWindowUserPointer` a second time — it
+silently overwrites the first, breaking all callbacks registered before it.
+
+### Upward-import avoidance via function-pointer indirection
+When a lower-numbered module needs to call into a type defined in a higher-numbered module
+(e.g. module 01's GLFW callbacks need to push into `EventQueue` defined in the app layer),
+define the type in the lower module and pass a function pointer (`PushEventFn`) instead of a
+direct reference. The higher module provides the thunk (`EventQueue.pushThunk`). This
+preserves the build-order invariant (INV-3.4) without duplicating type definitions.
 
 ---
 

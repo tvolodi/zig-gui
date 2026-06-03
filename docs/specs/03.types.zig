@@ -54,6 +54,7 @@ pub const Display = enum { block, flex, grid };
 pub const FlexDirection = enum { row, column };
 pub const JustifyContent = enum { start, center, end, space_between, space_around };
 pub const AlignItems = enum { start, center, end, stretch };
+pub const Overflow = enum { visible, hidden };
 
 /// One LayoutNode per element index. Module 03 stores these in `ElementStore.layout`.
 /// Module 04 (layout engine) reads every field except `computed`, which it writes.
@@ -80,6 +81,9 @@ pub const LayoutNode = struct {
     grid_template_rows: []const TrackSize = &.{},
     col_span: u16 = 1,
     row_span: u16 = 1,
+
+    /// Controls whether children that overflow this node's bounds are visible or clipped.
+    overflow: Overflow = .visible,
 
     /// Content-driven intrinsic size for leaves (filled by text/component modules
     /// BEFORE layout runs). Null until measured.
@@ -319,5 +323,24 @@ pub const ElementStore = struct {
 
     pub fn dirtyIndices(self: *const ElementStore) DirtyIterator {
         return DirtyIterator{ .store = self, .cursor = 0 };
+    }
+
+    /// Return true if any element has its dirty bit set.
+    /// O(capacity / 64) — negligible for < 1 000 elements.
+    pub fn hasDirty(self: *const ElementStore) bool {
+        return self.dirty.count() > 0;
+    }
+
+    /// Mark all live elements dirty. Called once after Scene.instantiate()
+    /// so the very first frame always runs the full layout + paint pipeline.
+    pub fn markAllDirty(self: *ElementStore) void {
+        var i: u32 = 0;
+        while (i < self.gen.items.len) : (i += 1) {
+            // gen > 0 means the slot has been used at least once and is currently live.
+            // Freed slots reuse an index with the same gen until next alloc increments it;
+            // checking free list membership is O(n) — gen > 0 is the conservative but safe
+            // check here because a first-frame full paint of a stale-freed slot is harmless.
+            if (self.gen.items[i] > 0) self.dirty.set(i);
+        }
     }
 };

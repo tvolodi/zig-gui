@@ -475,8 +475,23 @@ pub fn build(b: *std.Build) void {
     unit08_test_step.dependOn(&run_unit08.step);
 
     // -----------------------------------------------------------------------
+    // image_atlas.zig — standalone (no module deps beyond std).
+    const mod_image_atlas = b.addModule("image_atlas.zig", .{
+        .root_source_file = b.path("src/app/image_atlas.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // overlay.zig — depends on module 01 for DrawCommand.
+    const mod_overlay = b.addModule("overlay.zig", .{
+        .root_source_file = b.path("src/app/overlay.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_overlay.addImport("../01/types.zig", mod01);
+
     // Module 09 — Renderer (DrawCommand, buildDrawList, GpuAtlas, quad pipeline).
-    // Imports: 01 (VulkanBackend/DrawCommand), 02 (GlyphAtlas), 03, 05, 07.
+    // Imports: 01 (VulkanBackend/DrawCommand), 02 (GlyphAtlas), 03, 05, 07, image_atlas.
     // -----------------------------------------------------------------------
     const mod09 = b.addModule("renderer", .{
         .root_source_file = b.path("src/09/types.zig"),
@@ -488,6 +503,7 @@ pub fn build(b: *std.Build) void {
     mod09.addImport("../03/types.zig", mod03);
     mod09.addImport("../05/types.zig", mod05);
     mod09.addImport("../07/types.zig", mod07);
+    mod09.addImport("../app/image_atlas.zig", mod_image_atlas);
 
     // Acceptance test — docs/specs/09.acceptance_test.zig
     //   zig build test-09  → compile + run (pure CPU tests; GPU tests skip if no Vulkan)
@@ -536,6 +552,7 @@ pub fn build(b: *std.Build) void {
     unit09_mod.addImport("../07/types.zig", mod07);
     unit09_mod.addImport("../06/types.zig", mod06);
     unit09_mod.addImport("layout_engine", mod04);
+    unit09_mod.addImport("../app/image_atlas.zig", mod_image_atlas);
     unit09_mod.addIncludePath(b.path("deps"));
     unit09_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
     unit09_mod.link_libc = true;
@@ -543,6 +560,154 @@ pub fn build(b: *std.Build) void {
     const run_unit09 = b.addRunArtifact(unit09_test);
     const unit09_test_step = b.step("test-09-unit", "Run module 09 unit tests (pure CPU)");
     unit09_test_step.dependOn(&run_unit09.step);
+
+    // -----------------------------------------------------------------------
+    // App layer (R10-R13) — src/app/
+    // Depends on modules 01-09.
+    //
+    // Module identity rule: each .zig file gets ONE module object.  Sharing
+    // the same module object across mod_app, test-app, and test-events ensures
+    // Zig sees only one canonical identity for each file and avoids the
+    // "file exists in modules X and Y" error.
+    // -----------------------------------------------------------------------
+
+    // events.zig — one module, shared everywhere.
+    const mod_events = b.addModule("events.zig", .{
+        .root_source_file = b.path("src/app/events.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_events.addImport("../01/types.zig", mod01);
+
+    // app.zig — one module, shared everywhere.
+    const mod_app_impl = b.addModule("app.zig", .{
+        .root_source_file = b.path("src/app/app.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_app_impl.addImport("../01/types.zig", mod01);
+    mod_app_impl.addImport("../02/types.zig", mod02);
+    mod_app_impl.addImport("../03/types.zig", mod03);
+    mod_app_impl.addImport("../04/types.zig", mod04);
+    mod_app_impl.addImport("../05/types.zig", mod05);
+    mod_app_impl.addImport("../06/types.zig", mod06);
+    mod_app_impl.addImport("../07/types.zig", mod07);
+    mod_app_impl.addImport("../08/types.zig", mod08);
+    mod_app_impl.addImport("../09/types.zig", mod09);
+    mod_app_impl.addImport("overlay.zig", mod_overlay);
+    mod_app_impl.addImport("image_atlas.zig", mod_image_atlas);
+    // NOTE: app.zig does NOT import types.zig (types.zig imports app.zig — no cycle).
+    mod_app_impl.addImport("events.zig", mod_events);
+
+    // types.zig — the public root module.
+    const mod_app = b.addModule("app", .{
+        .root_source_file = b.path("src/app/types.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_app.addImport("../01/types.zig", mod01);
+    mod_app.addImport("../02/types.zig", mod02);
+    mod_app.addImport("../03/types.zig", mod03);
+    mod_app.addImport("../04/types.zig", mod04);
+    mod_app.addImport("../05/types.zig", mod05);
+    mod_app.addImport("../06/types.zig", mod06);
+    mod_app.addImport("../07/types.zig", mod07);
+    mod_app.addImport("../08/types.zig", mod08);
+    mod_app.addImport("../09/types.zig", mod09);
+    mod_app.addImport("app.zig", mod_app_impl);
+    mod_app.addImport("events.zig", mod_events);
+
+    // -----------------------------------------------------------------------
+    // test-app — headless unit tests (no GPU).
+    //   zig build test-app → compile + run
+    // -----------------------------------------------------------------------
+    const app_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/app_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    app_test_mod.addImport("types.zig", mod_app);
+    app_test_mod.addImport("../01/types.zig", mod01);
+    app_test_mod.addImport("events.zig", mod_events);
+    const app_test = b.addTest(.{ .name = "app-test", .root_module = app_test_mod });
+    const run_app_test = b.addRunArtifact(app_test);
+    const app_test_step = b.step("test-app", "Run app layer unit tests (headless, no GPU)");
+    app_test_step.dependOn(&run_app_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-events — EventQueue dedicated tests (no GPU, no GLFW).
+    //   zig build test-events → compile + run
+    // -----------------------------------------------------------------------
+    const events_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/events_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    events_test_mod.addImport("types.zig", mod_app);
+    events_test_mod.addImport("../01/types.zig", mod01);
+    events_test_mod.addImport("events.zig", mod_events);
+    const events_test = b.addTest(.{ .name = "events-test", .root_module = events_test_mod });
+    const run_events_test = b.addRunArtifact(events_test);
+    const events_test_step = b.step("test-events", "Run EventQueue unit tests (no GPU, no GLFW)");
+    events_test_step.dependOn(&run_events_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-signal — Signal(T) and Computed(T) unit tests (pure, no GPU).
+    //   zig build             → compile only (compile check)
+    //   zig build test-signal → compile + run
+    // -----------------------------------------------------------------------
+    const signal_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/signal_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // signal.zig imports only std — no additional module wiring needed.
+    const signal_test = b.addTest(.{ .name = "signal-test", .root_module = signal_test_mod });
+    b.default_step.dependOn(&signal_test.step);
+    const run_signal_test = b.addRunArtifact(signal_test);
+    const signal_test_step = b.step("test-signal", "Run Signal/Computed unit tests (pure, no GPU)");
+    signal_test_step.dependOn(&run_signal_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-overlay — OverlayLayer unit tests (no GPU, no GLFW).
+    //   zig build               → compile only (compile check)
+    //   zig build test-overlay  → compile + run
+    // -----------------------------------------------------------------------
+    const overlay_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/overlay_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    overlay_test_mod.addImport("overlay.zig", mod_overlay);
+    overlay_test_mod.addImport("../01/types.zig", mod01);
+    const overlay_test = b.addTest(.{ .name = "overlay-test", .root_module = overlay_test_mod });
+    b.default_step.dependOn(&overlay_test.step);
+    const run_overlay_test = b.addRunArtifact(overlay_test);
+    const overlay_test_step = b.step("test-overlay", "Run OverlayLayer unit tests (no GPU, no GLFW)");
+    overlay_test_step.dependOn(&run_overlay_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-binding — BindingSet unit tests (no GPU, no GLFW).
+    //   zig build              → compile only (compile check)
+    //   zig build test-binding → compile + run
+    // -----------------------------------------------------------------------
+    const binding_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/binding_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // binding.zig imports ../07/types.zig; wire mod07 so the build system resolves it.
+    // mod07 transitively brings in mod02 (stb_truetype C code) — add them explicitly
+    // to ensure the test binary links correctly.
+    binding_test_mod.addImport("../07/types.zig", mod07);
+    binding_test_mod.addIncludePath(b.path("deps"));
+    binding_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    binding_test_mod.link_libc = true;
+    const binding_test = b.addTest(.{ .name = "binding-test", .root_module = binding_test_mod });
+    b.default_step.dependOn(&binding_test.step);
+    const run_binding_test = b.addRunArtifact(binding_test);
+    const binding_test_step = b.step("test-binding", "Run BindingSet unit tests (no GPU, no GLFW)");
+    binding_test_step.dependOn(&run_binding_test.step);
 }
 
 // ---------------------------------------------------------------------------

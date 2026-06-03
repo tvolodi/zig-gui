@@ -104,12 +104,22 @@ const AtlasImpl = struct {
     cache: std.AutoHashMap(GlyphKey, AtlasRect),
 };
 
+/// R44 — Ellipsis glyph metrics (advance width + atlas key).
+pub const EllipsisMetrics = struct {
+    advance: f32,
+    glyph_id: u16,
+};
+
+const EllipsisCacheEntry = struct { font_size: u32, metrics: EllipsisMetrics };
+
 pub const GlyphAtlas = struct {
     width: u32 = 0,
     height: u32 = 0,
     generation: u32 = 0,
     // Internal packer state + bitmap are implementation-defined (not contract).
     _impl: *anyopaque = undefined,
+    /// R44: Cached ellipsis metrics per font size (max 8 slots).
+    ellipsis_cache: [8]?EllipsisCacheEntry = [_]?EllipsisCacheEntry{null} ** 8,
 
     pub fn init(gpa: std.mem.Allocator, width: u32, height: u32) AtlasError!GlyphAtlas {
         const impl = try gpa.create(AtlasImpl);
@@ -218,6 +228,64 @@ pub const GlyphAtlas = struct {
     pub fn pixels(self: *GlyphAtlas) []const u8 {
         const impl: *AtlasImpl = @ptrCast(@alignCast(self._impl));
         return impl.bitmap;
+    }
+
+    // -----------------------------------------------------------------------
+    // R44 — Ellipsis metrics (cached per font size)
+    // -----------------------------------------------------------------------
+
+    /// Return ellipsis metrics for `font_size`, rasterizing "…" (U+2026) if not cached.
+    pub fn ellipsisMetrics(
+        self: *GlyphAtlas,
+        font: *Font,
+        font_size: f32,
+    ) error{OutOfMemory}!EllipsisMetrics {
+        const fs_key: u32 = @intFromFloat(@round(font_size));
+
+        // Check cache first.
+        for (self.ellipsis_cache) |entry| {
+            if (entry) |e| {
+                if (e.font_size == fs_key) return e.metrics;
+            }
+        }
+
+        // Rasterize "…" (U+2026) into the atlas.
+        const ellipsis_cp: u21 = 0x2026;
+        const px_u16: u16 = @intCast(fs_key);
+        const key = GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16 };
+
+        // Try to look up first (may already be in atlas from a prior rasterize call).
+        const uv = if (self.lookup(key)) |existing| existing else blk: {
+            const render = font.rasterize(std.heap.page_allocator, ellipsis_cp, font_size) catch {
+                const metrics = EllipsisMetrics{ .advance = 0, .glyph_id = 0 };
+                self.storeEllipsisCache(fs_key, metrics);
+                return metrics;
+            };
+            defer std.heap.page_allocator.free(render.bitmap);
+            const rect = self.insert(key, render.width, render.height, render.bitmap) catch {
+                // Atlas full or glyph too large — return zero advance as fallback.
+                const metrics = EllipsisMetrics{ .advance = 0, .glyph_id = 0 };
+                self.storeEllipsisCache(fs_key, metrics);
+                return metrics;
+            };
+            break :blk rect;
+        };
+
+        const advance = @as(f32, @floatFromInt(uv.w));
+        const metrics = EllipsisMetrics{ .advance = advance, .glyph_id = 0 };
+        self.storeEllipsisCache(fs_key, metrics);
+        return metrics;
+    }
+
+    fn storeEllipsisCache(self: *GlyphAtlas, fs_key: u32, metrics: EllipsisMetrics) void {
+        for (&self.ellipsis_cache) |*slot| {
+            if (slot.* == null) {
+                slot.* = .{ .font_size = fs_key, .metrics = metrics };
+                return;
+            }
+        }
+        // All slots full — overwrite last (simple eviction).
+        self.ellipsis_cache[7] = .{ .font_size = fs_key, .metrics = metrics };
     }
 };
 

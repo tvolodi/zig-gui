@@ -54,6 +54,7 @@ pub const Display = enum { block, flex, grid };
 pub const FlexDirection = enum { row, column };
 pub const JustifyContent = enum { start, center, end, space_between, space_around };
 pub const AlignItems = enum { start, center, end, stretch };
+pub const Overflow = enum { visible, hidden };
 
 /// One LayoutNode per element index. Module 03 stores these in `ElementStore.layout`.
 /// Module 04 (layout engine) reads every field except `computed`, which it writes.
@@ -80,6 +81,9 @@ pub const LayoutNode = struct {
     grid_template_rows: []const TrackSize = &.{},
     col_span: u16 = 1,
     row_span: u16 = 1,
+
+    /// Controls whether children that overflow this node's bounds are visible or clipped.
+    overflow: Overflow = .visible,
 
     /// Content-driven intrinsic size for leaves (filled by text/component modules
     /// BEFORE layout runs). Null until measured.

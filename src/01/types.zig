@@ -50,9 +50,89 @@ pub const BackendError = error{
 // Internal implementation types (not part of the contract).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Input event vocabulary (R11) — defined here (module 01) so module 09 and
+// the app layer can re-export without an upward import (same pattern as DrawCommand).
+// ---------------------------------------------------------------------------
+
+pub const MouseButton = enum { left, right, middle };
+pub const InputAction = enum { press, release };
+pub const Key = enum {
+    enter,
+    escape,
+    tab,
+    backspace,
+    delete,
+    left,
+    right,
+    up,
+    down,
+    home,
+    end,
+    page_up,
+    page_down,
+    left_shift,
+    right_shift,
+    left_ctrl,
+    right_ctrl,
+    left_alt,
+    right_alt,
+    f1,
+    f2,
+    f3,
+    f4,
+    f5,
+    f6,
+    f7,
+    f8,
+    f9,
+    f10,
+    f11,
+    f12,
+    // Printable keys needed for text editing and clipboard shortcuts (R32, R33, R34)
+    space,
+    a,
+    c,
+    v,
+    x,
+    z,
+    other,
+};
+pub const Modifiers = packed struct {
+    shift: bool = false,
+    ctrl: bool = false,
+    alt: bool = false,
+    super: bool = false,
+};
+pub const InputEvent = union(enum) {
+    mouse_move: struct { x: f32, y: f32 },
+    mouse_button: struct { button: MouseButton, action: InputAction, x: f32, y: f32 },
+    scroll: struct { dx: f32, dy: f32 },
+    key: struct { key: Key, action: InputAction, mods: Modifiers },
+    char: struct { codepoint: u21 },
+};
+
+/// Function pointer type for pushing an InputEvent into a queue (R11).
+/// The app layer provides this; module 01 stores it in GlfwCallbackContext.
+pub const PushEventFn = *const fn (queue: *anyopaque, event: InputEvent) void;
+
+/// Packed context for all GLFW window user-pointer callbacks.
+/// glfwSetWindowUserPointer is called exactly once per window and always points here.
+pub const GlfwCallbackContext = struct {
+    /// EventQueue opaque pointer — set by Platform.setEventQueue.
+    event_queue: ?*anyopaque = null,
+    /// Function called to push an InputEvent into the queue.
+    push_fn: ?PushEventFn = null,
+    /// Framebuffer resize callback — set by Platform.setFramebufferSizeCallback.
+    resize_cb: ?*const fn (user_data: *anyopaque, size: Extent2D) void = null,
+    resize_ud: ?*anyopaque = null,
+};
+
 const PlatformImpl = struct {
     window: *c.GLFWwindow,
     allocator: std.mem.Allocator,
+    /// Packed callback context — glfwSetWindowUserPointer points here (R11 + R12).
+    callback_ctx: GlfwCallbackContext = .{},
 };
 
 const VulkanImpl = struct {
@@ -83,6 +163,9 @@ const VulkanImpl = struct {
     pipeline: c.VkPipeline,
     current_image_index: u32,
     validation_issue_count: u32,
+
+    /// Present mode selected at init (R13). Reused on swapchain recreation — never re-queried.
+    present_mode: c.VkPresentModeKHR = c.VK_PRESENT_MODE_FIFO_KHR,
 
     // Module 09 quad pipeline (null until initQuadPipeline is called).
     quad_pipeline_layout: c.VkPipelineLayout = null,
@@ -123,10 +206,28 @@ pub const GlyphCmd = struct {
     color: Color09,
 };
 
+/// Integer pixel rect used for scissor (R42). Origin top-left, exclusive right/bottom.
+pub const ScissorRect = struct {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+};
+
+/// Image/icon draw command (R43).
+pub const ImageCmd = struct {
+    dst: Rect09,
+    uv: Rect09,
+    tint: Color09,
+};
+
 pub const DrawCommand = union(enum) {
     filled_rect: FilledRect,
     border_rect: BorderRect,
     glyph: GlyphCmd,
+    set_scissor: ScissorRect,     // R42
+    restore_scissor: void,         // R42
+    image_rect: ImageCmd,          // R43
 };
 
 pub const QuadVertex = struct {
@@ -186,9 +287,7 @@ pub fn vkUploadAtlas(
 
     var stg_req: c.VkMemoryRequirements = undefined;
     c.vkGetBufferMemoryRequirements(dev, stg_buf, &stg_req);
-    const stg_type = findMemTypeLocal(phys, stg_req.memoryTypeBits,
-        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-        orelse return error.GpuUploadFailed;
+    const stg_type = findMemTypeLocal(phys, stg_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) orelse return error.GpuUploadFailed;
 
     var stg_ma = std.mem.zeroes(c.VkMemoryAllocateInfo);
     stg_ma.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -225,8 +324,7 @@ pub fn vkUploadAtlas(
 
     var ir: c.VkMemoryRequirements = undefined;
     c.vkGetImageMemoryRequirements(dev, img, &ir);
-    const img_type = findMemTypeLocal(phys, ir.memoryTypeBits,
-        c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) orelse return error.GpuUploadFailed;
+    const img_type = findMemTypeLocal(phys, ir.memoryTypeBits, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) orelse return error.GpuUploadFailed;
 
     var ima = std.mem.zeroes(c.VkMemoryAllocateInfo);
     ima.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -415,6 +513,14 @@ pub const Platform = struct {
         c.glfwPollEvents();
     }
 
+    /// Block the calling thread until the OS delivers at least one windowing or
+    /// input event, then return. Wraps glfwWaitEvents.
+    /// Call only from the main thread (GLFW requirement).
+    pub fn waitEvents(self: *Platform) void {
+        _ = self;
+        c.glfwWaitEvents();
+    }
+
     pub fn framebufferSize(self: *Platform) Extent2D {
         const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
         var w: c_int = 0;
@@ -445,7 +551,261 @@ pub const Platform = struct {
         }
         return @ptrCast(surface.?);
     }
+
+    // -----------------------------------------------------------------------
+    // R11 / R12 — event queue + framebuffer resize callback (added here)
+    // -----------------------------------------------------------------------
+
+    /// Register the event queue that GLFW callbacks will push into (R11).
+    /// `queue` is an opaque pointer to EventQueue; `push_fn` is called to push events.
+    /// Installs cursor-pos, mouse-button, scroll, key, and char callbacks.
+    /// Uses glfwSetWindowUserPointer — shares the packed context with setFramebufferSizeCallback.
+    pub fn setEventQueue(self: *Platform, queue: *anyopaque, push_fn: PushEventFn) void {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        impl.callback_ctx.event_queue = queue;
+        impl.callback_ctx.push_fn = push_fn;
+        // Point the window user-pointer to the packed context (shared with resize callback).
+        c.glfwSetWindowUserPointer(impl.window, &impl.callback_ctx);
+
+        // Install all five input callbacks.
+        _ = c.glfwSetCursorPosCallback(impl.window, glfwCursorPosCallback);
+        _ = c.glfwSetMouseButtonCallback(impl.window, glfwMouseButtonCallback);
+        _ = c.glfwSetScrollCallback(impl.window, glfwScrollCallback);
+        _ = c.glfwSetKeyCallback(impl.window, glfwKeyCallback);
+        _ = c.glfwSetCharCallback(impl.window, glfwCharCallback);
+    }
+
+    /// Return the current cursor position in screen pixels (top-left origin) (R11).
+    pub fn cursorPos(self: *Platform) struct { x: f32, y: f32 } {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        var xpos: f64 = 0;
+        var ypos: f64 = 0;
+        c.glfwGetCursorPos(impl.window, &xpos, &ypos);
+        return .{ .x = @floatCast(xpos), .y = @floatCast(ypos) };
+    }
+
+    /// Install a framebuffer-resize callback (R12).
+    /// `user_data` is stored in the packed GlfwCallbackContext alongside the event queue.
+    /// glfwSetWindowUserPointer must already have been set by setEventQueue, or will be
+    /// set here if not yet done.
+    pub fn setFramebufferSizeCallback(
+        self: *Platform,
+        user_data: *anyopaque,
+        callback: *const fn (user_data: *anyopaque, size: Extent2D) void,
+    ) void {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        impl.callback_ctx.resize_cb = callback;
+        impl.callback_ctx.resize_ud = user_data;
+        // Ensure the window user-pointer points to our context (idempotent if already set).
+        c.glfwSetWindowUserPointer(impl.window, &impl.callback_ctx);
+        _ = c.glfwSetFramebufferSizeCallback(impl.window, glfwFramebufferSizeCallback);
+    }
+
+    /// Set the system clipboard to the given text (R36).
+    /// Text is null-terminated and copied via GLFW; ownership remains with the caller.
+    pub fn setClipboard(self: *Platform, text: []const u8) void {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        // Heap-allocate a null-terminated copy (C6: no stack buffer limit).
+        const z_str = impl.allocator.dupeZ(u8, text) catch return;
+        defer impl.allocator.free(z_str);
+        c.glfwSetClipboardString(impl.window, z_str.ptr);
+    }
+
+    /// Get the current system clipboard content as a UTF-8 string (R36).
+    /// Returns an allocated string (caller owns, must free), or null if empty/non-UTF-8.
+    pub fn getClipboard(self: *Platform, allocator: std.mem.Allocator) ?[]u8 {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        const c_str = c.glfwGetClipboardString(impl.window) orelse return null;
+        const len = std.mem.len(c_str);
+        if (len == 0) return null;
+        const result = allocator.alloc(u8, len) catch return null;
+        @memcpy(result, c_str[0..len]);
+        // C7: validate UTF-8; return null for non-UTF-8 content.
+        if (!std.unicode.utf8ValidateSlice(result)) {
+            allocator.free(result);
+            return null;
+        }
+        return result;
+    }
 };
+
+// ---------------------------------------------------------------------------
+// GLFW input callbacks (R11) — C calling convention required.
+// ---------------------------------------------------------------------------
+
+/// Convert a GLFW key code to our Key enum.
+fn glfwKeyToKey(glfw_key: c_int) Key {
+    return switch (glfw_key) {
+        c.GLFW_KEY_ENTER, c.GLFW_KEY_KP_ENTER => .enter,
+        c.GLFW_KEY_ESCAPE => .escape,
+        c.GLFW_KEY_TAB => .tab,
+        c.GLFW_KEY_BACKSPACE => .backspace,
+        c.GLFW_KEY_DELETE => .delete,
+        c.GLFW_KEY_LEFT => .left,
+        c.GLFW_KEY_RIGHT => .right,
+        c.GLFW_KEY_UP => .up,
+        c.GLFW_KEY_DOWN => .down,
+        c.GLFW_KEY_HOME => .home,
+        c.GLFW_KEY_END => .end,
+        c.GLFW_KEY_PAGE_UP => .page_up,
+        c.GLFW_KEY_PAGE_DOWN => .page_down,
+        c.GLFW_KEY_LEFT_SHIFT => .left_shift,
+        c.GLFW_KEY_RIGHT_SHIFT => .right_shift,
+        c.GLFW_KEY_LEFT_CONTROL => .left_ctrl,
+        c.GLFW_KEY_RIGHT_CONTROL => .right_ctrl,
+        c.GLFW_KEY_LEFT_ALT => .left_alt,
+        c.GLFW_KEY_RIGHT_ALT => .right_alt,
+        c.GLFW_KEY_F1 => .f1,
+        c.GLFW_KEY_F2 => .f2,
+        c.GLFW_KEY_F3 => .f3,
+        c.GLFW_KEY_F4 => .f4,
+        c.GLFW_KEY_F5 => .f5,
+        c.GLFW_KEY_F6 => .f6,
+        c.GLFW_KEY_F7 => .f7,
+        c.GLFW_KEY_F8 => .f8,
+        c.GLFW_KEY_F9 => .f9,
+        c.GLFW_KEY_F10 => .f10,
+        c.GLFW_KEY_F11 => .f11,
+        c.GLFW_KEY_F12 => .f12,
+        c.GLFW_KEY_SPACE => .space,
+        c.GLFW_KEY_A => .a,
+        c.GLFW_KEY_C => .c,
+        c.GLFW_KEY_V => .v,
+        c.GLFW_KEY_X => .x,
+        c.GLFW_KEY_Z => .z,
+        else => .other,
+    };
+}
+
+fn glfwMods(mods: c_int) Modifiers {
+    return .{
+        .shift = (mods & c.GLFW_MOD_SHIFT) != 0,
+        .ctrl = (mods & c.GLFW_MOD_CONTROL) != 0,
+        .alt = (mods & c.GLFW_MOD_ALT) != 0,
+        .super = (mods & c.GLFW_MOD_SUPER) != 0,
+    };
+}
+
+fn glfwCursorPosCallback(
+    window: ?*c.GLFWwindow,
+    xpos: f64,
+    ypos: f64,
+) callconv(.c) void {
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const q = ctx.event_queue orelse return;
+    const push = ctx.push_fn orelse return;
+    push(q, InputEvent{ .mouse_move = .{
+        .x = @floatCast(xpos),
+        .y = @floatCast(ypos),
+    } });
+}
+
+fn glfwMouseButtonCallback(
+    window: ?*c.GLFWwindow,
+    button: c_int,
+    action: c_int,
+    _mods: c_int,
+) callconv(.c) void {
+    _ = _mods;
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const q = ctx.event_queue orelse return;
+    const push = ctx.push_fn orelse return;
+
+    const btn: MouseButton = switch (button) {
+        c.GLFW_MOUSE_BUTTON_LEFT => .left,
+        c.GLFW_MOUSE_BUTTON_RIGHT => .right,
+        c.GLFW_MOUSE_BUTTON_MIDDLE => .middle,
+        else => return,
+    };
+    const act: InputAction = if (action == c.GLFW_PRESS) .press else .release;
+
+    var xpos: f64 = 0;
+    var ypos: f64 = 0;
+    c.glfwGetCursorPos(window, &xpos, &ypos);
+
+    push(q, InputEvent{ .mouse_button = .{
+        .button = btn,
+        .action = act,
+        .x = @floatCast(xpos),
+        .y = @floatCast(ypos),
+    } });
+}
+
+fn glfwScrollCallback(
+    window: ?*c.GLFWwindow,
+    xoffset: f64,
+    yoffset: f64,
+) callconv(.c) void {
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const q = ctx.event_queue orelse return;
+    const push = ctx.push_fn orelse return;
+    push(q, InputEvent{ .scroll = .{
+        .dx = @floatCast(xoffset),
+        .dy = @floatCast(yoffset),
+    } });
+}
+
+fn glfwKeyCallback(
+    window: ?*c.GLFWwindow,
+    key: c_int,
+    _scancode: c_int,
+    action: c_int,
+    mods: c_int,
+) callconv(.c) void {
+    _ = _scancode;
+    if (action == c.GLFW_REPEAT) {
+        // Allow repeat only for text-editing keys (backspace, delete, arrows, home, end).
+        switch (key) {
+            c.GLFW_KEY_BACKSPACE, c.GLFW_KEY_DELETE, c.GLFW_KEY_LEFT, c.GLFW_KEY_RIGHT, c.GLFW_KEY_HOME, c.GLFW_KEY_END => {}, // fall through
+            else => return,
+        }
+    }
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const q = ctx.event_queue orelse return;
+    const push = ctx.push_fn orelse return;
+    const act: InputAction = if (action == c.GLFW_PRESS) .press else .release;
+    push(q, InputEvent{ .key = .{
+        .key = glfwKeyToKey(key),
+        .action = act,
+        .mods = glfwMods(mods),
+    } });
+}
+
+fn glfwCharCallback(
+    window: ?*c.GLFWwindow,
+    codepoint: c_uint,
+) callconv(.c) void {
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const q = ctx.event_queue orelse return;
+    const push = ctx.push_fn orelse return;
+    push(q, InputEvent{ .char = .{ .codepoint = @intCast(codepoint) } });
+}
+
+fn glfwFramebufferSizeCallback(
+    window: ?*c.GLFWwindow,
+    width: c_int,
+    height: c_int,
+) callconv(.c) void {
+    const ctx: *GlfwCallbackContext = @ptrCast(@alignCast(
+        c.glfwGetWindowUserPointer(window) orelse return,
+    ));
+    const cb = ctx.resize_cb orelse return;
+    const ud = ctx.resize_ud orelse return;
+    cb(ud, Extent2D{
+        .width = @intCast(@max(0, width)),
+        .height = @intCast(@max(0, height)),
+    });
+}
 
 // ---------------------------------------------------------------------------
 // VulkanBackend — the only GPU backend (INV-2.1).
@@ -692,9 +1052,13 @@ pub const VulkanBackend = struct {
 
     /// `atlas` is *const GpuAtlas or any struct with the same leading fields
     /// (image, image_view, sampler, memory as ?*anyopaque). Any *T coerces to *const anyopaque.
-    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, atlas: *const anyopaque) void {
+    /// `image_atlas` is *const GpuImageAtlas (from module 09) passed as opaque to avoid
+    /// an upward import. Reserved for future descriptor binding 1 / shader mode 2 (R43).
+    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, atlas: *const anyopaque, image_atlas: *const anyopaque) void {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
         const h: *const GpuAtlas = @ptrCast(@alignCast(atlas));
+        _ = image_atlas; // TODO: bind image_atlas descriptor (binding 1) and submit quad with mode=2
+        // For v1 this is a GPU integration step; skipped in unit-test builds.
         vkDrawFrame(impl, commands, h);
     }
 };
@@ -967,6 +1331,7 @@ fn vkCreateSwapchain(impl: *VulkanImpl) !void {
     }
     impl.swapchain_format = format.format;
     impl.swapchain_extent = extent;
+    impl.present_mode = present_mode; // R13: store for reuse on recreate
 
     // Retrieve images.
     var img_count: u32 = 0;
@@ -994,15 +1359,11 @@ fn chooseSwapFormat(impl: *VulkanImpl) c.VkSurfaceFormatKHR {
     return buf[0];
 }
 
-fn chooseSwapPresentMode(impl: *VulkanImpl) c.VkPresentModeKHR {
-    var count: u32 = 0;
-    _ = c.vkGetPhysicalDeviceSurfacePresentModesKHR(impl.physical_device, impl.surface, &count, null);
-    var buf: [8]c.VkPresentModeKHR = undefined;
-    var actual: u32 = @min(count, 8);
-    _ = c.vkGetPhysicalDeviceSurfacePresentModesKHR(impl.physical_device, impl.surface, &actual, &buf);
-    for (buf[0..actual]) |pm| {
-        if (pm == c.VK_PRESENT_MODE_MAILBOX_KHR) return pm;
-    }
+/// R13: always use FIFO (vsync, guaranteed by Vulkan spec).
+/// FIFO blocks in vkQueuePresentKHR at the vertical blanking interval — no explicit sleep needed.
+/// MAILBOX is a named constant for reference only; do not enable without a spec change.
+fn chooseSwapPresentMode(_impl: *VulkanImpl) c.VkPresentModeKHR {
+    _ = _impl; // present mode is always FIFO; no query needed
     return c.VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -1433,14 +1794,10 @@ fn vkInitQuadPipeline(impl: *VulkanImpl, gpa: std.mem.Allocator) !void {
     vib.inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX;
 
     var attr_descs: [4]c.VkVertexInputAttributeDescription = undefined;
-    attr_descs[0] = .{ .location = 0, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT,
-        .offset = @offsetOf(QuadVertex, "pos") };
-    attr_descs[1] = .{ .location = 1, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT,
-        .offset = @offsetOf(QuadVertex, "uv") };
-    attr_descs[2] = .{ .location = 2, .binding = 0, .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-        .offset = @offsetOf(QuadVertex, "color") };
-    attr_descs[3] = .{ .location = 3, .binding = 0, .format = c.VK_FORMAT_R32_UINT,
-        .offset = @offsetOf(QuadVertex, "mode") };
+    attr_descs[0] = .{ .location = 0, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(QuadVertex, "pos") };
+    attr_descs[1] = .{ .location = 1, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(QuadVertex, "uv") };
+    attr_descs[2] = .{ .location = 2, .binding = 0, .format = c.VK_FORMAT_R8G8B8A8_UNORM, .offset = @offsetOf(QuadVertex, "color") };
+    attr_descs[3] = .{ .location = 3, .binding = 0, .format = c.VK_FORMAT_R32_UINT, .offset = @offsetOf(QuadVertex, "mode") };
 
     var vi = std.mem.zeroes(c.VkPipelineVertexInputStateCreateInfo);
     vi.sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -1521,8 +1878,7 @@ fn vkInitQuadPipeline(impl: *VulkanImpl, gpa: std.mem.Allocator) !void {
 
     var mem_req: c.VkMemoryRequirements = undefined;
     c.vkGetBufferMemoryRequirements(impl.device, impl.quad_vertex_buf, &mem_req);
-    const mem_type = try findMemoryType(impl, mem_req.memoryTypeBits,
-        c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    const mem_type = try findMemoryType(impl, mem_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     var ma_info = std.mem.zeroes(c.VkMemoryAllocateInfo);
     ma_info.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -1591,6 +1947,8 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     }
 
     // Build vertex data: expand each DrawCommand into 6 vertices.
+    // Strategy: collect all quads into the buffer, then make one draw call.
+    // Scissor changes require separate draw calls; we track per-scissor ranges.
     const max_verts = MAX_QUADS * VERTS_PER_QUAD;
     var mapped: ?*anyopaque = null;
     const buf_size: c.VkDeviceSize = @as(u64, max_verts) * @sizeOf(QuadVertex);
@@ -1601,15 +1959,83 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     const W = @as(f32, @floatFromInt(impl.swapchain_extent.width));
     const H = @as(f32, @floatFromInt(impl.swapchain_extent.height));
 
+    // Scissor draw-range tracking (R42).
+    const ScissorRange = struct { scissor: c.VkRect2D, first_vert: u32 };
+    var scissor_ranges: [64]ScissorRange = undefined;
+    var scissor_range_count: u32 = 0;
+
+    // Scissor stack.
+    var scissor_stack: [8]c.VkRect2D = undefined;
+    var scissor_depth: u8 = 0;
+    var current_scissor = c.VkRect2D{ .offset = .{ .x = 0, .y = 0 }, .extent = impl.swapchain_extent };
+
+    // Start with the full-viewport scissor range.
+    scissor_ranges[0] = .{ .scissor = current_scissor, .first_vert = 0 };
+    scissor_range_count = 1;
+
     for (commands) |cmd| {
-        if (vert_count + VERTS_PER_QUAD > max_verts) {
-            std.debug.print("[renderer] MAX_QUADS ({}) exceeded, truncating\n", .{MAX_QUADS});
-            break;
-        }
         switch (cmd) {
-            .filled_rect => |r| emitQuad(verts, &vert_count, r.rect, .{}, r.color, 0),
-            .border_rect => |br| emitQuad(verts, &vert_count, br.rect, .{}, br.color, 0),
-            .glyph => |g| emitQuad(verts, &vert_count, g.dst, g.uv, g.color, 1),
+            .set_scissor => |sr| {
+                // Push to stack and set new intersected scissor.
+                if (scissor_depth < 8) {
+                    scissor_stack[scissor_depth] = current_scissor;
+                    scissor_depth += 1;
+                }
+                const ax0: i64 = current_scissor.offset.x;
+                const ay0: i64 = current_scissor.offset.y;
+                const ax1: i64 = ax0 + current_scissor.extent.width;
+                const ay1: i64 = ay0 + current_scissor.extent.height;
+                const bx0: i64 = sr.x;
+                const by0: i64 = sr.y;
+                const bx1: i64 = bx0 + sr.w;
+                const by1: i64 = by0 + sr.h;
+                const ix0 = @max(ax0, bx0);
+                const iy0 = @max(ay0, by0);
+                const ix1 = @min(ax1, bx1);
+                const iy1 = @min(ay1, by1);
+                const iw: u32 = @intCast(@max(0, ix1 - ix0));
+                const ih: u32 = @intCast(@max(0, iy1 - iy0));
+                current_scissor = .{
+                    .offset = .{ .x = @intCast(ix0), .y = @intCast(iy0) },
+                    .extent = .{ .width = iw, .height = ih },
+                };
+                // Start a new draw-range for the new scissor.
+                if (scissor_range_count < 64) {
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count };
+                    scissor_range_count += 1;
+                }
+            },
+            .restore_scissor => {
+                if (scissor_depth > 0) {
+                    scissor_depth -= 1;
+                    current_scissor = scissor_stack[scissor_depth];
+                }
+                // Start a new draw-range for the restored scissor.
+                if (scissor_range_count < 64) {
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count };
+                    scissor_range_count += 1;
+                }
+            },
+            .filled_rect => |r| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, 0);
+                }
+            },
+            .border_rect => |br| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, br.rect, .{}, br.color, 0);
+                }
+            },
+            .glyph => |g| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, g.dst, g.uv, g.color, 1);
+                }
+            },
+            .image_rect => |img| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, img.dst, img.uv, img.tint, 0);
+                }
+            },
         }
     }
     c.vkUnmapMemory(impl.device, impl.quad_vertex_mem);
@@ -1619,11 +2045,8 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     const cb = impl.command_buffer;
     c.vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, impl.quad_pipeline);
 
-    const viewport = c.VkViewport{ .x = 0, .y = 0, .width = W, .height = H,
-        .minDepth = 0, .maxDepth = 1 };
+    const viewport = c.VkViewport{ .x = 0, .y = 0, .width = W, .height = H, .minDepth = 0, .maxDepth = 1 };
     c.vkCmdSetViewport(cb, 0, 1, &viewport);
-    const scissor = c.VkRect2D{ .offset = .{ .x = 0, .y = 0 }, .extent = impl.swapchain_extent };
-    c.vkCmdSetScissor(cb, 0, 1, &scissor);
 
     // Orthographic projection: pixel coords to NDC. Column-major.
     const ortho = [16]f32{
@@ -1633,12 +2056,20 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
         -1,      -1,      0, 1,
     };
     c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &ortho);
-    c.vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS,
-        impl.quad_pipeline_layout, 0, 1, &impl.quad_desc_set, 0, null);
+    c.vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, impl.quad_pipeline_layout, 0, 1, &impl.quad_desc_set, 0, null);
 
     const vb_offset: c.VkDeviceSize = 0;
     c.vkCmdBindVertexBuffers(cb, 0, 1, &impl.quad_vertex_buf, &vb_offset);
-    c.vkCmdDraw(cb, vert_count, 1, 0, 0);
+
+    // Issue one draw call per scissor range (R42).
+    var ri: u32 = 0;
+    while (ri < scissor_range_count) : (ri += 1) {
+        const first = scissor_ranges[ri].first_vert;
+        const last = if (ri + 1 < scissor_range_count) scissor_ranges[ri + 1].first_vert else vert_count;
+        if (last <= first) continue;
+        c.vkCmdSetScissor(cb, 0, 1, &scissor_ranges[ri].scissor);
+        c.vkCmdDraw(cb, last - first, 1, first, 0);
+    }
 }
 
 fn emitQuad(
@@ -1649,15 +2080,25 @@ fn emitQuad(
     color: Color09,
     mode: u32,
 ) void {
-    const px0 = rect.x;             const py0 = rect.y;
-    const px1 = rect.x + rect.w;    const py1 = rect.y + rect.h;
-    const ux0 = uv.x;               const vy0 = uv.y;
-    const ux1 = uv.x + uv.w;        const vy1 = uv.y + uv.h;
+    const px0 = rect.x;
+    const py0 = rect.y;
+    const px1 = rect.x + rect.w;
+    const py1 = rect.y + rect.h;
+    const ux0 = uv.x;
+    const vy0 = uv.y;
+    const ux1 = uv.x + uv.w;
+    const vy1 = uv.y + uv.h;
     const col = [4]u8{ color.r, color.g, color.b, color.a };
-    verts[count.*] = .{ .pos = .{ px0, py0 }, .uv = .{ ux0, vy0 }, .color = col, .mode = mode }; count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode }; count.* += 1;
-    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode }; count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode }; count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py1 }, .uv = .{ ux1, vy1 }, .color = col, .mode = mode }; count.* += 1;
-    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode }; count.* += 1;
+    verts[count.*] = .{ .pos = .{ px0, py0 }, .uv = .{ ux0, vy0 }, .color = col, .mode = mode };
+    count.* += 1;
+    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode };
+    count.* += 1;
+    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode };
+    count.* += 1;
+    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode };
+    count.* += 1;
+    verts[count.*] = .{ .pos = .{ px1, py1 }, .uv = .{ ux1, vy1 }, .color = col, .mode = mode };
+    count.* += 1;
+    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode };
+    count.* += 1;
 }
