@@ -159,9 +159,17 @@ constitution and is a flag for human review.
   Latin + Cyrillic only. No complex shaping.
 - **Two layers:** pure layout (measureWidth, wrap, blockHeight) — fully testable without a
   font; font+atlas layer (stb_truetype backed).
-- **Key types:** `Word`, `Line`, `TextExtent`, `FontMetrics`, `Font`, `GlyphAtlas`
+- **Key types:** `Word`, `Line`, `TextExtent`, `FontMetrics`, `Font`, `GlyphAtlas`, `FontFamily`
 - **Does NOT touch module 03.** Defines its own `TextExtent`. Handoff to layout happens via
   module 07.
+- **R64 — `FontFamily` lives here:** `FontFamily` was moved from `src/app/font_family.zig`
+  into `src/02/types.zig` so that `layoutParagraphEx` can reference it without an upward
+  import (INV-3.4). `src/app/font_family.zig` is now a one-line re-export.
+- **R64 — `layoutParagraphEx`:** 7-param variant of `layoutParagraph` that accepts
+  `family: ?*FontFamily`. When non-null, each codepoint is resolved to the best font in the
+  fallback chain. Unsupported codepoints use `REPLACEMENT_CODEPOINT` (U+FFFD); if that is
+  also absent the glyph is skipped silently. `layoutParagraph` (6 params) remains unchanged
+  and delegates to `layoutParagraphEx(…, null)`. GlyphKey gains `font_id: u8 = 0`.
 
 ### Module 03 — Element store
 - **Goal:** The data-oriented foundation. Parallel arrays, generational handles, parent/child
@@ -203,13 +211,17 @@ constitution and is a flag for human review.
 ### Module 07 — Components
 - **Goal:** Turn `NodeDesc` tree into a live element tree. Map tags to widget kinds, resolve
   classes, write arrays, build elements.
-- **Eleven widget kinds (M4):** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`,
-  `checkbox`, `scrollview`, `image`, `icon`.
+- **Twenty-four widget kinds (M7 Phase 3):** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`,
+  `checkbox`, `scrollview`, `image`, `icon`, `textarea`, `separator`, `radio`, `slider`,
+  `progress_bar`, `spinner`, `tabs`, `tab_item`, `accordion`, `date_picker`, `avatar`, `badge`, `data_table`.
+- **`NONE` constant:** `pub const NONE: u32 = std.math.maxInt(u32)` — sentinel for "no element" used in `focused_idx` and similar u32 index fields. Do NOT redeclare a local `const NONE` inside functions; use the module-level constant.
 - **`Scene`** owns the `ElementStore` AND all parallel arrays: `kind[]`, `style[]`, `text[]`,
   `_button_state[]`, `_input_state[]`, `_dropdown_state[]`, `_checkbox_state[]`,
-  `_scroll_state[]`, `_queued_callbacks`, `_pseudo[]`, `_image_state[]` (INV-3.1: no per-widget heap objects).
-- **Focus state:** `focused_idx: u32` (maxInt(u32) = no focus) + `focusable_indices: []u32`
-  rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox (B2).
+  `_scroll_state[]`, `_queued_callbacks`, `_pseudo[]`, `_image_state[]`, `_selection[]`, `_textarea_state[]`, `_radio_state[]`, `_slider_state[]`, `_progress_state[]`, `_tabs_state[]`, `_accordion_state[]` (INV-3.1: no per-widget heap objects).
+- **`Scene.frame_count: u64`** — animation frame counter, set by the app layer each frame.
+  `buildDrawList` reads this for `progress_bar` indeterminate animation and `spinner` rotation.
+- **Focus state:** `focused_idx: u32` (NONE = no focus) + `focusable_indices: []u32`
+  rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox, textarea, radio, slider, accordion (M7 Phase 2 adds accordion).
 - **Two passes:** `instantiate` (no font, fully testable), then `measurePass` (font-dependent,
   fills `LayoutNode.measured`). **R60:** `measurePass` takes `*FontFamily` instead of `*Font`;
   uses `family.face(style.font_bold, style.font_italic)` per element.
@@ -219,6 +231,16 @@ constitution and is a flag for human review.
 - **R40 — Pseudo-state:** `PseudoState` parallel array `_pseudo[]`; `setPseudo(idx, state)` marks dirty.
 - **R43 — Image state:** `ImageState` parallel array `_image_state[]`; `setImage(idx, id)` / `setImageTint(idx, color)`.
 - **Style fields (M4):** `ComputedStyle` gains `truncate: bool`, `opacity: f32`, `shadow_blur: f32`, `shadow_offset_x/y: f32`, `shadow_color: Color`; resolved by `resolveClasses` from Tailwind `truncate`/`opacity-*`/`shadow-*` classes.
+- **R71 — Radio state:** `RadioState` parallel array `_radio_state[]`. `group_id: u16` computed via `hashGroupName` from the `group=` attribute. `selectRadio(idx)` deselects all others in the same group. `selectNextInGroup`/`selectPrevInGroup` cycle selection.
+- **R72 — Slider state:** `SliderState` parallel array `_slider_state[]`. `min`/`max`/`step`/`value` parsed from attributes at instantiation. `setSliderValue` applies step-snapping via `snapToStep`.
+- **R73 — Progress bar / spinner:** `ProgressState` parallel array `_progress_state[]`. `setProgress(idx, value)` updates `value` (0.0–1.0); `setIndeterminate(idx, bool)` enables the moving animation band. `spinner` kinds have no extra state — they animate purely from `scene.frame_count`.
+- **R76 — Tabs:** `TabsState` parallel array `_tabs_state[]`. `selectTab(idx, tab_i)` sets `active_idx`; all tab panels' `_hidden` bits are updated accordingly. `tab_count` is set at instantiation by counting `tab_item` children.
+- **R77 — Accordion:** `AccordionState` parallel array `_accordion_state[]`. `toggleAccordion(idx)` flips `open`; the body child's `_hidden` bit follows. `isAccordionOpen(idx)` for read access.
+- **R78 — Date Picker (M7 Phase 3):** `DatePickerState` parallel array `_date_picker_state[]`. `datePickerStateOf(idx)` → `*DatePickerState`. `setDateValue(idx, v)` / `getDateValue(idx)` for programmatic get/set. `openCalendar(idx)` / `closeCalendar(idx)` toggle the popup. `disabled=` attribute sets initial state; `value="YYYY-MM-DD"` sets initial date. Helper `parseDateStr` parses ISO dates.
+- **R7B — Avatar + Badge (M7 Phase 3):** `AvatarState` parallel array `_avatar_state[]`. `avatarStateOf(idx)` → `*AvatarState`. `setAvatarImage(idx, image_id)` / `setAvatarInitials(idx, initials)`. `BadgeState` parallel array `_badge_state[]`. `badgeStateOf(idx)` → `*BadgeState`. `BadgeState` fields: `text: [8]u8` (NUL-terminated display text) and `color: BadgeColor` (`.default`/`.success`/`.warning`/`.error_c`). Avatar background color is deterministic from first initial — uses 4 semantic tokens (accent/ok/warn/err), NOT hex literals (INV-4.3). `size=` attribute sets pixel size of avatar.
+- **R7C — Tooltip (M7 Phase 3):** `_tooltip[]` is `[]?[]const u8` — `null` means no tooltip. `tooltipOf(idx)` → `?[]const u8`. `setTooltip(idx, text)` assigns text. `tooltip=` attribute on any element sets it at instantiation. `TooltipManager` in `src/app/tooltip.zig` handles hover-delay logic (500 ms) and overlay rendering.
+- **R7D — Context Menu (M7 Phase 3):** `_context_menu_idx[]` is `[]u8` — `0xFF` means no menu. `contextMenuIdxOf(idx)` → `u8`. `setContextMenuIdx(idx, menu_idx)` assigns a registered menu. `ContextMenuManager` in `src/app/context_menu.zig` handles registration, right-click popup, and overlay rendering.
+- **R79 — Data Table (M7 Phase 3):** `DataTableState` parallel array `_table_state[]`. `tableStateOf(idx)` → `*DataTableState`. `setTableData(idx, rows)` sets the data source (`DataTableRows` with `row_ptr: *anyopaque`, `row_size: usize`, `row_count: u32`, and `cell_fn: CellTextFn`). `CellTextFn = *const fn(row_ptr: *anyopaque, col: u8, buf: []u8) u8` — receives pointer to the specific row, writes text into `buf`, returns byte count. Compute row N's pointer via `@ptrCast(@as([*]u8, @ptrCast(rows.row_ptr)) + N * rows.row_size)`. `setTableColumns(idx, columns)` defines column headers/widths. `sortTable(idx, col)` toggles sort direction and rebuilds `sorted_indices` using `std.ArrayListUnmanaged(u32)`. Virtualized rendering: only visible rows emitted by `buildDrawList`.
 
 ### Module 08 — Schema forms
 - **Goal:** JSON Schema (runtime) → working form. Walk schema → `FormModel`, map fields to
@@ -237,6 +259,26 @@ constitution and is a flag for human review.
 - **R45 — `applyOpacity(col, factor)`:** Multiplies `col.a` by `factor`; called for every color emitted when `effective_alpha < 1.0`.
 - **R46 — `emitShadow(...)`:** Emits 5 concentric `filled_rect` commands before the element background; skipped when `style.shadow_blur == 0`.
 - **R60 — Font variants (bold/italic):** `buildDrawList` now receives `family: *FontFamily` instead of `font: *Font`. Call `family.face(style.font_bold, style.font_italic)` per element before `emitGlyphs`. `computeTextX` has no style context — uses `.variant = .regular`.
+- **R62 — Text selection:** `TextSelection { anchor: u32, active: u32 }` stored in `Scene._selection[]`. `selectionOf(idx)` returns `*TextSelection`. Selection highlight rendered between border (step 2) and text glyphs (step 3) in `buildDrawList` as a `filled_rect` using `tokens.accent` with `a = 80`. Glyph matching uses `g.byte_offset` from `PositionedGlyph`. `hitTestText` maps mouse_x → byte offset by finding the glyph whose midpoint is closest. `handleTextKey` handles keyboard navigation for read-only `.text` elements.
+- **R63 — Textarea:** Adds `.textarea` WidgetKind (12th kind). `TextareaState` parallel array `_textarea_state[]`; `textareaStateOf(idx)` returns `*TextareaState`. Content is stored in `InputState.text`; `TextareaState.line_starts` is a `[]u32` of byte offsets of each line's first character (rebuilt by `rebuildLineStarts` in app.zig after every mutation). `buildDrawList` emits background/border, `set_scissor`, per-line glyphs + selection highlights, cursor rect, `restore_scissor`; does NOT push children. App layer adds `handleTextareaKey` (handles Enter, Up/Down; delegates other keys to `handleInputKey`) and standalone helpers `rebuildLineStarts`, `taLineOfByte`, `scrollToCursor`. Focusable kinds updated to include `.textarea`. `setFocus` activates/deactivates `InputState.active` for `.textarea` the same as `.input`.
+- **R64 — Font fallback:** `buildDrawList` calls to `layoutParagraph` updated to
+  `layoutParagraphEx(…, scene.font_family)`. Fallback glyphs are stored in atlas under
+  `font_id = 1+idx` — `emitGlyphs` looks up with the primary font's key only (font_id=0);
+  full fallback rendering in emitGlyphs is a post-v1 enhancement.
+- **R70 — Polished checkbox (M7 Phase 1):** Box size = `style.font_size`. Box background = `tokens.accent` when checked, `tokens.bg_surface` otherwise. Border = `tokens.border_strong` on hover, `tokens.border_default` otherwise. Checkmark rendered as two `filled_rect` tick strokes (horizontal + vertical) in `tokens.accent_text`.
+- **R7A — Separator (M7 Phase 1):** No special rendering case needed. `defaultStyleFor(.separator)` sets `background = tokens.border_default`, and the existing "emit background if a > 0" path in `buildDrawList` handles it automatically.
+- **R71 — Radio (M7 Phase 1):** Three-layer rendering: outer ring (`tokens.border_default` filled circle), inner fill (`tokens.bg_surface` inset by 2 px to create ring appearance), accent dot (`tokens.accent`) when `rs.selected`. All with `effective_alpha`.
+- **R72 — Slider (M7 Phase 1):** Three-layer rendering: 4 px tall track (`tokens.border_default`), filled portion (`tokens.accent`, width = `track_w * t`), circular thumb (`tokens.accent`, radius = `font_size * 0.5`; `tokens.accent_hover` when dragging). Edge case: `range = max - min`; if `range <= 0` then `t = 0`.
+
+- **R73 — Progress bar / spinner (M7 Phase 2):** `progress_bar` renders a track + fill; when `indeterminate`, a moving 40% band animates using `scene.frame_count % 120`. `spinner` renders 8 tick marks at angles 0–315°; visible mark rotates using `scene.frame_count % 8`. Animation reads from `Scene.frame_count` (NOT a buildDrawList parameter — the app sets `scene.frame_count` before each call).
+- **R74 — Toast (M7 Phase 2):** `ToastManager` in `src/app/toast.zig`. `init(overlay)` allocates an overlay slot. `show(message, kind, duration_ms, now_ms)` enqueues a toast. `tick(now_ms, w, h, tokens, font, atlas, overlay, alloc)` expires old toasts, builds draw commands, writes to the overlay slot. Max 4 simultaneous toasts. Memory: `current_cmds: ?[]DrawCommand` freed at start of each `tick`.
+- **R75 — Modal dialog (M7 Phase 2):** `DialogManager` in `src/app/dialog.zig`. `init(overlay)` allocates an overlay slot. `open(content_idx, scene)` shows backdrop + focus trap. `close(scene)` restores focus. `buildOverlay(w, h, tokens, overlay, alloc)` emits semi-transparent backdrop + panel background.
+- **R76 — Tabs (M7 Phase 2):** `tabs` renders a tab bar along the top from `tab_item` children's `_text` labels. Active panel is shown; others have their hidden bit set. Clicking a tab bar button calls `scene.selectTab`. Tabs click handling is NOT in `focusable_indices` — it is handled in `app.zig`'s mouse press path.
+- **R77 — Accordion (M7 Phase 2):** `accordion` renders its header child (first child) with a chevron (▶/▼) prepended. Clicking the header toggles the body child (second child) visibility via `scene.toggleAccordion`. The accordion header is in `focusable_indices`.
+- **R78 — Date Picker (M7 Phase 3):** Styled input rect + border + date string text. Popup calendar rendering deferred to later milestone.
+- **R7B — Avatar (M7 Phase 3):** Image mode: `ImageCmd` with `dst`/`uv`/`tint` fields. Initials mode: circle background (`initialsColor` from char modulo 8-color palette) + initials text + border.
+- **R79 — Badge (M7 Phase 3):** Pill `filled_rect` + count text. Background uses `tokens.err` when no explicit color set. Zero count renders as empty string.
+- **R79 — Data Table (M7 Phase 3):** `set_scissor` + header row (column headers, dividers) + virtualized data rows + `restore_scissor`. Only `visible_count = ceil(view_h / row_height) + 1` rows emitted per frame.
 
 ### App layer — Milestone 1 (src/app/)
 - **Goal:** Single `App.run()` entry point that owns and drives all modules. Wires together
@@ -246,9 +288,10 @@ constitution and is a flag for human review.
 - **Init order (must be exact):** Platform → VulkanBackend → initQuadPipeline → FontFamily →
   GlyphAtlas → GpuAtlas → Scene. Deinit is exact reverse.
 - **R60:** `AppOptions` gains `bold_font_path` / `italic_font_path` (both optional). `AppInner`
-  holds `font_family: FontFamily` instead of `font: Font`. `FontFamily` is defined in
-  `src/app/font_family.zig`; its `face(bold, italic)` method returns `*Font` with fallback to
-  regular when a variant is not loaded.
+  holds `font_family: FontFamily` instead of `font: Font`. **R64:** `FontFamily` is now
+  defined in `src/02/types.zig` (moved from `src/app/font_family.zig` to avoid upward
+  import); `src/app/font_family.zig` re-exports it. `FontFamily.face(bold, italic)` returns
+  `*Font` with fallback to regular. `FontFamily.addFallback(ttf)` registers a fallback font.
 - **Frame loop order:** poll events → drain EventQueue → apply pending resize → beginFrame →
   measurePass → re-upload GPU atlas if generation changed → layout solve → buildDrawList →
   clear → drawFrame → endFrame.
@@ -268,6 +311,11 @@ constitution and is a flag for human review.
   apply pending resize → beginFrame → measurePass → re-upload GPU atlas if generation changed
   → layout solve → **`scene.fireQueuedCallbacks()`** → buildDrawList → clear → drawFrame →
   endFrame → clear dirty bits.
+- **R73–R77 — Animated elements (M7 Phase 2):** `AppInner` increments `self.scene.frame_count` (wrapping `+%=`) and sets `self.scene.frame_time_ms` each frame before calling `buildDrawList`. `hasAnimatedElements(scene, tooltip)` scans `_kind[]` and `_progress_state[]` to detect spinner or indeterminate progress bars AND checks `tooltip.isPending()` (tooltip hover delay); when found, the idle check calls `pollEvents()` (non-blocking) instead of `waitEvents()` so the display refreshes each frame.
+- **R74 — `ToastManager` (`src/app/toast.zig`):** Wire into app: `var toasts = ToastManager.init(&overlay); defer toasts.deinit(alloc);`. Call `toasts.tick(now_ms, w, h, tokens, font, &atlas, &overlay, alloc)` once per frame after `buildDrawList`. Internally frees its own draw-command slice at start of each tick.
+- **R75 — `DialogManager` (`src/app/dialog.zig`):** Wire into app: `var dialog = DialogManager.init(&overlay); defer dialog.deinit(alloc);`. Call `dialog.buildOverlay(w, h, tokens, &overlay, alloc)` each frame when open. `dialog.open(content_idx, &scene)` hides the rest of the scene and traps focus; `dialog.close(&scene)` restores it.
+- **R7C — `TooltipManager` (`src/app/tooltip.zig`):** Fields in `AppInner`: `tooltip_manager: TooltipManager = .{}`. `deinit` called in `AppInner.deinit`. Mouse move handler calls `onHover(idx, text, now_ms)` / `onLeave(idx)` based on hit-testing `_tooltip[]`. `isPending()` checked in `hasAnimatedElements`. `tick` called once per frame to build overlay.
+- **R7D — `ContextMenuManager` (`src/app/context_menu.zig`):** Fields in `AppInner`: `context_menu_manager: ContextMenuManager = .{}`. `deinit` called in `AppInner.deinit`. Right-click (`mb.button == .right`) opens menu via `openAt(menu_idx, x, y, &overlay, tokens, &font_family.regular, &atlas_cpu, gpa)` when `contextMenuIdxOf(hit) != 0xFF`.
 - **Viewport constraints:** stored as `AppInner.viewport_constraints: Constraints` and updated
   on every resize. Passed to `layout.solve` each frame. No `LayoutEngine.setViewport` method
   exists in module 04 — the App layer owns this state.
@@ -288,6 +336,9 @@ constitution and is a flag for human review.
 2. Run `zig test NN.acceptance_test.zig` as your feedback loop.
 3. Do NOT implement anything listed under "Non-goals" in the spec.
 4. Go through `NN.checklist.md` line by line. Tick boxes only when you can verify them.
+5. Update `docs/requirements/DEMO_APP.md` to include the new feature in the appropriate
+   Showcase screen (or add a new screen if the feature is too large to fit an existing one).
+   A feature with no demo coverage is invisible to the next agent and will break silently.
 
 ### Merge rule for style layering (module 07)
 ```
@@ -395,6 +446,7 @@ A module is done when:
 - `zig test` against its `acceptance_test.zig` passes with zero failures.
 - `zig test` against any unit test file (`src/NN/NN_test.zig`) passes with zero failures.
 - Every checkbox in its `checklist.md` is ticked.
+- `docs/requirements/DEMO_APP.md` has been updated to cover the new feature.
 - Module 01 additionally requires a manual visual confirmation on both Windows and Linux.
 
 ### 11.1 Frozen acceptance tests vs. agent-written unit tests

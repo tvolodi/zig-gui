@@ -76,7 +76,16 @@ pub const AtlasRect = struct { x: u32, y: u32, w: u32, h: u32 };
 /// R60 — Discriminant for bold/italic atlas cache slots.
 pub const FontVariant = enum(u8) { regular, bold, italic };
 
-pub const GlyphKey = struct { codepoint: u21, px: u16, variant: FontVariant = .regular };
+/// R64 — Rendered when no font in the fallback chain covers a codepoint.
+pub const REPLACEMENT_CODEPOINT: u21 = 0xFFFD;
+
+pub const GlyphKey = struct {
+    codepoint: u21,
+    px: u16,
+    variant: FontVariant = .regular,
+    /// R64: 0 = primary font, 1–4 = fallback index + 1.
+    font_id: u8 = 0,
+};
 
 /// Convert a font size in pixels to the integer key used in GlyphKey.
 /// Rounds to the nearest integer to minimize rasterization artifacts.
@@ -193,6 +202,71 @@ pub const Font = struct {
         _ = px;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
+
+    /// R64 — Return the stb_truetype glyph index for `codepoint`, or 0 if absent.
+    pub fn glyphIndex(self: *Font, codepoint: u21) i32 {
+        _ = self;
+        _ = codepoint;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+};
+
+// ===========================================================================
+// R64 — FontFamily: three-slot font container + fallback chain.
+// ===========================================================================
+
+pub const FontFamily = struct {
+    regular: Font,
+    bold: ?Font,
+    italic: ?Font,
+    fallbacks: [4]?Font,
+    fallback_count: u8,
+    gpa: std.mem.Allocator,
+
+    pub fn init(
+        gpa: std.mem.Allocator,
+        regular_ttf: []const u8,
+        bold_ttf: ?[]const u8,
+        italic_ttf: ?[]const u8,
+    ) FontError!FontFamily {
+        _ = gpa;
+        _ = regular_ttf;
+        _ = bold_ttf;
+        _ = italic_ttf;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn deinit(self: *FontFamily) void {
+        _ = self;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn face(self: *FontFamily, bold: bool, italic: bool) *Font {
+        _ = self;
+        _ = bold;
+        _ = italic;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn addFallback(self: *FontFamily, ttf: []const u8) !void {
+        _ = self;
+        _ = ttf;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn fontForCodepoint(self: *FontFamily, primary: *Font, codepoint: u21) ?*Font {
+        _ = self;
+        _ = primary;
+        _ = codepoint;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn fontIdForCodepoint(self: *FontFamily, primary: *Font, codepoint: u21) u8 {
+        _ = self;
+        _ = primary;
+        _ = codepoint;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
 };
 
 // ===========================================================================
@@ -208,6 +282,8 @@ pub const PositionedGlyph = struct {
     dest_h: f32,
     /// Location of the glyph in the atlas.
     uv: AtlasRect,
+    /// R62 — byte offset of this glyph's codepoint in the source string.
+    byte_offset: u32,
 };
 
 pub const Paragraph = struct {
@@ -232,5 +308,25 @@ pub fn layoutParagraph(
     _ = str;
     _ = px;
     _ = max_width;
+    @compileError("not implemented — implement per spec.md; do not change this signature");
+}
+
+/// R64 — Like `layoutParagraph` but with font-family fallback support.
+pub fn layoutParagraphEx(
+    gpa: std.mem.Allocator,
+    font: *Font,
+    atlas: *GlyphAtlas,
+    str: []const u8,
+    px: f32,
+    max_width: f32,
+    family: ?*FontFamily,
+) FontError!Paragraph {
+    _ = gpa;
+    _ = font;
+    _ = atlas;
+    _ = str;
+    _ = px;
+    _ = max_width;
+    _ = family;
     @compileError("not implemented — implement per spec.md; do not change this signature");
 }

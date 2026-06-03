@@ -59,14 +59,14 @@ pub const ParseErrorKind = enum {
 
 /// Source location within a `.ui` file (1-based, matching editor conventions). (R54)
 pub const SourceLoc = struct {
-    line:   u32,  // 1-based line number
-    column: u32,  // 1-based byte column on that line
+    line: u32, // 1-based line number
+    column: u32, // 1-based byte column on that line
 };
 
 /// Diagnostic emitted by `parse` on failure. (R54)
 pub const ParseDiagnostic = struct {
-    err:     ParseErrorKind,
-    loc:     SourceLoc,
+    err: ParseErrorKind,
+    loc: SourceLoc,
     /// A human-readable description of the error. Points into static string storage (no allocation).
     message: []const u8,
 };
@@ -83,7 +83,7 @@ const Parser = struct {
     src: []const u8,
     pos: usize,
     alloc: std.mem.Allocator,
-    line: u32 = 1,   // NEW (R54): current line (1-based)
+    line: u32 = 1, // NEW (R54): current line (1-based)
     column: u32 = 1, // NEW (R54): current byte column (1-based)
 
     fn init(alloc: std.mem.Allocator, src: []const u8) Parser {
@@ -108,8 +108,8 @@ const Parser = struct {
         const c = p.src[p.pos];
         p.pos += 1;
         if (c == '\n') {
-            p.line   += 1;
-            p.column  = 1;
+            p.line += 1;
+            p.column = 1;
         } else {
             p.column += 1;
         }
@@ -118,8 +118,7 @@ const Parser = struct {
 
     fn expect(p: *Parser, c: u8, diag: ?*ParseDiagnostic) InternalParseError!void {
         if (p.pos >= p.src.len or p.src[p.pos] != c) {
-            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken,
-                "unexpected character; expected '<', '/', '>', '=', or a name");
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken, "unexpected character; expected '<', '/', '>', '=', or a name");
             return error.UnexpectedToken;
         }
         _ = p.consume();
@@ -132,8 +131,7 @@ const Parser = struct {
             _ = p.consume();
         }
         if (p.pos == start) {
-            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken,
-                "unexpected character; expected '<', '/', '>', '=', or a name");
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken, "unexpected character; expected '<', '/', '>', '=', or a name");
             return error.UnexpectedToken;
         }
         return p.src[start..p.pos];
@@ -160,8 +158,8 @@ const Parser = struct {
     /// Construct a ParseDiagnostic from current parser state. (R54)
     fn makeDiag(p: *const Parser, err: ParseErrorKind, message: []const u8) ParseDiagnostic {
         return .{
-            .err     = err,
-            .loc     = .{ .line = p.line, .column = p.column },
+            .err = err,
+            .loc = .{ .line = p.line, .column = p.column },
             .message = message,
         };
     }
@@ -267,7 +265,7 @@ fn isNameChar(c: u8) bool {
 /// Backward-compatible 2-arg version (used by existing tests). Internally uses null diag.
 pub fn parse(
     allocator: std.mem.Allocator,
-    source:    []const u8,
+    source: []const u8,
 ) ParseError!NodeDesc {
     return parseWithDiag(allocator, source, null);
 }
@@ -278,8 +276,8 @@ pub fn parse(
 /// One function, two uses: build-time codegen and hot-reload (INV-4.4).
 pub fn parseWithDiag(
     allocator: std.mem.Allocator,
-    source:    []const u8,
-    diag:      ?*ParseDiagnostic,
+    source: []const u8,
+    diag: ?*ParseDiagnostic,
 ) ParseError!NodeDesc {
     var p = Parser.init(allocator, source);
     p.skipWs();
@@ -328,11 +326,11 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
     if (std.mem.eql(u8, cls, "hidden")) {
         r.layout.display = .none;
 
-    // --- R51 Group B: Overflow ---
+        // --- R51 Group B: Overflow ---
     } else if (std.mem.eql(u8, cls, "overflow-hidden")) {
         r.layout.overflow = .hidden;
 
-    // --- Layout display ---
+        // --- Layout display ---
     } else if (std.mem.eql(u8, cls, "flex")) {
         r.layout.display = .flex;
     } else if (std.mem.eql(u8, cls, "grid")) {
@@ -473,7 +471,7 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
 
         // --- R51 Group D: Margin / horizontal centering ---
     } else if (std.mem.eql(u8, cls, "mx-auto")) {
-        r.layout.margin.left  = .auto;
+        r.layout.margin.left = .auto;
         r.layout.margin.right = .auto;
     } else if (std.mem.startsWith(u8, cls, "m-")) {
         if (parseUint(cls[2..])) |n| {
@@ -483,23 +481,23 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
     } else if (std.mem.startsWith(u8, cls, "mx-")) {
         if (parseUint(cls[3..])) |n| {
             const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
-            r.layout.margin.left  = v;
+            r.layout.margin.left = v;
             r.layout.margin.right = v;
         }
     } else if (std.mem.startsWith(u8, cls, "my-")) {
         if (parseUint(cls[3..])) |n| {
             const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
-            r.layout.margin.top    = v;
+            r.layout.margin.top = v;
             r.layout.margin.bottom = v;
         }
     } else if (std.mem.startsWith(u8, cls, "mt-")) {
-        if (parseUint(cls[3..])) |n| r.layout.margin.top    = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        if (parseUint(cls[3..])) |n| r.layout.margin.top = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
     } else if (std.mem.startsWith(u8, cls, "mr-")) {
-        if (parseUint(cls[3..])) |n| r.layout.margin.right  = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        if (parseUint(cls[3..])) |n| r.layout.margin.right = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
     } else if (std.mem.startsWith(u8, cls, "mb-")) {
         if (parseUint(cls[3..])) |n| r.layout.margin.bottom = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
     } else if (std.mem.startsWith(u8, cls, "ml-")) {
-        if (parseUint(cls[3..])) |n| r.layout.margin.left   = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        if (parseUint(cls[3..])) |n| r.layout.margin.left = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
 
         // --- R51 Group E: Flex modifiers ---
     } else if (std.mem.eql(u8, cls, "shrink-0")) {
@@ -510,11 +508,16 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.layout.flex_grow = 1;
     } else if (std.mem.eql(u8, cls, "shrink")) {
         r.layout.flex_shrink = 1;
-    } else if (std.mem.eql(u8, cls, "self-auto"))    { r.layout.align_self = .auto;
-    } else if (std.mem.eql(u8, cls, "self-start"))   { r.layout.align_self = .start;
-    } else if (std.mem.eql(u8, cls, "self-center"))  { r.layout.align_self = .center;
-    } else if (std.mem.eql(u8, cls, "self-end"))     { r.layout.align_self = .end;
-    } else if (std.mem.eql(u8, cls, "self-stretch")) { r.layout.align_self = .stretch;
+    } else if (std.mem.eql(u8, cls, "self-auto")) {
+        r.layout.align_self = .auto;
+    } else if (std.mem.eql(u8, cls, "self-start")) {
+        r.layout.align_self = .start;
+    } else if (std.mem.eql(u8, cls, "self-center")) {
+        r.layout.align_self = .center;
+    } else if (std.mem.eql(u8, cls, "self-end")) {
+        r.layout.align_self = .end;
+    } else if (std.mem.eql(u8, cls, "self-stretch")) {
+        r.layout.align_self = .stretch;
 
         // --- R51 Group F: Grid span ---
     } else if (std.mem.startsWith(u8, cls, "col-span-")) {
@@ -654,7 +657,7 @@ pub fn parseHexColor(s: []const u8) ?theme.Color {
             return theme.Color{
                 .r = @intCast((rgba >> 24) & 0xFF),
                 .g = @intCast((rgba >> 16) & 0xFF),
-                .b = @intCast((rgba >> 8)  & 0xFF),
+                .b = @intCast((rgba >> 8) & 0xFF),
                 .a = @intCast(rgba & 0xFF),
             };
         },

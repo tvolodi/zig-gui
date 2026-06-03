@@ -479,6 +479,7 @@ pub const Form = struct {
         for (self.model, 0..) |field, i| {
             const tag: []const u8 = switch (field.kind) {
                 .input => "Input",
+                .textarea => "Textarea",
                 .dropdown => "Dropdown",
                 .button => "Button",
                 .card => "Card",
@@ -489,6 +490,18 @@ pub const Form = struct {
                 .scrollview => "ScrollView",
                 .image => "Image",
                 .icon => "Icon",
+                .separator => "Separator",
+                .radio => "Radio",
+                .slider => "Slider",
+                .progress_bar => "ProgressBar",
+                .spinner => "Spinner",
+                .tabs => "Tabs",
+                .tab_item => "TabItem",
+                .accordion => "Accordion",
+                .date_picker => "DatePicker",
+                .avatar => "Avatar",
+                .badge => "Badge",
+                .data_table => "DataTable",
             };
             children[i] = comp.NodeDesc{ .tag = tag, .classes = "" };
         }

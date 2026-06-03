@@ -11,7 +11,6 @@ const store_mod = @import("../03/types.zig");
 const theme_mod = @import("../05/types.zig");
 const comp_mod = @import("../07/types.zig");
 const image_atlas_mod = @import("../app/image_atlas.zig");
-const font_family_mod = @import("../app/font_family.zig");
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -305,12 +304,14 @@ const StackEntry = union(enum) {
 
 /// Walk a solved Scene depth-first pre-order and emit a flat DrawCommand list.
 /// Caller owns the returned slice; free with `alloc`.
+/// `font` is the fallback face when scene.font_family is null (acceptance test path).
+/// When scene.font_family is set (app path, R60), per-element bold/italic face is selected.
 pub fn buildDrawList(
     alloc: std.mem.Allocator,
     scene: *Scene,
     atlas: *GlyphAtlas,
     image_atlas: *const ImageAtlas,
-    family: *font_family_mod.FontFamily,
+    font: *text_mod.Font,
     tokens: Tokens,
 ) error{OutOfMemory}![]DrawCommand {
     var list: std.ArrayListUnmanaged(DrawCommand) = .empty;
@@ -446,6 +447,141 @@ pub fn buildDrawList(
             continue;
         }
 
+        // R63: Handle textarea — inline multi-line text rendering with scissor.
+        if (kind == .textarea) {
+            // 1. Background and border.
+            if (style.shadow_blur > 0) try emitShadow(&list, alloc, computed, style, effective_alpha);
+            if (style.background.a > 0) {
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = toRect09(computed),
+                    .color = toColor09(applyOpacity(style.background, effective_alpha)),
+                    .radius = style.radius,
+                } });
+            }
+            if (style.border_width > 0) {
+                try list.append(alloc, .{ .border_rect = .{
+                    .rect = toRect09(computed),
+                    .color = toColor09(applyOpacity(style.border_color, effective_alpha)),
+                    .width = style.border_width,
+                } });
+            }
+
+            // 2. Emit scissor for the textarea's rect.
+            try list.append(alloc, .{ .set_scissor = rectToScissor(computed) });
+
+            const ts = scene.textareaStateOf(id.index);
+            const inp = scene.inputStateOf(id.index);
+            const text_content = inp.text.items;
+            const ta_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+            const fm = ta_font.metrics(style.font_size);
+            const line_h = fm.ascent + fm.descent + fm.line_gap;
+
+            // Update container_h from layout.
+            ts.container_h = computed.h;
+
+            // Ensure at least one line-start entry (line 0 = byte 0).
+            const line_count: usize = if (ts.line_starts.items.len > 0) ts.line_starts.items.len else 1;
+            ts.content_h = @as(f32, @floatFromInt(line_count)) * line_h;
+
+            // Selection range for later use.
+            const sel = scene.selectionOf(id.index).*;
+            const sel_r = sel.range();
+
+            // 3. For each line: emit glyph commands + selection highlights.
+            const num_lines = ts.line_starts.items.len;
+            if (num_lines > 0) {
+                for (ts.line_starts.items, 0..) |line_start, li| {
+                    const line_end: u32 = if (li + 1 < num_lines)
+                        ts.line_starts.items[li + 1] -| 1 // exclude the '\n'
+                    else
+                        @intCast(text_content.len);
+
+                    const line_y = computed.y + @as(f32, @floatFromInt(li)) * line_h - ts.scroll_y;
+                    // Cull lines outside the visible area.
+                    if (line_y + line_h < computed.y or line_y > computed.y + computed.h) continue;
+
+                    const effective_start = if (line_start <= @as(u32, @intCast(text_content.len))) line_start else @as(u32, @intCast(text_content.len));
+                    const effective_end = if (line_end <= @as(u32, @intCast(text_content.len))) line_end else @as(u32, @intCast(text_content.len));
+                    if (effective_start > effective_end) continue;
+                    const line_text = text_content[effective_start..effective_end];
+
+                    const line_rect = store_mod.Rect{
+                        .x = computed.x,
+                        .y = line_y,
+                        .w = computed.w,
+                        .h = line_h,
+                    };
+
+                    // 3a. Selection highlight for this line.
+                    if (!sel.isEmpty() and line_text.len > 0 and
+                        sel_r.lo < effective_end + 1 and sel_r.hi > effective_start)
+                    {
+                        const para_opt = text_mod.layoutParagraphEx(alloc, ta_font, atlas, line_text, style.font_size, 1e6, scene.font_family) catch null;
+                        if (para_opt) |para| {
+                            defer alloc.free(para.glyphs);
+                            var run_start_x: ?f32 = null;
+                            var run_end_x: f32 = 0;
+                            for (para.glyphs) |g| {
+                                const abs_off = g.byte_offset + effective_start;
+                                const in_sel = abs_off >= sel_r.lo and abs_off < sel_r.hi;
+                                if (in_sel) {
+                                    if (run_start_x == null) run_start_x = g.dest_x;
+                                    run_end_x = g.dest_x + g.dest_w;
+                                } else if (run_start_x != null) {
+                                    try list.append(alloc, .{ .filled_rect = .{
+                                        .rect = .{ .x = computed.x + run_start_x.?, .y = line_y, .w = run_end_x - run_start_x.?, .h = line_h },
+                                        .color = .{ .r = tokens.accent.r, .g = tokens.accent.g, .b = tokens.accent.b, .a = 80 },
+                                        .radius = 0,
+                                    } });
+                                    run_start_x = null;
+                                }
+                            }
+                            if (run_start_x != null) {
+                                try list.append(alloc, .{ .filled_rect = .{
+                                    .rect = .{ .x = computed.x + run_start_x.?, .y = line_y, .w = run_end_x - run_start_x.?, .h = line_h },
+                                    .color = .{ .r = tokens.accent.r, .g = tokens.accent.g, .b = tokens.accent.b, .a = 80 },
+                                    .radius = 0,
+                                } });
+                            }
+                        }
+                    }
+
+                    // 3b. Glyph commands for this line.
+                    if (line_text.len > 0) {
+                        try emitGlyphs(&list, alloc, id, line_text, line_rect, &style, atlas, ta_font, effective_alpha);
+                    }
+                }
+            }
+
+            // 4. Cursor (thin vertical line, 2px wide).
+            if (inp.active) {
+                const cursor_line = textareaLineOfByte(ts.line_starts.items, inp.cursor);
+                const cl_start = if (cursor_line < ts.line_starts.items.len) ts.line_starts.items[cursor_line] else 0;
+                const cl_end: u32 = if (cursor_line + 1 < ts.line_starts.items.len)
+                    ts.line_starts.items[cursor_line + 1] -| 1
+                else
+                    @intCast(text_content.len);
+                const cl_eff_end = if (cl_end <= @as(u32, @intCast(text_content.len))) cl_end else @as(u32, @intCast(text_content.len));
+                const cl_eff_start = if (cl_start <= @as(u32, @intCast(text_content.len))) cl_start else @as(u32, @intCast(text_content.len));
+                const line_text_for_cursor = if (cl_eff_start <= cl_eff_end) text_content[cl_eff_start..cl_eff_end] else "";
+                const cursor_in_line = if (inp.cursor >= cl_eff_start) inp.cursor - cl_eff_start else 0;
+                const px_u16: u16 = @intFromFloat(style.font_size);
+                const cursor_x = computeTextX(computed.x, line_text_for_cursor, cursor_in_line, px_u16, atlas);
+                const cursor_y = computed.y + @as(f32, @floatFromInt(cursor_line)) * line_h - ts.scroll_y;
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = cursor_x, .y = cursor_y + 2.0, .w = 1.5, .h = line_h - 4.0 },
+                    .color = .{ .r = 30, .g = 30, .b = 30, .a = 220 },
+                    .radius = 0,
+                } });
+            }
+
+            // 5. Restore scissor.
+            try list.append(alloc, .{ .restore_scissor = {} });
+
+            // Textarea has no child widgets — do not push children.
+            continue;
+        }
+
         // R46: Shadow before background.
         if (style.shadow_blur > 0) {
             try emitShadow(&list, alloc, computed, style, effective_alpha);
@@ -469,10 +605,58 @@ pub fn buildDrawList(
             } });
         }
 
+        // 2.5. Selection highlight (R62) — after background/border, before glyph commands.
+        if (kind == .text or kind == .input) {
+            const sel = scene.selectionOf(id.index).*;
+            if (!sel.isEmpty()) {
+                const text_for_sel: []const u8 = blk: {
+                    if (kind == .input) {
+                        const inp_s = scene.inputStateOf(id.index);
+                        if (inp_s.text.items.len == 0) break :blk "";
+                        break :blk inp_s.text.items;
+                    } else {
+                        break :blk scene.textOf(id) orelse "";
+                    }
+                };
+                if (text_for_sel.len > 0) {
+                    const sel_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                    const para_opt = text_mod.layoutParagraphEx(alloc, sel_font, atlas, text_for_sel, style.font_size, 1e6, scene.font_family) catch null;
+                    if (para_opt) |para| {
+                        defer alloc.free(para.glyphs);
+                        const r = sel.range();
+                        var run_start_x: ?f32 = null;
+                        var run_end_x: f32 = 0;
+                        for (para.glyphs) |g| {
+                            const in_sel = g.byte_offset >= r.lo and g.byte_offset < r.hi;
+                            if (in_sel) {
+                                if (run_start_x == null) run_start_x = g.dest_x;
+                                run_end_x = g.dest_x + g.dest_w;
+                            } else if (run_start_x != null) {
+                                try list.append(alloc, .{ .filled_rect = .{
+                                    .rect = .{ .x = computed.x + run_start_x.?, .y = computed.y, .w = run_end_x - run_start_x.?, .h = computed.h },
+                                    .color = .{ .r = tokens.accent.r, .g = tokens.accent.g, .b = tokens.accent.b, .a = 80 },
+                                    .radius = 0,
+                                } });
+                                run_start_x = null;
+                            }
+                        }
+                        // Flush final run.
+                        if (run_start_x != null) {
+                            try list.append(alloc, .{ .filled_rect = .{
+                                .rect = .{ .x = computed.x + run_start_x.?, .y = computed.y, .w = run_end_x - run_start_x.?, .h = computed.h },
+                                .color = .{ .r = tokens.accent.r, .g = tokens.accent.g, .b = tokens.accent.b, .a = 80 },
+                                .radius = 0,
+                            } });
+                        }
+                    }
+                }
+            }
+        }
+
         // 3. Text glyphs
         if (scene.textOf(id)) |str| {
             if (str.len > 0) {
-                const elem_font = family.face(style.font_bold, style.font_italic);
+                const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
                 try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, elem_font, effective_alpha);
             }
         }
@@ -483,22 +667,11 @@ pub fn buildDrawList(
                 // Pseudo-state visual handled via resolveStyle (R40).
             },
             .input => {
-                // Input cursor and selection highlight (R32).
+                // Input cursor (R32). Selection highlight handled by R62 block above.
                 const inp = scene.inputStateOf(id.index);
                 if (inp.active) {
                     const px_u16: u16 = @intFromFloat(style.font_size);
-                    const sel_lo = @min(inp.selection_start, inp.cursor);
-                    const sel_hi = @max(inp.selection_start, inp.cursor);
                     const cursor_x = computeTextX(computed.x, inp.text.items, inp.cursor, px_u16, atlas);
-                    if (sel_lo != sel_hi) {
-                        const sel_x0 = computeTextX(computed.x, inp.text.items, sel_lo, px_u16, atlas);
-                        const sel_x1 = computeTextX(computed.x, inp.text.items, sel_hi, px_u16, atlas);
-                        try list.append(alloc, .{ .filled_rect = .{
-                            .rect = .{ .x = sel_x0, .y = computed.y, .w = sel_x1 - sel_x0, .h = computed.h },
-                            .color = .{ .r = 100, .g = 160, .b = 255, .a = 100 },
-                            .radius = 0,
-                        } });
-                    }
                     try list.append(alloc, .{ .filled_rect = .{
                         .rect = .{ .x = cursor_x, .y = computed.y + 2.0, .w = 1.5, .h = computed.h - 4.0 },
                         .color = .{ .r = 30, .g = 30, .b = 30, .a = 220 },
@@ -507,27 +680,122 @@ pub fn buildDrawList(
                 }
             },
             .checkbox => {
+                // R70 — Polished checkbox: box + checkmark as two FilledRect tick strokes.
                 const st = scene.checkboxStateOf(id.index);
-                const box_size: f32 = @min(computed.w, computed.h) - 4.0;
-                const bx = computed.x + 2.0;
-                const by = computed.y + (computed.h - box_size) / 2.0;
-                const box_color: platform.Color09 = if (st.hovered)
-                    .{ .r = 80, .g = 80, .b = 80, .a = 255 }
-                else
-                    .{ .r = 120, .g = 120, .b = 120, .a = 255 };
+                const S: f32 = style.font_size; // box side length (revised decision)
+                const bx = computed.x;
+                const by = computed.y + (computed.h - S) / 2.0;
+                // Box background: accent when checked, surface otherwise.
+                const bg_col = if (st.checked) tokens.accent else tokens.bg_surface;
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = bx, .y = by, .w = S, .h = S },
+                    .color = toColor09(applyOpacity(bg_col, effective_alpha)),
+                    .radius = 2.0,
+                } });
+                // Box border.
+                const border_col = if (st.hovered) tokens.border_strong else tokens.border_default;
                 try list.append(alloc, .{ .border_rect = .{
-                    .rect = .{ .x = bx, .y = by, .w = box_size, .h = box_size },
-                    .color = box_color,
+                    .rect = .{ .x = bx, .y = by, .w = S, .h = S },
+                    .color = toColor09(applyOpacity(border_col, effective_alpha)),
                     .width = 1.5,
                 } });
                 if (st.checked) {
-                    const m: f32 = box_size * 0.25;
+                    // Vertical stroke of tick (left leg):
                     try list.append(alloc, .{ .filled_rect = .{
-                        .rect = .{ .x = bx + m, .y = by + m, .w = box_size - 2.0 * m, .h = box_size - 2.0 * m },
-                        .color = .{ .r = 40, .g = 130, .b = 220, .a = 255 },
-                        .radius = 1.0,
+                        .rect = .{ .x = bx + S * 0.25, .y = by + S * 0.45, .w = S * 0.15, .h = S * 0.45 },
+                        .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
+                        .radius = 0,
+                    } });
+                    // Horizontal stroke of tick (right leg):
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = bx + S * 0.25, .y = by + S * 0.45, .w = S * 0.55, .h = S * 0.15 },
+                        .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
+                        .radius = 0,
                     } });
                 }
+            },
+            .radio => {
+                // R71 — Radio button: outer ring + inner fill + accent dot if selected.
+                const rs = scene.radioStateOf(id.index);
+                const S: f32 = style.font_size; // circle diameter
+                const cx = computed.x + (computed.w - S) / 2.0;
+                const cy = computed.y + (computed.h - S) / 2.0;
+                const circle_rect = platform.Rect09{ .x = cx, .y = cy, .w = S, .h = S };
+                // Outer ring (filled circle with ring color):
+                const ring_col = if (rs.hovered) tokens.border_strong else tokens.border_default;
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = circle_rect,
+                    .color = toColor09(applyOpacity(ring_col, effective_alpha)),
+                    .radius = S / 2.0,
+                } });
+                // Inner fill (inset by 2px — white/surface fill to create ring appearance):
+                const inner_rect = platform.Rect09{ .x = cx + 2, .y = cy + 2, .w = S - 4, .h = S - 4 };
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = inner_rect,
+                    .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha)),
+                    .radius = (S - 4) / 2.0,
+                } });
+                // Accent dot if selected:
+                if (rs.selected) {
+                    const dot_inset = S * 0.3;
+                    const dot_rect = platform.Rect09{
+                        .x = cx + dot_inset,
+                        .y = cy + dot_inset,
+                        .w = S - dot_inset * 2,
+                        .h = S - dot_inset * 2,
+                    };
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = dot_rect,
+                        .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
+                        .radius = dot_rect.w / 2.0,
+                    } });
+                }
+            },
+            .slider => {
+                // R72 — Slider: track + filled portion + thumb.
+                const ss = scene.sliderStateOf(id.index);
+                const track_h: f32 = 4;
+                const thumb_r: f32 = style.font_size * 0.5;
+                // Track background:
+                const track_rect = platform.Rect09{
+                    .x = computed.x,
+                    .y = computed.y + (computed.h - track_h) / 2.0,
+                    .w = computed.w,
+                    .h = track_h,
+                };
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = track_rect,
+                    .color = toColor09(applyOpacity(tokens.border_default, effective_alpha)),
+                    .radius = track_h / 2.0,
+                } });
+                // Filled portion (left of thumb):
+                const range = ss.max - ss.min;
+                const t = if (range > 0) std.math.clamp((ss.value - ss.min) / range, 0, 1) else 0;
+                const filled_rect = platform.Rect09{
+                    .x = track_rect.x,
+                    .y = track_rect.y,
+                    .w = track_rect.w * t,
+                    .h = track_h,
+                };
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = filled_rect,
+                    .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
+                    .radius = track_h / 2.0,
+                } });
+                // Thumb:
+                const thumb_x = computed.x + computed.w * t;
+                const thumb_rect = platform.Rect09{
+                    .x = thumb_x - thumb_r,
+                    .y = computed.y + (computed.h / 2.0) - thumb_r,
+                    .w = thumb_r * 2,
+                    .h = thumb_r * 2,
+                };
+                const thumb_color = if (ss.dragging) tokens.accent_hover else tokens.accent;
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = thumb_rect,
+                    .color = toColor09(applyOpacity(thumb_color, effective_alpha)),
+                    .radius = thumb_r,
+                } });
             },
             .image, .icon => {
                 // R43: Image/icon rendering.
@@ -544,6 +812,326 @@ pub fn buildDrawList(
                         .tint = toColor09(tint),
                     } });
                 }
+            },
+            .progress_bar => {
+                // R73 — Progress bar: track + fill or indeterminate animation.
+                const ps = scene.progressStateOf(id.index);
+                const track_h = computed.h;
+                // Track background.
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = toRect09(computed),
+                    .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha)),
+                    .radius = track_h / 2.0,
+                } });
+                if (!ps.indeterminate) {
+                    const fill_w = computed.w * std.math.clamp(ps.value, 0.0, 1.0);
+                    if (fill_w > 0) {
+                        try list.append(alloc, .{ .filled_rect = .{
+                            .rect = .{ .x = computed.x, .y = computed.y, .w = fill_w, .h = track_h },
+                            .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
+                            .radius = track_h / 2.0,
+                        } });
+                    }
+                } else {
+                    // Indeterminate: moving 40% fill band.
+                    const phase: f32 = @as(f32, @floatFromInt(scene.frame_count % 120)) / 120.0;
+                    const fill_w = computed.w * 0.4;
+                    const travel = computed.w + fill_w;
+                    const fill_x = computed.x - fill_w + travel * phase;
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = fill_x, .y = computed.y, .w = fill_w, .h = track_h },
+                        .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
+                        .radius = track_h / 2.0,
+                    } });
+                }
+            },
+            .spinner => {
+                // R73 — Spinner: 8 tick marks rotating.
+                const N: u32 = 8;
+                const cx = computed.x + computed.w / 2.0;
+                const cy = computed.y + computed.h / 2.0;
+                const r = computed.w * 0.35;
+                const tw = computed.w * 0.10;
+                const th = computed.w * 0.25;
+                const phase_idx: u32 = @intCast(scene.frame_count % N);
+                var i: u32 = 0;
+                while (i < N) : (i += 1) {
+                    const angle = @as(f32, @floatFromInt(i)) * (std.math.tau / @as(f32, @floatFromInt(N)));
+                    const age: u32 = (i + N - phase_idx) % N;
+                    const a_frac: f32 = @as(f32, @floatFromInt(N - age)) / @as(f32, @floatFromInt(N));
+                    const tick_alpha = effective_alpha * a_frac;
+                    const tx = cx + r * @cos(angle) - tw / 2.0;
+                    const ty = cy + r * @sin(angle) - th / 2.0;
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = tx, .y = ty, .w = tw, .h = th },
+                        .color = toColor09(applyOpacity(tokens.accent, tick_alpha)),
+                        .radius = tw / 2.0,
+                    } });
+                }
+            },
+            .tabs => {
+                // R76 — Tabs: render a tab bar at the top, one button per TabItem.
+                const ts = scene.tabsStateOf(id.index);
+                if (ts.tab_count == 0) {
+                    try pushChildrenReversed(&stack, alloc, s, id, effective_alpha, translate_x, translate_y);
+                    continue;
+                }
+                const tab_bar_h: f32 = 36.0;
+                const tab_w = computed.w / @as(f32, @floatFromInt(ts.tab_count));
+                var child_idx = scene.elements.first_child.items[id.index];
+                var tab_i: u32 = 0;
+                while (child_idx != store_mod.NONE) : (child_idx = scene.elements.next_sibling.items[child_idx]) {
+                    if (child_idx >= scene._kind.items.len) break;
+                    if (scene._kind.items[child_idx] != .tab_item) continue;
+                    const is_active = tab_i == ts.active_idx;
+                    const btn_x = computed.x + @as(f32, @floatFromInt(tab_i)) * tab_w;
+                    const btn_rect = platform.Rect09{ .x = btn_x, .y = computed.y, .w = tab_w, .h = tab_bar_h };
+                    // Tab button background.
+                    const btn_bg = if (is_active) tokens.bg_raised else tokens.bg_surface;
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = btn_rect,
+                        .color = toColor09(applyOpacity(btn_bg, effective_alpha)),
+                        .radius = 0,
+                    } });
+                    // Active accent bottom border.
+                    if (is_active) {
+                        try list.append(alloc, .{ .filled_rect = .{
+                            .rect = .{ .x = btn_x, .y = computed.y + tab_bar_h - 2, .w = tab_w, .h = 2 },
+                            .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
+                            .radius = 0,
+                        } });
+                    }
+                    // Tab label text.
+                    if (scene.textOf(.{ .index = child_idx, .gen = s.gen.items[child_idx] })) |label| {
+                        if (label.len > 0) {
+                            const label_rect = store_mod.Rect{ .x = btn_x + 8, .y = computed.y, .w = tab_w - 16, .h = tab_bar_h };
+                            const label_style = comp_mod.ComputedStyle{ .text_color = tokens.text_body, .font_size = tokens.text_sm };
+                            try emitGlyphs(&list, alloc, .{ .index = child_idx, .gen = s.gen.items[child_idx] }, label, label_rect, &label_style, atlas, font, effective_alpha);
+                        }
+                    }
+                    tab_i += 1;
+                }
+                // Bottom divider line.
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = computed.x, .y = computed.y + tab_bar_h - 1, .w = computed.w, .h = 1 },
+                    .color = toColor09(applyOpacity(tokens.border_subtle, effective_alpha)),
+                    .radius = 0,
+                } });
+            },
+            .tab_item => {
+                // R76 — Tab item: just a container for content (children rendered normally).
+            },
+            .accordion => {
+                // R77 — Accordion: draw chevron on the first child (header) rect.
+                const acc_state = scene.accordionStateOf(id.index);
+                const header_child = scene.elements.first_child.items[id.index];
+                if (header_child != store_mod.NONE and header_child < s.layout.items.len) {
+                    const header_computed = s.get(.{ .index = header_child, .gen = s.gen.items[header_child] }).computed;
+                    const chevron_sz: f32 = 8.0;
+                    const chevron_x = computed.x + computed.w - 20.0;
+                    const chevron_y = header_computed.y + (header_computed.h - chevron_sz) / 2.0;
+                    const chev_col = toColor09(applyOpacity(tokens.text_muted, effective_alpha));
+                    if (acc_state.open) {
+                        // Down chevron: two rect "strokes".
+                        try list.append(alloc, .{ .filled_rect = .{ .rect = .{ .x = chevron_x - chevron_sz * 0.5, .y = chevron_y + chevron_sz * 0.3, .w = chevron_sz * 0.6, .h = 2 }, .color = chev_col, .radius = 1 } });
+                        try list.append(alloc, .{ .filled_rect = .{ .rect = .{ .x = chevron_x, .y = chevron_y + chevron_sz * 0.3, .w = chevron_sz * 0.6, .h = 2 }, .color = chev_col, .radius = 1 } });
+                    } else {
+                        // Right chevron.
+                        try list.append(alloc, .{ .filled_rect = .{ .rect = .{ .x = chevron_x + chevron_sz * 0.3, .y = chevron_y, .w = 2, .h = chevron_sz * 0.6 }, .color = chev_col, .radius = 1 } });
+                        try list.append(alloc, .{ .filled_rect = .{ .rect = .{ .x = chevron_x + chevron_sz * 0.3, .y = chevron_y + chevron_sz * 0.4, .w = 2, .h = chevron_sz * 0.6 }, .color = chev_col, .radius = 1 } });
+                    }
+                }
+            },
+            .date_picker => {
+                // R78 — DatePicker: input-like appearance + calendar icon.
+                const dp = scene.datePickerStateOf(id.index);
+                const base_col = if (dp.disabled)
+                    toColor09(applyOpacity(tokens.bg_surface, effective_alpha * 0.5))
+                else
+                    toColor09(applyOpacity(style.background, effective_alpha));
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = computed.h },
+                    .color = base_col,
+                    .radius = style.radius,
+                } });
+                // Border
+                if (style.border_width > 0) {
+                    try list.append(alloc, .{ .border_rect = .{
+                        .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = computed.h },
+                        .color = toColor09(applyOpacity(style.border_color, effective_alpha)),
+                        .width = style.border_width,
+                    } });
+                }
+                // Display the selected date text.
+                var date_buf: [10]u8 = undefined;
+                const date_str: []const u8 = if (dp.value.year > 0) blk: {
+                    const s2 = std.fmt.bufPrint(&date_buf, "{d:0>4}-{d:0>2}-{d:0>2}", .{
+                        dp.value.year, dp.value.month, dp.value.day,
+                    }) catch break :blk "YYYY-MM-DD";
+                    break :blk s2;
+                } else "YYYY-MM-DD";
+                try emitGlyphs(&list, alloc, id, date_str, computed, &style, atlas, font, effective_alpha);
+            },
+            .avatar => {
+                // R7B — Avatar: circular frame, image or initials.
+                const av = scene.avatarStateOf(id.index);
+                const cx = computed.x + computed.w / 2.0;
+                const cy = computed.y + computed.h / 2.0;
+                const radius_px = computed.w / 2.0;
+                if (av.image_id != 0) {
+                    // Draw as filled circle with tinted image (quad approximation).
+                    const img_rect = image_atlas.getRect(av.image_id);
+                    try list.append(alloc, .{ .image_rect = .{
+                        .dst = toRect09(computed),
+                        .uv = .{ .x = img_rect.uv_x, .y = img_rect.uv_y, .w = img_rect.uv_w, .h = img_rect.uv_h },
+                        .tint = toColor09(applyOpacity(.{ .r = 255, .g = 255, .b = 255, .a = 255 }, effective_alpha)),
+                    } });
+                } else {
+                    // Initialscolour based on first initial character.
+                    const init_char = av.initials[0];
+                    const bg_color = initialsColor(init_char, tokens);
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = computed.h },
+                        .color = toColor09(applyOpacity(bg_color, effective_alpha)),
+                        .radius = radius_px,
+                    } });
+                    // Draw initials text.
+                    const init_text: []const u8 = av.initials[0..if (av.initials[1] != 0) @as(usize, 2) else @as(usize, 1)];
+                    const init_style = theme_mod.ComputedStyle{
+                        .text_color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+                        .font_size = @max(10.0, computed.w * 0.35),
+                    };
+                    try emitGlyphs(&list, alloc, id, init_text, computed, &init_style, atlas, font, effective_alpha);
+                }
+                // Circle border.
+                try list.append(alloc, .{ .border_rect = .{
+                    .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = computed.h },
+                    .color = toColor09(applyOpacity(tokens.border_default, effective_alpha)),
+                    .width = 1.5,
+                } });
+                _ = cx;
+                _ = cy;
+            },
+            .badge => {
+                // R7B — Badge: small pill with text label.
+                const bs = scene.badgeStateOf(id.index);
+                if (bs.text[0] != 0) {
+                    const badge_bg = switch (bs.color) {
+                        .default => toColor09(applyOpacity(tokens.border_strong, effective_alpha)),
+                        .success => toColor09(applyOpacity(tokens.ok, effective_alpha)),
+                        .warning => toColor09(applyOpacity(tokens.warn, effective_alpha)),
+                        .error_c => toColor09(applyOpacity(tokens.err, effective_alpha)),
+                    };
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = computed.h },
+                        .color = badge_bg,
+                        .radius = computed.h / 2.0,
+                    } });
+                    const cnt_style = theme_mod.ComputedStyle{
+                        .text_color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+                        .font_size = @max(9.0, computed.h * 0.6),
+                    };
+                    const text_len = std.mem.indexOfScalar(u8, &bs.text, 0) orelse bs.text.len;
+                    try emitGlyphs(&list, alloc, id, bs.text[0..text_len], computed, &cnt_style, atlas, font, effective_alpha);
+                }
+            },
+            .data_table => {
+                // R79 — DataTable: header row + virtualized data rows with scissor.
+                const ts = scene.tableStateOf(id.index);
+                const header_h: f32 = 36.0;
+                const header_bg = toColor09(applyOpacity(tokens.bg_surface, effective_alpha));
+                const border_col = toColor09(applyOpacity(tokens.border_default, effective_alpha));
+
+                // Scissor to table bounds.
+                try list.append(alloc, .{ .set_scissor = rectToScissor(computed) });
+
+                // Header row background.
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = computed.x, .y = computed.y, .w = computed.w, .h = header_h },
+                    .color = header_bg,
+                    .radius = 0,
+                } });
+
+                // Draw column headers.
+                var col_x = computed.x;
+                for (ts.columns[0..ts.col_count]) |*col| {
+                    const header_label = col.headerSlice();
+                    if (header_label.len > 0) {
+                        const hdr_style = theme_mod.ComputedStyle{
+                            .text_color = tokens.text_body,
+                            .font_size = 13.0,
+                            .font_bold = true,
+                        };
+                        const hdr_rect = store_mod.Rect{ .x = col_x + 4.0, .y = computed.y, .w = col.width_px - 8.0, .h = header_h };
+                        try emitGlyphs(&list, alloc, id, header_label, hdr_rect, &hdr_style, atlas, font, effective_alpha);
+                    }
+                    // Column divider.
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = col_x + col.width_px - 1.0, .y = computed.y, .w = 1.0, .h = header_h },
+                        .color = border_col,
+                        .radius = 0,
+                    } });
+                    col_x += col.width_px;
+                }
+
+                // Header bottom border.
+                try list.append(alloc, .{ .filled_rect = .{
+                    .rect = .{ .x = computed.x, .y = computed.y + header_h - 1.0, .w = computed.w, .h = 1.0 },
+                    .color = border_col,
+                    .radius = 0,
+                } });
+
+                // Data rows.
+                if (ts.rows) |rows_data| {
+                    const view_h = computed.h - header_h;
+                    const first_row: u32 = @intFromFloat(@max(0.0, ts.scroll_y / ts.row_height));
+                    const visible_count: u32 = @as(u32, @intFromFloat(@ceil(view_h / ts.row_height))) + 1;
+                    const n_sorted = ts.sorted_indices.items.len;
+
+                    var row_i: u32 = first_row;
+                    while (row_i < first_row + visible_count and row_i < n_sorted) : (row_i += 1) {
+                        const data_row = ts.sorted_indices.items[row_i];
+                        const row_y = computed.y + header_h + @as(f32, @floatFromInt(row_i - first_row)) * ts.row_height - @mod(ts.scroll_y, ts.row_height);
+
+                        // Alternating row background.
+                        if (row_i % 2 == 0) {
+                            try list.append(alloc, .{ .filled_rect = .{
+                                .rect = .{ .x = computed.x, .y = row_y, .w = computed.w, .h = ts.row_height },
+                                .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha * 0.5)),
+                                .radius = 0,
+                            } });
+                        }
+
+                        // Cell text.
+                        var cell_x = computed.x;
+                        const row_base: [*]u8 = @ptrCast(rows_data.row_ptr);
+                        for (ts.columns[0..ts.col_count], 0..) |*col, ci| {
+                            var cell_buf: [128]u8 = undefined;
+                            const row_ptr: *anyopaque = @ptrCast(row_base + @as(usize, data_row) * rows_data.row_size);
+                            const cell_len = rows_data.cell_fn(row_ptr, @intCast(ci), &cell_buf);
+                            const cell_text = cell_buf[0..cell_len];
+                            if (cell_text.len > 0) {
+                                const cell_style = theme_mod.ComputedStyle{
+                                    .text_color = tokens.text_body,
+                                    .font_size = 13.0,
+                                };
+                                const cell_rect = store_mod.Rect{ .x = cell_x + 4.0, .y = row_y, .w = col.width_px - 8.0, .h = ts.row_height };
+                                try emitGlyphs(&list, alloc, id, cell_text, cell_rect, &cell_style, atlas, font, effective_alpha);
+                            }
+                            cell_x += col.width_px;
+                        }
+
+                        // Row bottom border.
+                        try list.append(alloc, .{ .filled_rect = .{
+                            .rect = .{ .x = computed.x, .y = row_y + ts.row_height - 1.0, .w = computed.w, .h = 1.0 },
+                            .color = border_col,
+                            .radius = 0,
+                        } });
+                    }
+                }
+
+                // Restore scissor.
+                try list.append(alloc, .restore_scissor);
             },
             else => {},
         }
@@ -594,13 +1182,30 @@ pub fn buildDrawList(
             if (opt.label.len > 0) {
                 const opt_style = scene.styleOf(id);
                 const opt_computed = store_mod.Rect{ .x = panel_x + 4.0, .y = oy, .w = panel_w - 8.0, .h = item_h };
-                const opt_font = family.face(opt_style.font_bold, opt_style.font_italic);
+                const opt_font = if (scene.font_family) |fam| fam.face(opt_style.font_bold, opt_style.font_italic) else font;
                 try emitGlyphs(&list, alloc, id, opt.label, opt_computed, opt_style, atlas, opt_font, 1.0);
             }
         }
     }
 
     return list.toOwnedSlice(alloc);
+}
+
+/// Binary-search for the line index whose start is <= `offset`.
+/// Returns 0 if line_starts is empty.
+fn textareaLineOfByte(line_starts: []const u32, offset: u32) u32 {
+    if (line_starts.len == 0) return 0;
+    var lo: u32 = 0;
+    var hi: u32 = @as(u32, @intCast(line_starts.len));
+    while (lo + 1 < hi) {
+        const mid = (lo + hi) / 2;
+        if (line_starts[mid] <= offset) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
 }
 
 /// Compute the X pixel position of a cursor at `cursor_pos` bytes into `text_bytes`.
@@ -655,6 +1260,18 @@ fn pushChildrenReversedWithTranslate(
     translate_y: f32,
 ) !void {
     return pushChildrenReversed(stack, alloc, s, id, alpha, translate_x, translate_y);
+}
+
+/// Deterministic avatar background color from initial character.
+/// Uses 4 semantic token colors (INV-4.3: no hex literals).
+fn initialsColor(c: u8, tokens: Tokens) Color {
+    return switch (c % 4) {
+        0 => tokens.accent,
+        1 => tokens.ok,
+        2 => tokens.warn,
+        3 => tokens.err,
+        else => unreachable,
+    };
 }
 
 fn emitGlyphs(

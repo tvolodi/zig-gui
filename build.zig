@@ -596,6 +596,28 @@ pub fn build(b: *std.Build) void {
     });
     mod_events.addImport("../01/types.zig", mod01);
 
+    // navigator.zig — R80: Navigator, ScreenFn, NavEntry, PendingNav, ScreenEntry.
+    // Does NOT import app.zig (to avoid circular build deps); app.zig imports it.
+    const mod_navigator = b.addModule("navigator.zig", .{
+        .root_source_file = b.path("src/app/navigator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_navigator.addImport("../07/types.zig", mod07);
+    mod_navigator.addImport("../05/types.zig", mod05);
+
+    // binding.zig — one module, shared everywhere that imports it.
+    // R83: multi_window.zig also imports binding.zig; registering it as a named
+    // module ensures the build system sees only one canonical identity for the file.
+    const mod_binding = b.addModule("binding.zig", .{
+        .root_source_file = b.path("src/app/binding.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_binding.addImport("../07/types.zig", mod07);
+    // binding.zig imports signal.zig via relative path — no extra wiring needed for it
+    // since signal.zig only imports std.
+
     // app.zig — one module, shared everywhere.
     const mod_app_impl = b.addModule("app.zig", .{
         .root_source_file = b.path("src/app/app.zig"),
@@ -612,10 +634,12 @@ pub fn build(b: *std.Build) void {
     mod_app_impl.addImport("../08/types.zig", mod08);
     mod_app_impl.addImport("../09/types.zig", mod09);
     mod_app_impl.addImport("overlay.zig", mod_overlay);
+    mod_app_impl.addImport("binding.zig", mod_binding);
     mod_app_impl.addImport("image_atlas.zig", mod_image_atlas);
     mod_app_impl.addImport("font_family.zig", mod_font_family);
     // NOTE: app.zig does NOT import types.zig (types.zig imports app.zig — no cycle).
     mod_app_impl.addImport("events.zig", mod_events);
+    mod_app_impl.addImport("navigator.zig", mod_navigator);
 
     // types.zig — the public root module.
     const mod_app = b.addModule("app", .{
@@ -634,6 +658,12 @@ pub fn build(b: *std.Build) void {
     mod_app.addImport("../09/types.zig", mod09);
     mod_app.addImport("app.zig", mod_app_impl);
     mod_app.addImport("events.zig", mod_events);
+    mod_app.addImport("navigator.zig", mod_navigator);
+    // R83: multi_window.zig (imported by types.zig) uses overlay.zig, binding.zig,
+    // events.zig, navigator.zig — wire them so the build system sees only one module
+    // identity for each file (INV rule: files must belong to only one module).
+    mod_app.addImport("overlay.zig", mod_overlay);
+    mod_app.addImport("binding.zig", mod_binding);
 
     // -----------------------------------------------------------------------
     // test-app — headless unit tests (no GPU).
@@ -741,7 +771,7 @@ pub fn build(b: *std.Build) void {
     });
     codegen_mod.addImport("m06", mod06);
     const codegen_exe = b.addExecutable(.{
-        .name        = "ui_codegen",
+        .name = "ui_codegen",
         .root_module = codegen_mod,
     });
 
@@ -790,13 +820,248 @@ pub fn build(b: *std.Build) void {
     run_dev_mod.addOptions("build_options", dev_options);
 
     const run_dev_exe = b.addExecutable(.{
-        .name        = "zig-gui-dev",
+        .name = "zig-gui-dev",
         .root_module = run_dev_mod,
     });
 
     const run_dev_cmd = b.addRunArtifact(run_dev_exe);
     const run_dev_step = b.step("run-dev", "Run the app with hot-reload enabled");
     run_dev_step.dependOn(&run_dev_cmd.step);
+
+    // -----------------------------------------------------------------------
+    // test-m7-widget — Milestone 7 widget unit tests (R70-R79).
+    //   zig build               → compile only (compile check)
+    //   zig build test-m7-widget → compile + run
+    // -----------------------------------------------------------------------
+    const m7_widget_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/07/m7_widget_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    m7_widget_test_mod.addImport("types.zig", mod07);
+    m7_widget_test_mod.addImport("../03/types.zig", mod03);
+    m7_widget_test_mod.addImport("../05/types.zig", mod05);
+    m7_widget_test_mod.addImport("../06/types.zig", mod06);
+    m7_widget_test_mod.addImport("../app/font_family.zig", mod_font_family);
+    m7_widget_test_mod.addIncludePath(b.path("deps"));
+    m7_widget_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    m7_widget_test_mod.link_libc = true;
+    const m7_widget_test = b.addTest(.{ .name = "m7-widget-test", .root_module = m7_widget_test_mod });
+    b.default_step.dependOn(&m7_widget_test.step);
+    const run_m7_widget_test = b.addRunArtifact(m7_widget_test);
+    const m7_widget_test_step = b.step("test-m7-widget", "Run Milestone 7 widget unit tests (R70-R79)");
+    m7_widget_test_step.dependOn(&run_m7_widget_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-toast — ToastManager unit tests (R74, no GPU).
+    //   zig build            → compile only
+    //   zig build test-toast → compile + run
+    // -----------------------------------------------------------------------
+    const toast_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/toast_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    toast_test_mod.addImport("../01/types.zig", mod01);
+    toast_test_mod.addImport("../02/types.zig", mod02);
+    toast_test_mod.addImport("../05/types.zig", mod05);
+    toast_test_mod.addImport("overlay.zig", mod_overlay);
+    toast_test_mod.addIncludePath(b.path("deps"));
+    toast_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    toast_test_mod.link_libc = true;
+    const toast_test = b.addTest(.{ .name = "toast-test", .root_module = toast_test_mod });
+    b.default_step.dependOn(&toast_test.step);
+    const run_toast_test = b.addRunArtifact(toast_test);
+    const toast_test_step = b.step("test-toast", "Run ToastManager unit tests (R74, no GPU)");
+    toast_test_step.dependOn(&run_toast_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-dialog — DialogManager unit tests (R75, no GPU).
+    //   zig build             → compile only
+    //   zig build test-dialog → compile + run
+    // -----------------------------------------------------------------------
+    const dialog_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/dialog_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dialog_test_mod.addImport("../01/types.zig", mod01);
+    dialog_test_mod.addImport("../07/types.zig", mod07);
+    dialog_test_mod.addImport("../05/types.zig", mod05);
+    dialog_test_mod.addImport("../06/types.zig", mod06);
+    dialog_test_mod.addImport("overlay.zig", mod_overlay);
+    dialog_test_mod.addImport("../app/font_family.zig", mod_font_family);
+    dialog_test_mod.addIncludePath(b.path("deps"));
+    dialog_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    dialog_test_mod.link_libc = true;
+    const dialog_test = b.addTest(.{ .name = "dialog-test", .root_module = dialog_test_mod });
+    b.default_step.dependOn(&dialog_test.step);
+    const run_dialog_test = b.addRunArtifact(dialog_test);
+    const dialog_test_step = b.step("test-dialog", "Run DialogManager unit tests (R75, no GPU)");
+    dialog_test_step.dependOn(&run_dialog_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-date-util — Date utility unit tests (R78, pure).
+    //   zig build               → compile only
+    //   zig build test-date-util → compile + run
+    // -----------------------------------------------------------------------
+    const date_util_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/date_util_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    date_util_test_mod.addImport("../07/types.zig", mod07);
+    date_util_test_mod.addImport("../03/types.zig", mod03);
+    date_util_test_mod.addImport("../05/types.zig", mod05);
+    date_util_test_mod.addImport("../06/types.zig", mod06);
+    date_util_test_mod.addImport("../app/font_family.zig", mod_font_family);
+    date_util_test_mod.addIncludePath(b.path("deps"));
+    date_util_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    date_util_test_mod.link_libc = true;
+    const date_util_test = b.addTest(.{ .name = "date-util-test", .root_module = date_util_test_mod });
+    b.default_step.dependOn(&date_util_test.step);
+    const run_date_util_test = b.addRunArtifact(date_util_test);
+    const date_util_test_step = b.step("test-date-util", "Run date utility unit tests (R78, pure)");
+    date_util_test_step.dependOn(&run_date_util_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-context-menu — ContextMenuManager unit tests (R7D, no GPU).
+    //   zig build                  → compile only
+    //   zig build test-context-menu → compile + run
+    // -----------------------------------------------------------------------
+    const context_menu_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/context_menu_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    context_menu_test_mod.addImport("../01/types.zig", mod01);
+    context_menu_test_mod.addImport("../02/types.zig", mod02);
+    context_menu_test_mod.addImport("../05/types.zig", mod05);
+    context_menu_test_mod.addImport("overlay.zig", mod_overlay);
+    context_menu_test_mod.addImport("font_family.zig", mod_font_family);
+    context_menu_test_mod.addIncludePath(b.path("deps"));
+    context_menu_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    context_menu_test_mod.link_libc = true;
+    const context_menu_test = b.addTest(.{ .name = "context-menu-test", .root_module = context_menu_test_mod });
+    b.default_step.dependOn(&context_menu_test.step);
+    const run_context_menu_test = b.addRunArtifact(context_menu_test);
+    const context_menu_test_step = b.step("test-context-menu", "Run ContextMenuManager unit tests (R7D, no GPU)");
+    context_menu_test_step.dependOn(&run_context_menu_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-nav — Navigator unit tests (R80, headless).
+    //   zig build          → compile only
+    //   zig build test-nav → compile + run
+    // -----------------------------------------------------------------------
+    const nav_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/navigator_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nav_test_mod.addImport("types.zig", mod_app);
+    nav_test_mod.addImport("../07/types.zig", mod07);
+    nav_test_mod.addImport("../05/types.zig", mod05);
+    nav_test_mod.addIncludePath(b.path("deps"));
+    nav_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    nav_test_mod.link_libc = true;
+    const nav_test = b.addTest(.{ .name = "nav-test", .root_module = nav_test_mod });
+    b.default_step.dependOn(&nav_test.step);
+    const run_nav_test = b.addRunArtifact(nav_test);
+    const nav_test_step = b.step("test-nav", "Run Navigator unit tests (R80, headless)");
+    nav_test_step.dependOn(&run_nav_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-tooltip — TooltipManager unit tests (R7C, no GPU).
+    //   zig build              → compile only
+    //   zig build test-tooltip → compile + run
+    // -----------------------------------------------------------------------
+    const tooltip_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/tooltip_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tooltip_test_mod.addImport("../01/types.zig", mod01);
+    tooltip_test_mod.addImport("../02/types.zig", mod02);
+    tooltip_test_mod.addImport("../05/types.zig", mod05);
+    tooltip_test_mod.addImport("../07/types.zig", mod07);
+    tooltip_test_mod.addImport("overlay.zig", mod_overlay);
+    tooltip_test_mod.addImport("font_family.zig", mod_font_family);
+    tooltip_test_mod.addIncludePath(b.path("deps"));
+    tooltip_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    tooltip_test_mod.link_libc = true;
+    const tooltip_test = b.addTest(.{ .name = "tooltip-test", .root_module = tooltip_test_mod });
+    b.default_step.dependOn(&tooltip_test.step);
+    const run_tooltip_test = b.addRunArtifact(tooltip_test);
+    const tooltip_test_step = b.step("test-tooltip", "Run TooltipManager unit tests (R7C, no GPU)");
+    tooltip_test_step.dependOn(&run_tooltip_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-app-state — AppState(T) unit tests (R81, pure, no GPU).
+    //   zig build               → compile only (compile check)
+    //   zig build test-app-state → compile + run
+    // -----------------------------------------------------------------------
+    const app_state_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/app_state_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // app_state_test.zig imports signal.zig and app_state.zig by relative path.
+    // No external modules needed — both files import only std.
+    const app_state_test = b.addTest(.{ .name = "app-state-test", .root_module = app_state_test_mod });
+    b.default_step.dependOn(&app_state_test.step);
+    const run_app_state_test = b.addRunArtifact(app_state_test);
+    const app_state_test_step = b.step("test-app-state", "Run AppState unit tests (R81, pure)");
+    app_state_test_step.dependOn(&run_app_state_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-settings — PersistentSettings unit tests (R82, file I/O).
+    //   zig build               → compile only (compile check)
+    //   zig build test-settings → compile + run
+    // -----------------------------------------------------------------------
+    const settings_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/persistent_settings_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const settings_test = b.addTest(.{ .name = "settings-test", .root_module = settings_test_mod });
+    b.default_step.dependOn(&settings_test.step);
+    const run_settings_test = b.addRunArtifact(settings_test);
+    const settings_test_step = b.step("test-settings", "Run PersistentSettings unit tests (R82, file I/O)");
+    settings_test_step.dependOn(&run_settings_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-multi-window — MultiWindowApp unit tests (R83, headless — no GPU).
+    //   zig build                  → compile only (compile check)
+    //   zig build test-multi-window → compile + run
+    // -----------------------------------------------------------------------
+    const multi_window_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/multi_window_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // multi_window_test.zig imports:
+    //   multi_window.zig → overlay.zig, binding.zig, events.zig, navigator.zig, mod05, mod07
+    //   ../01/types.zig  → for is_shared field check
+    //   ../07/types.zig  → for Scene (mod07 brings in mod02/stb_truetype)
+    //   ../05/types.zig  → for Tokens/Palette
+    multi_window_test_mod.addImport("../01/types.zig", mod01);
+    multi_window_test_mod.addImport("../07/types.zig", mod07);
+    multi_window_test_mod.addImport("../05/types.zig", mod05);
+    multi_window_test_mod.addImport("../06/types.zig", mod06);
+    multi_window_test_mod.addImport("../03/types.zig", mod03);
+    multi_window_test_mod.addImport("../app/font_family.zig", mod_font_family);
+    multi_window_test_mod.addImport("overlay.zig", mod_overlay);
+    multi_window_test_mod.addImport("binding.zig", mod_binding);
+    multi_window_test_mod.addImport("events.zig", mod_events);
+    multi_window_test_mod.addImport("navigator.zig", mod_navigator);
+    multi_window_test_mod.addIncludePath(b.path("deps"));
+    multi_window_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    multi_window_test_mod.link_libc = true;
+    const multi_window_test = b.addTest(.{ .name = "multi-window-test", .root_module = multi_window_test_mod });
+    b.default_step.dependOn(&multi_window_test.step);
+    const run_multi_window_test = b.addRunArtifact(multi_window_test);
+    const multi_window_test_step = b.step("test-multi-window", "Run MultiWindowApp unit tests (R83, headless)");
+    multi_window_test_step.dependOn(&run_multi_window_test.step);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,7 @@
+> **Implementation decision (2026-06-03):** Model A (register by element index) was
+> chosen over Model B (registerNamed). `registerNamed` is NOT implemented.
+> The `context_menu` markup attribute stores a u8 menu index, not a string name.
+
 # R7D — M7-14: Context menu
 
 > Roadmap item: M7-14  

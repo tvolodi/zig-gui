@@ -26,7 +26,10 @@ pub const NodeDesc = markup.NodeDesc;
 // Widget kinds + registry
 // ---------------------------------------------------------------------------
 
-pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon };
+/// Sentinel for "no element" — used in focused_idx and similar u32 index fields.
+pub const NONE: u32 = std.math.maxInt(u32);
+
+pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon, textarea, separator, radio, slider };
 
 /// R40 — Pseudo-state flags for interactive widgets.
 pub const PseudoState = packed struct {
@@ -60,6 +63,10 @@ pub fn tagToKind(tag: []const u8) ?WidgetKind {
     if (eql(u8, tag, "ScrollView")) return .scrollview;
     if (eql(u8, tag, "Image")) return .image;
     if (eql(u8, tag, "Icon")) return .icon;
+    if (eql(u8, tag, "Textarea")) return .textarea;
+    if (eql(u8, tag, "Separator")) return .separator;
+    if (eql(u8, tag, "Radio")) return .radio;
+    if (eql(u8, tag, "Slider")) return .slider;
     return null;
 }
 
@@ -70,6 +77,10 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
         .row => .{ .display = .flex, .direction = .row },
         .column => .{ .display = .flex, .direction = .column },
         .scrollview => .{ .display = .block, .overflow = .hidden },
+        .textarea => .{ .display = .block, .overflow = .hidden },
+        .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 1 } },
+        .radio => .{ .display = .flex, .direction = .row, .align_items = .center },
+        .slider => .{ .display = .block, .height = .{ .px = 24 } },
         else => .{ .display = .block },
     };
 }
@@ -112,7 +123,6 @@ pub const ButtonState = struct {
 pub const InputState = struct {
     text: std.ArrayListUnmanaged(u8) = .{},
     cursor: u32 = 0,
-    selection_start: u32 = 0,
     active: bool = false,
 };
 
@@ -151,12 +161,82 @@ pub const ScrollState = struct {
 };
 
 // ---------------------------------------------------------------------------
+// R62 — Text selection state
+// ---------------------------------------------------------------------------
+
+/// Byte-offset selection range for a text or input element.
+pub const TextSelection = struct {
+    anchor: u32 = 0,
+    active: u32 = 0,
+    pub fn isEmpty(self: TextSelection) bool {
+        return self.anchor == self.active;
+    }
+    pub fn range(self: TextSelection) struct { lo: u32, hi: u32 } {
+        if (self.anchor <= self.active) return .{ .lo = self.anchor, .hi = self.active };
+        return .{ .lo = self.active, .hi = self.anchor };
+    }
+};
+
+// ---------------------------------------------------------------------------
+// R63 — Textarea state
+// ---------------------------------------------------------------------------
+
+/// Extra per-element state for multi-line textarea widgets.
+pub const TextareaState = struct {
+    line_starts: std.ArrayListUnmanaged(u32) = .{},
+    scroll_y: f32 = 0,
+    content_h: f32 = 0,
+    container_h: f32 = 0,
+};
+
+// ---------------------------------------------------------------------------
+// R71 — Radio state / R72 — Slider state
+// ---------------------------------------------------------------------------
+
+/// Per-element state for radio widgets (R71).
+pub const RadioState = struct {
+    group_id: u16 = 0,
+    value_str: []const u8 = "",
+    selected: bool = false,
+    disabled: bool = false,
+    hovered: bool = false,
+    pressed: bool = false,
+};
+
+/// Per-element state for slider widgets (R72).
+pub const SliderState = struct {
+    value: f32 = 0,
+    min: f32 = 0,
+    max: f32 = 100,
+    step: f32 = 1,
+    dragging: bool = false,
+    hovered: bool = false,
+    disabled: bool = false,
+};
+
+// ---------------------------------------------------------------------------
 // Scene — owns the ElementStore + parallel presentation arrays (INV-3.1)
 // ---------------------------------------------------------------------------
 
 pub const InstantiateError = error{
     UnknownTag,
     OutOfMemory,
+};
+
+pub const BadgeColor = enum { default, success, warning, error_c };
+
+pub const BadgeState = struct {
+    text:  [8]u8      = .{0} ** 8,
+    color: BadgeColor = .default,
+};
+
+pub const CellTextFn = *const fn (row_ptr: *anyopaque, col: u8, buf: []u8) u8;
+
+pub const DataTableRows = struct {
+    row_ptr:   *anyopaque,
+    row_size:  usize,
+    row_count: u32,
+    cell_fn:   CellTextFn,
 };
 
 pub const Scene = struct {
@@ -187,6 +267,18 @@ pub const Scene = struct {
     // R52 — Hidden state parallel arrays
     _hidden: std.ArrayListUnmanaged(bool) = .{},
     _saved_display: std.ArrayListUnmanaged(Display) = .{},
+
+    // R62 — Selection state parallel array
+    _selection: std.ArrayListUnmanaged(TextSelection) = .{},
+
+    // R63 — Textarea state parallel array
+    _textarea_state: std.ArrayListUnmanaged(TextareaState) = .{},
+
+    // R71 — Radio state parallel array
+    _radio_state: std.ArrayListUnmanaged(RadioState) = .{},
+
+    // R72 — Slider state parallel array
+    _slider_state: std.ArrayListUnmanaged(SliderState) = .{},
 
     gpa: std.mem.Allocator,
 
@@ -470,6 +562,89 @@ pub const Scene = struct {
         _ = self;
         _ = idx;
         _ = hidden;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- selection (R62) ---
+
+    pub fn selectionOf(self: *Scene, idx: u32) *TextSelection {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn setSelection(self: *Scene, idx: u32, anchor: u32, active: u32) void {
+        _ = self;
+        _ = idx;
+        _ = anchor;
+        _ = active;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearSelection(self: *Scene, idx: u32) void {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- textarea (R63) ---
+
+    pub fn textareaStateOf(self: *Scene, idx: u32) *TextareaState {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- radio (R71) ---
+
+    pub fn radioStateOf(self: *Scene, idx: u32) *RadioState {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn isRadioSelected(self: *Scene, idx: u32) bool {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn selectRadio(self: *Scene, idx: u32) void {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn selectNextInGroup(self: *Scene, group_id: u16) void {
+        _ = self;
+        _ = group_id;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn selectPrevInGroup(self: *Scene, group_id: u16) void {
+        _ = self;
+        _ = group_id;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- slider (R72) ---
+
+    pub fn sliderStateOf(self: *Scene, idx: u32) *SliderState {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn getSliderValue(self: *Scene, idx: u32) f32 {
+        _ = self;
+        _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn setSliderValue(self: *Scene, idx: u32, value: f32) void {
+        _ = self;
+        _ = idx;
+        _ = value;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 

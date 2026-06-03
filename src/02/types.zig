@@ -92,7 +92,16 @@ pub const AtlasRect = struct { x: u32, y: u32, w: u32, h: u32 };
 /// R60 — Discriminant for bold/italic atlas cache slots.
 pub const FontVariant = enum(u8) { regular, bold, italic };
 
-pub const GlyphKey = struct { codepoint: u21, px: u16, variant: FontVariant = .regular };
+/// R64 — Rendered when no font in the fallback chain covers a codepoint.
+pub const REPLACEMENT_CODEPOINT: u21 = 0xFFFD;
+
+pub const GlyphKey = struct {
+    codepoint: u21,
+    px: u16,
+    variant: FontVariant = .regular,
+    /// R64: 0 = primary font, 1–4 = fallback index + 1.
+    font_id: u8 = 0,
+};
 
 /// Convert a font size in pixels to the integer key used in GlyphKey.
 /// Rounds to the nearest integer to minimize rasterization artifacts.
@@ -400,6 +409,126 @@ pub const Font = struct {
             .bitmap = bitmap,
         };
     }
+
+    /// R64 — Return the stb_truetype glyph index for `codepoint`, or 0 if absent.
+    pub fn glyphIndex(self: *Font, codepoint: u21) i32 {
+        const impl: *FontImpl = @ptrCast(@alignCast(self._impl));
+        return c.stbtt_FindGlyphIndex(&impl.info, @intCast(codepoint));
+    }
+};
+
+// ===========================================================================
+// R64 — FontFamily: three-slot font container + fallback chain.
+// Moved here from src/app/font_family.zig so that layoutParagraphEx can use
+// it without violating the upward-import prohibition (INV-3.4).
+// src/app/font_family.zig re-exports this type.
+// ===========================================================================
+
+pub const FontFamily = struct {
+    regular: Font,
+    bold: ?Font,
+    italic: ?Font,
+    /// Ordered fallback fonts tried when the primary face lacks a codepoint. Max 4.
+    fallbacks: [4]?Font = .{null} ** 4,
+    fallback_count: u8 = 0,
+    gpa: std.mem.Allocator,
+
+    /// Load up to three TTF faces. `regular_ttf` is required; bold/italic are optional.
+    pub fn init(
+        gpa: std.mem.Allocator,
+        regular_ttf: []const u8,
+        bold_ttf: ?[]const u8,
+        italic_ttf: ?[]const u8,
+    ) FontError!FontFamily {
+        var regular = try Font.initFromBytes(gpa, regular_ttf);
+        regular.variant = .regular;
+        errdefer regular.deinit();
+
+        var bold: ?Font = null;
+        if (bold_ttf) |b| {
+            var bf = try Font.initFromBytes(gpa, b);
+            bf.variant = .bold;
+            bold = bf;
+        }
+        errdefer if (bold) |*b| b.deinit();
+
+        var italic: ?Font = null;
+        if (italic_ttf) |it| {
+            var itf = try Font.initFromBytes(gpa, it);
+            itf.variant = .italic;
+            italic = itf;
+        }
+
+        return FontFamily{
+            .regular = regular,
+            .bold = bold,
+            .italic = italic,
+            .gpa = gpa,
+        };
+    }
+
+    pub fn deinit(self: *FontFamily) void {
+        self.regular.deinit();
+        if (self.bold) |*b| b.deinit();
+        if (self.italic) |*it| it.deinit();
+        var i: u8 = 0;
+        while (i < self.fallback_count) : (i += 1) {
+            if (self.fallbacks[i]) |*fb| fb.deinit();
+        }
+    }
+
+    /// Return a pointer to the best-matching font face (bold → italic → regular).
+    /// Variant field on the returned font is already set correctly from init.
+    pub fn face(self: *FontFamily, bold: bool, italic: bool) *Font {
+        if (bold) {
+            if (self.bold != null) return &self.bold.?;
+            return &self.regular;
+        }
+        if (italic) {
+            if (self.italic != null) return &self.italic.?;
+            return &self.regular;
+        }
+        return &self.regular;
+    }
+
+    /// Add a fallback font. TTF bytes are copied into the family's allocator.
+    /// Returns error.TooManyFallbacks if the 4-fallback limit is reached.
+    pub fn addFallback(self: *FontFamily, ttf: []const u8) !void {
+        if (self.fallback_count >= 4) return error.TooManyFallbacks;
+        var fb = try Font.initFromBytes(self.gpa, ttf);
+        fb.variant = .regular;
+        self.fallbacks[self.fallback_count] = fb;
+        self.fallback_count += 1;
+    }
+
+    /// Return the best Font for `codepoint` starting from `primary`, then trying fallbacks.
+    /// Returns null if no font in the chain covers the codepoint.
+    pub fn fontForCodepoint(self: *FontFamily, primary: *Font, codepoint: u21) ?*Font {
+        if (primary.glyphIndex(codepoint) != 0) return primary;
+        var i: u8 = 0;
+        while (i < self.fallback_count) : (i += 1) {
+            if (self.fallbacks[i] != null) {
+                if (self.fallbacks[i].?.glyphIndex(codepoint) != 0) {
+                    return &self.fallbacks[i].?;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Return font_id: 0 for primary, 1+index for the fallback that covers the codepoint.
+    pub fn fontIdForCodepoint(self: *FontFamily, primary: *Font, codepoint: u21) u8 {
+        if (primary.glyphIndex(codepoint) != 0) return 0;
+        var i: u8 = 0;
+        while (i < self.fallback_count) : (i += 1) {
+            if (self.fallbacks[i] != null) {
+                if (self.fallbacks[i].?.glyphIndex(codepoint) != 0) {
+                    return i + 1;
+                }
+            }
+        }
+        return 0;
+    }
 };
 
 // ===========================================================================
@@ -415,6 +544,8 @@ pub const PositionedGlyph = struct {
     dest_h: f32,
     /// Location of the glyph in the atlas.
     uv: AtlasRect,
+    /// R62 — byte offset of this glyph's codepoint in the source string.
+    byte_offset: u32,
 };
 
 pub const Paragraph = struct {
@@ -432,6 +563,22 @@ pub fn layoutParagraph(
     str: []const u8,
     px: f32,
     max_width: f32,
+) FontError!Paragraph {
+    return layoutParagraphEx(gpa, font, atlas, str, px, max_width, null);
+}
+
+/// R64 — Like `layoutParagraph` but with font-family fallback support.
+/// When `family` is non-null, each codepoint is resolved to the best font in the chain.
+/// Codepoints with no coverage render as U+FFFD (REPLACEMENT CHARACTER); if even that
+/// is absent from the chain the glyph is silently skipped.
+pub fn layoutParagraphEx(
+    gpa: std.mem.Allocator,
+    font: *Font,
+    atlas: *GlyphAtlas,
+    str: []const u8,
+    px: f32,
+    max_width: f32,
+    family: ?*FontFamily,
 ) FontError!Paragraph {
     const fm = font.metrics(px);
     const line_height = fm.ascent + fm.descent + fm.line_gap;
@@ -451,6 +598,10 @@ pub fn layoutParagraph(
     var codepoints_buf: std.ArrayList(u21) = .empty;
     defer codepoints_buf.deinit(gpa);
 
+    // R62: parallel byte-offset buffer for selection hit-testing.
+    var byte_offsets_buf: std.ArrayList(u32) = .empty;
+    defer byte_offsets_buf.deinit(gpa);
+
     {
         var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
         var in_word = false;
@@ -458,7 +609,9 @@ pub fn layoutParagraph(
         var word_w: f32 = 0;
         var prev_cp: ?u21 = null;
 
-        while (iter.nextCodepoint()) |cp| {
+        while (true) {
+            const byte_off = @as(u32, @intCast(iter.i));
+            const cp = iter.nextCodepoint() orelse break;
             const is_ws = cp == ' ' or cp == '\t' or cp == '\n' or cp == '\r';
             if (!is_ws) {
                 if (!in_word) {
@@ -474,6 +627,7 @@ pub fn layoutParagraph(
                 }
                 word_w += font.advance(cp, px);
                 try codepoints_buf.append(gpa, cp);
+                try byte_offsets_buf.append(gpa, byte_off);
                 prev_cp = cp;
             } else {
                 if (in_word) {
@@ -527,11 +681,31 @@ pub fn layoutParagraph(
             const cps = codepoints_buf.items[span.start .. span.start + span.len];
 
             for (cps, 0..) |cp, ci| {
-                const key = GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
+                // R64: Resolve active font and actual codepoint via fallback chain.
+                var active_font: *Font = font;
+                var actual_cp: u21 = cp;
+                var fid: u8 = 0;
+                if (family) |fam| {
+                    if (fam.fontForCodepoint(font, cp)) |fb| {
+                        active_font = fb;
+                        fid = fam.fontIdForCodepoint(font, cp);
+                    } else if (fam.fontForCodepoint(font, REPLACEMENT_CODEPOINT)) |fb| {
+                        active_font = fb;
+                        actual_cp = REPLACEMENT_CODEPOINT;
+                        fid = fam.fontIdForCodepoint(font, REPLACEMENT_CODEPOINT);
+                    } else {
+                        std.log.warn("zig-gui: no glyph for U+{X:04}, skipping", .{cp});
+                        pen_x += font.advance(cp, px);
+                        if (ci + 1 < cps.len) pen_x += font.kerning(cp, cps[ci + 1], px);
+                        continue;
+                    }
+                }
+
+                const key = GlyphKey{ .codepoint = actual_cp, .px = px_u16, .variant = active_font.variant, .font_id = fid };
 
                 // Ensure glyph is in atlas.
                 const uv: AtlasRect = if (atlas.lookup(key)) |r| r else blk: {
-                    const gr = font.rasterize(gpa, cp, px) catch |err| switch (err) {
+                    const gr = active_font.rasterize(gpa, actual_cp, px) catch |err| switch (err) {
                         FontError.GlyphNotFound => {
                             // No bitmap (e.g. space) — skip adding to atlas, just advance.
                             pen_x += font.advance(cp, px);
@@ -553,25 +727,26 @@ pub fn layoutParagraph(
                 // Get glyph metrics for positioning.
                 var adv_c: c_int = 0;
                 var lsb_c: c_int = 0;
-                const impl: *FontImpl = @ptrCast(@alignCast(font._impl));
-                c.stbtt_GetCodepointHMetrics(&impl.info, @intCast(cp), &adv_c, &lsb_c);
+                const impl: *FontImpl = @ptrCast(@alignCast(active_font._impl));
+                c.stbtt_GetCodepointHMetrics(&impl.info, @intCast(actual_cp), &adv_c, &lsb_c);
                 const scale = c.stbtt_ScaleForPixelHeight(&impl.info, px);
                 var ix0: c_int = 0;
                 var iy0: c_int = 0;
                 var ix1: c_int = 0;
                 var iy1: c_int = 0;
-                c.stbtt_GetCodepointBitmapBox(&impl.info, @intCast(cp), 0, scale, &ix0, &iy0, &ix1, &iy1);
+                c.stbtt_GetCodepointBitmapBox(&impl.info, @intCast(actual_cp), 0, scale, &ix0, &iy0, &ix1, &iy1);
 
                 const dest_x = pen_x + @as(f32, @floatFromInt(ix0));
                 const dest_y = pen_y + @as(f32, @floatFromInt(iy0));
 
                 try glyphs.append(gpa, PositionedGlyph{
-                    .codepoint = cp,
+                    .codepoint = actual_cp,
                     .dest_x = dest_x,
                     .dest_y = dest_y,
                     .dest_w = @as(f32, @floatFromInt(uv.w)),
                     .dest_h = @as(f32, @floatFromInt(uv.h)),
                     .uv = uv,
+                    .byte_offset = byte_offsets_buf.items[span.start + ci],
                 });
 
                 pen_x += @as(f32, @floatFromInt(adv_c)) * scale;

@@ -618,7 +618,7 @@ test "R32: inputStateOf initial state has empty text, cursor=0, selection_start=
     const state = scene.inputStateOf(id.index);
     try testing.expectEqual(@as(usize, 0), state.text.items.len);
     try testing.expectEqual(@as(u32, 0), state.cursor);
-    try testing.expectEqual(@as(u32, 0), state.selection_start);
+    try testing.expectEqual(@as(u32, 0), scene.selectionOf(id.index).anchor);
     try testing.expect(!state.active);
 }
 
@@ -642,7 +642,7 @@ test "R32: setInputText places cursor at end of text" {
     const id = try scene.instantiate(desc, testTokens());
     try scene.setInputText(id.index, "hello");
     try testing.expectEqual(@as(u32, 5), scene.inputStateOf(id.index).cursor);
-    try testing.expectEqual(@as(u32, 5), scene.inputStateOf(id.index).selection_start);
+    try testing.expectEqual(@as(u32, 5), scene.selectionOf(id.index).anchor);
 }
 
 test "R32: setInputText replaces prior text and resets cursor" {
@@ -667,7 +667,7 @@ test "R32: no selection initially (selection_start equals cursor)" {
     const id = try scene.instantiate(desc, testTokens());
     try scene.setInputText(id.index, "hello");
     const state = scene.inputStateOf(id.index);
-    try testing.expectEqual(state.selection_start, state.cursor);
+    try testing.expectEqual(scene.selectionOf(id.index).anchor, state.cursor);
 }
 
 test "R32: selection exists when selection_start differs from cursor" {
@@ -681,9 +681,9 @@ test "R32: selection exists when selection_start differs from cursor" {
     const state = scene.inputStateOf(id.index);
     // Simulate Shift+Left selection: cursor at 5, selection_start at 2
     state.cursor = 5;
-    state.selection_start = 2;
-    try testing.expect(state.selection_start != state.cursor);
-    try testing.expectEqual(@as(u32, 2), state.selection_start);
+    scene.selectionOf(id.index).anchor = 2;
+    try testing.expect(scene.selectionOf(id.index).anchor != state.cursor);
+    try testing.expectEqual(@as(u32, 2), scene.selectionOf(id.index).anchor);
     try testing.expectEqual(@as(u32, 5), state.cursor);
 }
 
@@ -1051,28 +1051,34 @@ test "R50: style:background sets ComputedStyle.background from hex color" {
     // Construct NodeDesc directly — parser cannot handle ':' in attr names.
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:background", .value = .{ .literal = "#FF0000" } },
-        .{ .name = "text",             .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "",
+        .attrs = &attrs,
+        .children = &.{},
     };
     var scene = C.Scene.init(testing.allocator);
     defer scene.deinit();
     const id = try scene.instantiate(desc, testTokens());
     const s = scene.styleOf(id);
     try testing.expectEqual(@as(u8, 255), s.background.r);
-    try testing.expectEqual(@as(u8, 0),   s.background.g);
-    try testing.expectEqual(@as(u8, 0),   s.background.b);
+    try testing.expectEqual(@as(u8, 0), s.background.g);
+    try testing.expectEqual(@as(u8, 0), s.background.b);
     try testing.expectEqual(@as(u8, 255), s.background.a);
 }
 
 test "R50: style:opacity sets ComputedStyle.opacity" {
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:opacity", .value = .{ .literal = "0.5" } },
-        .{ .name = "text",          .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "",
+        .attrs = &attrs,
+        .children = &.{},
     };
     var scene = C.Scene.init(testing.allocator);
     defer scene.deinit();
@@ -1084,10 +1090,13 @@ test "R50: style:opacity sets ComputedStyle.opacity" {
 test "R50: unknown style:foo attribute does not crash and style is unchanged" {
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:foo", .value = .{ .literal = "bar" } },
-        .{ .name = "text",      .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "",
+        .attrs = &attrs,
+        .children = &.{},
     };
     var scene = C.Scene.init(testing.allocator);
     defer scene.deinit();
@@ -1100,10 +1109,13 @@ test "R50: malformed style:radius retains class-derived value" {
     // rounded-md sets a class-derived radius; style:radius="abc" is silently ignored
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:radius", .value = .{ .literal = "abc" } },
-        .{ .name = "text",         .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "rounded-md", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "rounded-md",
+        .attrs = &attrs,
+        .children = &.{},
     };
     const t = testTokens();
     var scene = C.Scene.init(testing.allocator);
@@ -1117,10 +1129,13 @@ test "R50: inline style:background overrides class-derived background" {
     // bg-canvas sets a theme-derived background; style:background="#AABBCC" must win
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:background", .value = .{ .literal = "#AABBCC" } },
-        .{ .name = "text",             .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "bg-canvas", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "bg-canvas",
+        .attrs = &attrs,
+        .children = &.{},
     };
     var scene = C.Scene.init(testing.allocator);
     defer scene.deinit();
@@ -1129,16 +1144,19 @@ test "R50: inline style:background overrides class-derived background" {
     try testing.expectEqual(@as(u8, 0xAA), s.background.r);
     try testing.expectEqual(@as(u8, 0xBB), s.background.g);
     try testing.expectEqual(@as(u8, 0xCC), s.background.b);
-    try testing.expectEqual(@as(u8, 255),  s.background.a);
+    try testing.expectEqual(@as(u8, 255), s.background.a);
 }
 
 test "R50: style:opacity clamped to 0.0-1.0 range (value above 1)" {
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:opacity", .value = .{ .literal = "2.0" } },
-        .{ .name = "text",          .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "",
+        .attrs = &attrs,
+        .children = &.{},
     };
     var scene = C.Scene.init(testing.allocator);
     defer scene.deinit();
@@ -1151,10 +1169,13 @@ test "R50: style:background with bind value is silently skipped" {
     // A bind value in a style:* attribute must be silently ignored (non-goal per R50)
     const attrs = [_]markup_mod.Attr{
         .{ .name = "style:background", .value = .{ .bind = "user.color" } },
-        .{ .name = "text",             .value = .{ .literal = "x" } },
+        .{ .name = "text", .value = .{ .literal = "x" } },
     };
     const desc = markup_mod.NodeDesc{
-        .tag = "Text", .classes = "bg-canvas", .attrs = &attrs, .children = &.{},
+        .tag = "Text",
+        .classes = "bg-canvas",
+        .attrs = &attrs,
+        .children = &.{},
     };
     const t = testTokens();
     var scene = C.Scene.init(testing.allocator);

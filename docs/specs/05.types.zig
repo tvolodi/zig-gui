@@ -122,6 +122,12 @@ pub const Tokens = struct {
     accent_hover: Color,
     accent_text: Color,
 
+    // semantic status colors
+    ok: Color,
+    warn: Color,
+    err: Color,
+    info: Color,
+
     // spacing scale (strictly increasing)
     sp_xs: f32,
     sp_sm: f32,
@@ -160,6 +166,11 @@ pub const Tokens = struct {
             .accent_hover = p.accent_600,
             .accent_text = p.white,
 
+            .ok = p.ok_400,
+            .warn = p.warn_400,
+            .err = p.err_400,
+            .info = p.info_400,
+
             .sp_xs = 4,
             .sp_sm = 8,
             .sp_md = 16,
@@ -196,6 +207,11 @@ pub const Tokens = struct {
             .accent = p.accent_400,
             .accent_hover = p.accent_200,
             .accent_text = p.white,
+
+            .ok = p.ok_400,
+            .warn = p.warn_400,
+            .err = p.err_400,
+            .info = p.info_400,
 
             .sp_xs = 4,
             .sp_sm = 8,
@@ -302,7 +318,6 @@ pub fn checkboxPseudo(t: Tokens) PseudoStyleSet {
 
 /// Component-style builders. Each derives ENTIRELY from tokens (INV-4.3) — no palette values,
 /// no hex literals.
-
 pub fn buttonPrimary(t: Tokens) ComputedStyle {
     return .{
         .background = t.accent,

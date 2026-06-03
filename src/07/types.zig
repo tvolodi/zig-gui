@@ -35,7 +35,10 @@ pub const FontFamily = font_family_mod.FontFamily;
 // Widget kinds + registry
 // ---------------------------------------------------------------------------
 
-pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon };
+/// Sentinel value used by R75, R7C, R7D to indicate "no element".
+pub const NONE: u32 = std.math.maxInt(u32);
+
+pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon, textarea, separator, radio, slider, progress_bar, spinner, tabs, tab_item, accordion, date_picker, avatar, badge, data_table };
 
 /// R40 — Pseudo-state flags for interactive widgets.
 pub const PseudoState = packed struct {
@@ -68,6 +71,19 @@ pub fn tagToKind(tag: []const u8) ?WidgetKind {
     if (eql(u8, tag, "ScrollView")) return .scrollview;
     if (eql(u8, tag, "Image")) return .image;
     if (eql(u8, tag, "Icon")) return .icon;
+    if (eql(u8, tag, "Textarea")) return .textarea;
+    if (eql(u8, tag, "Separator")) return .separator;
+    if (eql(u8, tag, "Radio")) return .radio;
+    if (eql(u8, tag, "Slider")) return .slider;
+    if (eql(u8, tag, "ProgressBar")) return .progress_bar;
+    if (eql(u8, tag, "Spinner")) return .spinner;
+    if (eql(u8, tag, "Tabs")) return .tabs;
+    if (eql(u8, tag, "TabItem")) return .tab_item;
+    if (eql(u8, tag, "Accordion")) return .accordion;
+    if (eql(u8, tag, "DatePicker")) return .date_picker;
+    if (eql(u8, tag, "Avatar")) return .avatar;
+    if (eql(u8, tag, "Badge")) return .badge;
+    if (eql(u8, tag, "DataTable")) return .data_table;
     return null;
 }
 
@@ -77,6 +93,19 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
         .row => .{ .display = .flex, .direction = .row },
         .column => .{ .display = .flex, .direction = .column },
         .scrollview => .{ .display = .block, .overflow = .hidden },
+        .textarea => .{ .display = .block, .overflow = .hidden },
+        .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 1 } },
+        .radio => .{ .display = .flex, .direction = .row, .align_items = .center },
+        .slider => .{ .display = .block, .height = .{ .px = 24 } },
+        .progress_bar => .{ .display = .block, .height = .{ .px = 8 } },
+        .spinner => .{ .display = .block, .width = .{ .px = 24 }, .height = .{ .px = 24 } },
+        .tabs => .{ .display = .flex, .direction = .column },
+        .tab_item => .{ .display = .block },
+        .accordion => .{ .display = .block },
+        .date_picker => .{ .display = .flex, .direction = .row, .align_items = .center },
+        .avatar => .{ .display = .block, .width = .{ .px = 40 }, .height = .{ .px = 40 } },
+        .badge => .{ .display = .block },
+        .data_table => .{ .display = .block, .overflow = .hidden },
         else => .{ .display = .block },
     };
 }
@@ -86,8 +115,9 @@ pub fn defaultStyleFor(kind: WidgetKind, tokens: Tokens) ComputedStyle {
     return switch (kind) {
         .button => theme.buttonPrimary(tokens),
         .card => theme.cardSurface(tokens),
-        .input, .dropdown => theme.inputDefault(tokens),
-        .text, .row, .column, .checkbox, .scrollview, .image, .icon => ComputedStyle{},
+        .input, .dropdown, .textarea => theme.inputDefault(tokens),
+        .separator => ComputedStyle{ .background = tokens.border_default },
+        .text, .row, .column, .checkbox, .scrollview, .image, .icon, .radio, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table => ComputedStyle{},
     };
 }
 
@@ -119,7 +149,6 @@ pub const ButtonState = struct {
 pub const InputState = struct {
     text: std.ArrayListUnmanaged(u8) = .empty,
     cursor: u32 = 0,
-    selection_start: u32 = 0,
     active: bool = false,
 };
 
@@ -142,6 +171,142 @@ pub const CheckboxState = struct {
     pressed: bool = false,
 };
 
+// ---------------------------------------------------------------------------
+// R71 — Radio group state
+// ---------------------------------------------------------------------------
+
+pub const RadioState = struct {
+    group_id: u16 = 0,
+    value_str: []const u8 = "",
+    selected: bool = false,
+    disabled: bool = false,
+    hovered: bool = false,
+    pressed: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// R72 — Slider state
+// ---------------------------------------------------------------------------
+
+pub const SliderState = struct {
+    value: f32 = 0,
+    min: f32 = 0,
+    max: f32 = 100,
+    step: f32 = 1,
+    dragging: bool = false,
+    hovered: bool = false,
+    disabled: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// R73 — Progress bar / spinner state
+// ---------------------------------------------------------------------------
+
+pub const ProgressState = struct {
+    value: f32 = 0,
+    indeterminate: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// R76 — Tabs state
+// ---------------------------------------------------------------------------
+
+pub const TabsState = struct {
+    active_idx: u32 = 0,
+    tab_count: u32 = 0,
+};
+
+// ---------------------------------------------------------------------------
+// R77 — Accordion state
+// ---------------------------------------------------------------------------
+
+pub const AccordionState = struct {
+    open: bool = false,
+    hovered: bool = false,
+    disabled: bool = false,
+    /// Index of the body child element (NONE if not yet resolved).
+    body_idx: u32 = std.math.maxInt(u32),
+};
+
+// ---------------------------------------------------------------------------
+// R78 — Date picker state
+// ---------------------------------------------------------------------------
+
+pub const DateValue = struct {
+    year: u16 = 0,
+    month: u8 = 1,
+    day: u8 = 1,
+};
+
+pub const DatePickerState = struct {
+    value: DateValue = .{},
+    nav_year: u16 = 2025,
+    nav_month: u8 = 1,
+    open: bool = false,
+    disabled: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// R7B — Avatar / badge state
+// ---------------------------------------------------------------------------
+
+pub const AvatarState = struct {
+    image_id: ImageId = 0,
+    initials: [2]u8 = .{ '?', 0 },
+    size_px: f32 = 40,
+};
+
+pub const BadgeColor = enum { default, success, warning, error_c };
+
+pub const BadgeState = struct {
+    text:  [8]u8      = .{0} ** 8,
+    color: BadgeColor = .default,
+};
+
+// ---------------------------------------------------------------------------
+// R79 — Data table state
+// ---------------------------------------------------------------------------
+
+pub const ColumnAlign = enum { left, center, right };
+pub const SortDir = enum { none, asc, desc };
+pub const MAX_COLUMNS: u8 = 16;
+pub const MAX_TABLE_ROWS: u32 = 1000;
+
+pub const DataColumn = struct {
+    header: [64]u8 = [_]u8{0} ** 64,
+    header_len: u8 = 0,
+    width_px: f32 = 120,
+    col_align: ColumnAlign = .left,
+    sortable: bool = true,
+
+    pub fn headerSlice(self: *const DataColumn) []const u8 {
+        return self.header[0..self.header_len];
+    }
+};
+
+/// Caller-owned callback to extract cell text from a row pointer.
+/// Writes cell text into `buf` and returns the byte count.
+/// `row_ptr` points to one element of the caller's row array.
+pub const CellTextFn = *const fn (row_ptr: *anyopaque, col: u8, buf: []u8) u8;
+
+pub const DataTableRows = struct {
+    row_ptr:  *anyopaque,
+    row_size: usize,
+    row_count: u32,
+    cell_fn:  CellTextFn,
+};
+
+pub const DataTableState = struct {
+    columns: [MAX_COLUMNS]DataColumn = [_]DataColumn{.{}} ** MAX_COLUMNS,
+    col_count: u8 = 0,
+    sort_col: u8 = 0xFF,
+    sort_dir: SortDir = .none,
+    sorted_indices: std.ArrayListUnmanaged(u32) = .empty,
+    scroll_y: f32 = 0,
+    row_height: f32 = 32,
+    rows: ?*const DataTableRows = null,
+};
+
 pub const ScrollState = struct {
     scroll_y: f32 = 0,
     scroll_x: f32 = 0,
@@ -156,6 +321,87 @@ pub const ScrollState = struct {
     drag_start_scroll_y: f32 = 0,
     drag_start_scroll_x: f32 = 0,
 };
+
+// ---------------------------------------------------------------------------
+// R62 — Text selection state
+// ---------------------------------------------------------------------------
+
+/// Byte-offset selection range for a text or input element.
+/// `anchor` is where the selection started; `active` is where it currently ends.
+/// When anchor == active the selection is collapsed (no visible highlight).
+pub const TextSelection = struct {
+    anchor: u32 = 0,
+    active: u32 = 0,
+
+    pub fn isEmpty(self: TextSelection) bool {
+        return self.anchor == self.active;
+    }
+
+    pub fn range(self: TextSelection) struct { lo: u32, hi: u32 } {
+        if (self.anchor <= self.active)
+            return .{ .lo = self.anchor, .hi = self.active };
+        return .{ .lo = self.active, .hi = self.anchor };
+    }
+};
+
+// ---------------------------------------------------------------------------
+// R63 — Textarea state
+// ---------------------------------------------------------------------------
+
+/// Extra per-element state for multi-line textarea widgets.
+/// Shares the element's InputState (cursor, text buffer, active flag).
+/// Both arrays are indexed by ElementId.index; non-textarea slots are zeroed (unused).
+pub const TextareaState = struct {
+    /// Byte position of each line's start in the text buffer.
+    /// Index 0 is always 0. Rebuilt on every text mutation.
+    line_starts: std.ArrayListUnmanaged(u32) = .empty,
+
+    /// Vertical scroll offset within the textarea (pixels scrolled down).
+    scroll_y: f32 = 0,
+
+    /// Total content height in pixels (sum of all line heights).
+    content_h: f32 = 0,
+
+    /// Height of the visible textarea area (from layout rect).
+    container_h: f32 = 0,
+};
+
+// ---------------------------------------------------------------------------
+// Step-snapping helper (R72)
+// ---------------------------------------------------------------------------
+
+fn snapToStep(value: f32, min: f32, step: f32) f32 {
+    if (step == 0) return value;
+    return min + @round((value - min) / step) * step;
+}
+
+// ---------------------------------------------------------------------------
+// Date parsing helper (R78)
+// ---------------------------------------------------------------------------
+
+/// Parse "YYYY-MM-DD" into DateValue. Returns null if malformed.
+fn parseDateStr(s: []const u8) ?DateValue {
+    if (s.len != 10) return null;
+    if (s[4] != '-' or s[7] != '-') return null;
+    const year = std.fmt.parseInt(u16, s[0..4], 10) catch return null;
+    const month = std.fmt.parseInt(u8, s[5..7], 10) catch return null;
+    const day = std.fmt.parseInt(u8, s[8..10], 10) catch return null;
+    if (month < 1 or month > 12) return null;
+    if (day < 1 or day > 31) return null;
+    return DateValue{ .year = year, .month = month, .day = day };
+}
+
+// ---------------------------------------------------------------------------
+// Group name → u16 hash helper (R71)
+// ---------------------------------------------------------------------------
+
+fn hashGroupName(name: []const u8) u16 {
+    var hash: u32 = 5381;
+    for (name) |c| {
+        hash = hash *% 33 +% @as(u32, c);
+    }
+    return @truncate(hash);
+}
 
 // ---------------------------------------------------------------------------
 // Color equality helper
@@ -211,6 +457,54 @@ pub const Scene = struct {
     _hidden: std.ArrayListUnmanaged(bool) = .empty,
     _saved_display: std.ArrayListUnmanaged(store_mod.Display) = .empty,
 
+    // R62 — Selection state parallel array
+    _selection: std.ArrayListUnmanaged(TextSelection) = .empty,
+
+    // R63 — Textarea state parallel array
+    _textarea_state: std.ArrayListUnmanaged(TextareaState) = .empty,
+
+    // R71 — Radio state parallel array
+    _radio_state: std.ArrayListUnmanaged(RadioState) = .empty,
+
+    // R72 — Slider state parallel array
+    _slider_state: std.ArrayListUnmanaged(SliderState) = .empty,
+
+    // R73 — Progress / spinner state parallel array
+    _progress_state: std.ArrayListUnmanaged(ProgressState) = .empty,
+
+    // R76 — Tabs state parallel array
+    _tabs_state: std.ArrayListUnmanaged(TabsState) = .empty,
+
+    // R77 — Accordion state parallel array
+    _accordion_state: std.ArrayListUnmanaged(AccordionState) = .empty,
+
+    // R78 — Date picker state parallel array
+    _date_picker_state: std.ArrayListUnmanaged(DatePickerState) = .empty,
+
+    // R7B — Avatar state parallel array
+    _avatar_state: std.ArrayListUnmanaged(AvatarState) = .empty,
+
+    // R7B — Badge state parallel array
+    _badge_state: std.ArrayListUnmanaged(BadgeState) = .empty,
+
+    // R7C — Tooltip text parallel array (null = no tooltip)
+    _tooltip: std.ArrayListUnmanaged(?[]const u8) = .empty,
+
+    // R7D — Context menu index parallel array (0xFF = no menu)
+    _context_menu_idx: std.ArrayListUnmanaged(u8) = .empty,
+
+    // R79 — Data table state parallel array
+    _table_state: std.ArrayListUnmanaged(DataTableState) = .empty,
+
+    // R73 — Frame counter and timestamp for animation (updated each frame by app).
+    frame_count: u64 = 0,
+    frame_time_ms: u64 = 0,
+
+    /// Optional: set by app.zig before calling measurePass/buildDrawList for bold/italic face
+    /// selection (R60). When null, measurePass falls back to the `font` parameter directly.
+    /// Acceptance tests leave this null — they pass a single *Font.
+    font_family: ?*font_family_mod.FontFamily = null,
+
     gpa: std.mem.Allocator,
 
     pub fn init(gpa: std.mem.Allocator) Scene {
@@ -224,6 +518,7 @@ pub const Scene = struct {
         // Free text content in InputState items before clearing.
         for (self._input_state.items) |*inp| inp.text.deinit(self.gpa);
         for (self._dropdown_state.items) |*dd| dd.options.deinit(self.gpa);
+        for (self._textarea_state.items) |*ts| ts.line_starts.deinit(self.gpa);
         self._kind.deinit(self.gpa);
         self._style.deinit(self.gpa);
         self._text.deinit(self.gpa);
@@ -238,12 +533,27 @@ pub const Scene = struct {
         self._image_state.deinit(self.gpa);
         self._hidden.deinit(self.gpa);
         self._saved_display.deinit(self.gpa);
+        self._selection.deinit(self.gpa);
+        self._textarea_state.deinit(self.gpa);
+        self._radio_state.deinit(self.gpa);
+        self._slider_state.deinit(self.gpa);
+        self._progress_state.deinit(self.gpa);
+        self._tabs_state.deinit(self.gpa);
+        self._accordion_state.deinit(self.gpa);
+        self._date_picker_state.deinit(self.gpa);
+        self._avatar_state.deinit(self.gpa);
+        self._badge_state.deinit(self.gpa);
+        self._tooltip.deinit(self.gpa);
+        self._context_menu_idx.deinit(self.gpa);
+        for (self._table_state.items) |*ts| ts.sorted_indices.deinit(self.gpa);
+        self._table_state.deinit(self.gpa);
         self.elements.deinit();
     }
 
     pub fn reset(self: *Scene) void {
         for (self._input_state.items) |*inp| inp.text.deinit(self.gpa);
         for (self._dropdown_state.items) |*dd| dd.options.deinit(self.gpa);
+        for (self._textarea_state.items) |*ts| ts.line_starts.deinit(self.gpa);
         self._kind.clearRetainingCapacity();
         self._style.clearRetainingCapacity();
         self._text.clearRetainingCapacity();
@@ -258,6 +568,19 @@ pub const Scene = struct {
         self._image_state.clearRetainingCapacity();
         self._hidden.clearRetainingCapacity();
         self._saved_display.clearRetainingCapacity();
+        self._selection.clearRetainingCapacity();
+        self._textarea_state.clearRetainingCapacity();
+        self._radio_state.clearRetainingCapacity();
+        self._slider_state.clearRetainingCapacity();
+        self._progress_state.clearRetainingCapacity();
+        self._tabs_state.clearRetainingCapacity();
+        self._accordion_state.clearRetainingCapacity();
+        self._date_picker_state.clearRetainingCapacity();
+        self._avatar_state.clearRetainingCapacity();
+        self._badge_state.clearRetainingCapacity();
+        self._tooltip.clearRetainingCapacity();
+        self._context_menu_idx.clearRetainingCapacity();
+        self._table_state.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -273,7 +596,7 @@ pub const Scene = struct {
         self.focusable_indices.clearRetainingCapacity();
         for (self._kind.items, 0..) |kind, i| {
             switch (kind) {
-                .button, .input, .dropdown, .checkbox => {
+                .button, .input, .dropdown, .checkbox, .textarea, .radio, .slider, .accordion, .date_picker => {
                     self.focusable_indices.append(self.gpa, @as(u32, @intCast(i))) catch {};
                 },
                 else => {},
@@ -283,13 +606,17 @@ pub const Scene = struct {
     }
 
     /// Measure every text-bearing element and fill its LayoutNode.measured.
-    /// R60: accepts FontFamily so each element uses the correct bold/italic face.
-    pub fn measurePass(self: *Scene, family: *font_family_mod.FontFamily, atlas: *text.GlyphAtlas) text.FontError!void {
+    /// `font` is the fallback face used when self.font_family is null (acceptance test path).
+    /// When self.font_family is set (app path, R60), per-element bold/italic face is selected.
+    pub fn measurePass(self: *Scene, font: *text.Font, atlas: *text.GlyphAtlas) text.FontError!void {
         for (self._text.items, 0..) |maybe_str, i| {
             const str = maybe_str orelse continue;
             const style = self._style.items[i];
-            const font = family.face(style.font_bold, style.font_italic);
-            const para = try text.layoutParagraph(self.gpa, font, atlas, str, style.font_size, 1e6);
+            const effective_font = if (self.font_family) |fam|
+                fam.face(style.font_bold, style.font_italic)
+            else
+                font;
+            const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, str, style.font_size, 1e6, self.font_family);
             defer self.gpa.free(para.glyphs);
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
         }
@@ -336,13 +663,12 @@ pub const Scene = struct {
     /// Move focus to element at `idx`. Pass std.math.maxInt(u32) to clear focus.
     /// Handles side-effects: deactivates old input, closes old dropdown, activates new input.
     pub fn setFocus(self: *Scene, idx: u32) void {
-        const NONE = std.math.maxInt(u32);
         const old_idx = self.focused_idx;
 
         // Deactivate old element.
         if (old_idx != NONE and old_idx < self._kind.items.len) {
             const old_kind = self._kind.items[old_idx];
-            if (old_kind == .input and old_idx < self._input_state.items.len)
+            if ((old_kind == .input or old_kind == .textarea) and old_idx < self._input_state.items.len)
                 self._input_state.items[old_idx].active = false;
             if (old_kind == .dropdown and old_idx < self._dropdown_state.items.len)
                 self._dropdown_state.items[old_idx].open = false;
@@ -354,7 +680,7 @@ pub const Scene = struct {
 
         // Activate new element.
         if (idx != NONE and idx < self._kind.items.len) {
-            if (self._kind.items[idx] == .input and idx < self._input_state.items.len)
+            if ((self._kind.items[idx] == .input or self._kind.items[idx] == .textarea) and idx < self._input_state.items.len)
                 self._input_state.items[idx].active = true;
             if (idx < self.elements.dirty.bit_length)
                 self.elements.dirty.set(idx);
@@ -440,7 +766,10 @@ pub const Scene = struct {
         inp.text.clearRetainingCapacity();
         try inp.text.appendSlice(self.gpa, initial_text);
         inp.cursor = @as(u32, @intCast(initial_text.len));
-        inp.selection_start = inp.cursor;
+        // R62: sync selection to cursor position.
+        if (idx < self._selection.items.len) {
+            self._selection.items[idx] = .{ .anchor = inp.cursor, .active = inp.cursor };
+        }
     }
 
     pub fn getInputText(self: *Scene, idx: u32) []const u8 {
@@ -510,6 +839,346 @@ pub const Scene = struct {
 
     pub fn isCheckboxChecked(self: *Scene, idx: u32) bool {
         return self._checkbox_state.items[idx].checked;
+    }
+
+    // -----------------------------------------------------------------------
+    // Radio group (R71)
+    // -----------------------------------------------------------------------
+
+    pub fn radioStateOf(self: *Scene, idx: u32) *RadioState {
+        return &self._radio_state.items[idx];
+    }
+
+    pub fn isRadioSelected(self: *Scene, idx: u32) bool {
+        return self._radio_state.items[idx].selected;
+    }
+
+    /// Select `idx` and deselect all other radios with the same `group_id`.
+    /// Marks all affected elements dirty.
+    pub fn selectRadio(self: *Scene, idx: u32) void {
+        if (idx >= self._radio_state.items.len) return;
+        const gid = self._radio_state.items[idx].group_id;
+        var i: u32 = 0;
+        while (i < self._kind.items.len) : (i += 1) {
+            if (i >= self._radio_state.items.len) break;
+            if (self._kind.items[i] != .radio) continue;
+            const rs = &self._radio_state.items[i];
+            if (rs.group_id != gid) continue;
+            const was = rs.selected;
+            rs.selected = (i == idx);
+            if (was != rs.selected) {
+                if (i < self.elements.dirty.bit_length) self.elements.dirty.set(i);
+            }
+        }
+    }
+
+    /// Select the next radio in the same group (wraps around). Also moves focus.
+    pub fn selectNextInGroup(self: *Scene, idx: u32) void {
+        if (idx >= self._radio_state.items.len) return;
+        const gid = self._radio_state.items[idx].group_id;
+        // Collect group members in order.
+        var group_buf: [256]u32 = undefined;
+        var n: usize = 0;
+        var i: u32 = 0;
+        while (i < self._kind.items.len) : (i += 1) {
+            if (i >= self._radio_state.items.len) break;
+            if (self._kind.items[i] != .radio) continue;
+            if (self._radio_state.items[i].group_id != gid) continue;
+            if (n < group_buf.len) {
+                group_buf[n] = i;
+                n += 1;
+            }
+        }
+        if (n == 0) return;
+        // Find current position.
+        var pos: usize = 0;
+        for (group_buf[0..n], 0..) |gi, pi| {
+            if (gi == idx) {
+                pos = pi;
+                break;
+            }
+        }
+        const next_pos = (pos + 1) % n;
+        const target = group_buf[next_pos];
+        self.selectRadio(target);
+        self.setFocus(target);
+    }
+
+    /// Select the previous radio in the same group (wraps around). Also moves focus.
+    pub fn selectPrevInGroup(self: *Scene, idx: u32) void {
+        if (idx >= self._radio_state.items.len) return;
+        const gid = self._radio_state.items[idx].group_id;
+        // Collect group members in order.
+        var group_buf: [256]u32 = undefined;
+        var n: usize = 0;
+        var i: u32 = 0;
+        while (i < self._kind.items.len) : (i += 1) {
+            if (i >= self._radio_state.items.len) break;
+            if (self._kind.items[i] != .radio) continue;
+            if (self._radio_state.items[i].group_id != gid) continue;
+            if (n < group_buf.len) {
+                group_buf[n] = i;
+                n += 1;
+            }
+        }
+        if (n == 0) return;
+        // Find current position.
+        var pos: usize = 0;
+        for (group_buf[0..n], 0..) |gi, pi| {
+            if (gi == idx) {
+                pos = pi;
+                break;
+            }
+        }
+        const prev_pos = if (pos == 0) n - 1 else pos - 1;
+        const target = group_buf[prev_pos];
+        self.selectRadio(target);
+        self.setFocus(target);
+    }
+
+    // -----------------------------------------------------------------------
+    // Slider (R72)
+    // -----------------------------------------------------------------------
+
+    pub fn sliderStateOf(self: *Scene, idx: u32) *SliderState {
+        return &self._slider_state.items[idx];
+    }
+
+    pub fn getSliderValue(self: *Scene, idx: u32) f32 {
+        return self._slider_state.items[idx].value;
+    }
+
+    /// Set slider value, clamped to [min, max], snapped to step, and mark dirty.
+    pub fn setSliderValue(self: *Scene, idx: u32, value: f32) void {
+        var st = &self._slider_state.items[idx];
+        const clamped = std.math.clamp(value, st.min, st.max);
+        const snapped = snapToStep(clamped, st.min, st.step);
+        st.value = snapped;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Progress / Spinner (R73)
+    // -----------------------------------------------------------------------
+
+    pub fn progressStateOf(self: *Scene, idx: u32) *ProgressState {
+        return &self._progress_state.items[idx];
+    }
+
+    pub fn setProgress(self: *Scene, idx: u32, value: f32) void {
+        self._progress_state.items[idx].value = std.math.clamp(value, 0.0, 1.0);
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tabs (R76)
+    // -----------------------------------------------------------------------
+
+    pub fn tabsStateOf(self: *Scene, idx: u32) *TabsState {
+        return &self._tabs_state.items[idx];
+    }
+
+    /// Switch the active tab to `tab_idx`, show that panel, hide the rest.
+    pub fn selectTab(self: *Scene, container_idx: u32, tab_idx: u32) void {
+        const ts = &self._tabs_state.items[container_idx];
+        if (ts.active_idx == tab_idx) return;
+        ts.active_idx = tab_idx;
+        var child_idx = self.elements.first_child.items[container_idx];
+        var item_i: u32 = 0;
+        while (child_idx != NONE) : (child_idx = self.elements.next_sibling.items[child_idx]) {
+            if (child_idx < self._kind.items.len and self._kind.items[child_idx] == .tab_item) {
+                self.setHidden(child_idx, item_i != tab_idx);
+                item_i += 1;
+            }
+        }
+        if (container_idx < self.elements.dirty.bit_length) self.elements.dirty.set(container_idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Accordion (R77)
+    // -----------------------------------------------------------------------
+
+    pub fn accordionStateOf(self: *Scene, idx: u32) *AccordionState {
+        return &self._accordion_state.items[idx];
+    }
+
+    /// Toggle open/closed. Shows or hides the body child.
+    pub fn toggleAccordion(self: *Scene, idx: u32) void {
+        const state = &self._accordion_state.items[idx];
+        state.open = !state.open;
+        const body_idx = state.body_idx;
+        if (body_idx != NONE) {
+            self.setHidden(body_idx, !state.open);
+        }
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn isAccordionOpen(self: *Scene, idx: u32) bool {
+        return self._accordion_state.items[idx].open;
+    }
+
+    // -----------------------------------------------------------------------
+    // Date picker (R78)
+    // -----------------------------------------------------------------------
+
+    pub fn datePickerStateOf(self: *Scene, idx: u32) *DatePickerState {
+        return &self._date_picker_state.items[idx];
+    }
+
+    pub fn setDateValue(self: *Scene, idx: u32, value: DateValue) void {
+        self._date_picker_state.items[idx].value = value;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn getDateValue(self: *Scene, idx: u32) DateValue {
+        return self._date_picker_state.items[idx].value;
+    }
+
+    pub fn openCalendar(self: *Scene, idx: u32) void {
+        self._date_picker_state.items[idx].open = true;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn closeCalendar(self: *Scene, idx: u32) void {
+        self._date_picker_state.items[idx].open = false;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Avatar / badge (R7B)
+    // -----------------------------------------------------------------------
+
+    pub fn avatarStateOf(self: *Scene, idx: u32) *AvatarState {
+        return &self._avatar_state.items[idx];
+    }
+
+    pub fn setAvatarImage(self: *Scene, idx: u32, image_id: ImageId) void {
+        self._avatar_state.items[idx].image_id = image_id;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn setAvatarInitials(self: *Scene, idx: u32, initials: [2]u8) void {
+        self._avatar_state.items[idx].initials = initials;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn badgeStateOf(self: *Scene, idx: u32) *BadgeState {
+        return &self._badge_state.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
+    // Tooltip (R7C)
+    // -----------------------------------------------------------------------
+
+    pub fn tooltipOf(self: *Scene, idx: u32) ?[]const u8 {
+        if (idx >= self._tooltip.items.len) return null;
+        return self._tooltip.items[idx];
+    }
+
+    pub fn setTooltip(self: *Scene, idx: u32, text_val: ?[]const u8) void {
+        if (idx >= self._tooltip.items.len) return;
+        self._tooltip.items[idx] = text_val;
+    }
+
+    // -----------------------------------------------------------------------
+    // Context menu index (R7D)
+    // -----------------------------------------------------------------------
+
+    pub fn contextMenuIdxOf(self: *Scene, idx: u32) u8 {
+        if (idx >= self._context_menu_idx.items.len) return 0xFF;
+        return self._context_menu_idx.items[idx];
+    }
+
+    pub fn setContextMenuIdx(self: *Scene, idx: u32, menu_idx: u8) void {
+        if (idx >= self._context_menu_idx.items.len) return;
+        self._context_menu_idx.items[idx] = menu_idx;
+    }
+
+    // -----------------------------------------------------------------------
+    // Data table (R79)
+    // -----------------------------------------------------------------------
+
+    pub fn tableStateOf(self: *Scene, idx: u32) *DataTableState {
+        return &self._table_state.items[idx];
+    }
+
+    pub fn setTableData(self: *Scene, idx: u32, data: *const DataTableRows) void {
+        const ts = &self._table_state.items[idx];
+        ts.rows = data;
+        // Rebuild sorted_indices (identity mapping initially).
+        ts.sorted_indices.clearRetainingCapacity();
+        var r: u32 = 0;
+        while (r < @min(data.row_count, MAX_TABLE_ROWS)) : (r += 1) {
+            ts.sorted_indices.append(self.gpa, r) catch break;
+        }
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn setTableColumns(self: *Scene, idx: u32, columns: []const DataColumn) void {
+        const ts = &self._table_state.items[idx];
+        const n = @min(columns.len, MAX_COLUMNS);
+        ts.col_count = @intCast(n);
+        for (0..n) |i| ts.columns[i] = columns[i];
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    /// Sort by column `col_idx`. Cycles none → asc → desc → none.
+    pub fn sortTable(self: *Scene, idx: u32, col_idx: u8) void {
+        const ts = &self._table_state.items[idx];
+        if (ts.sort_col == col_idx) {
+            ts.sort_dir = switch (ts.sort_dir) {
+                .none => .asc,
+                .asc => .desc,
+                .desc => .none,
+            };
+        } else {
+            ts.sort_col = col_idx;
+            ts.sort_dir = .asc;
+        }
+
+        const rows_data = ts.rows orelse return;
+        if (ts.sort_dir == .none) {
+            // Restore identity order.
+            ts.sorted_indices.clearRetainingCapacity();
+            var r: u32 = 0;
+            while (r < @min(rows_data.row_count, MAX_TABLE_ROWS)) : (r += 1) {
+                ts.sorted_indices.append(self.gpa, r) catch break;
+            }
+            if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+            return;
+        }
+
+        // Sort using cell text comparison (stable-ish via std sort).
+        const n = ts.sorted_indices.items.len;
+        var buf_a: [128]u8 = undefined;
+        var buf_b: [128]u8 = undefined;
+        const col = col_idx;
+        const ascending = ts.sort_dir == .asc;
+
+        // Simple insertion sort (acceptable for <= 1000 rows).
+        const row_base: [*]u8 = @ptrCast(rows_data.row_ptr);
+        var i: usize = 1;
+        while (i < n) : (i += 1) {
+            const key = ts.sorted_indices.items[i];
+            const key_row_ptr: *anyopaque = @ptrCast(row_base + @as(usize, key) * rows_data.row_size);
+            const key_len = rows_data.cell_fn(key_row_ptr, col, &buf_a);
+            const key_text = buf_a[0..key_len];
+            var j: usize = i;
+            while (j > 0) {
+                const cmp_row = ts.sorted_indices.items[j - 1];
+                const cmp_row_ptr: *anyopaque = @ptrCast(row_base + @as(usize, cmp_row) * rows_data.row_size);
+                const cmp_len = rows_data.cell_fn(cmp_row_ptr, col, &buf_b);
+                const cmp_text = buf_b[0..cmp_len];
+                const less = std.mem.lessThan(u8, key_text, cmp_text);
+                const should_swap = if (ascending) less else !less;
+                if (!should_swap) break;
+                ts.sorted_indices.items[j] = ts.sorted_indices.items[j - 1];
+                j -= 1;
+            }
+            ts.sorted_indices.items[j] = key;
+        }
+
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
     }
 
     // -----------------------------------------------------------------------
@@ -595,6 +1264,36 @@ pub const Scene = struct {
     }
 
     // -----------------------------------------------------------------------
+    // Selection (R62)
+    // -----------------------------------------------------------------------
+
+    /// Return a pointer to the selection state for element `idx`.
+    pub fn selectionOf(self: *Scene, idx: u32) *TextSelection {
+        return &self._selection.items[idx];
+    }
+
+    /// Set selection for element `idx` and mark it dirty.
+    pub fn setSelection(self: *Scene, idx: u32, anchor: u32, active: u32) void {
+        self._selection.items[idx] = .{ .anchor = anchor, .active = active };
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    /// Collapse selection for element `idx` and mark it dirty.
+    pub fn clearSelection(self: *Scene, idx: u32) void {
+        self._selection.items[idx] = .{};
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Textarea (R63)
+    // -----------------------------------------------------------------------
+
+    /// Return a pointer to the textarea state for element `idx`.
+    pub fn textareaStateOf(self: *Scene, idx: u32) *TextareaState {
+        return &self._textarea_state.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
     // Children management (R53)
     // -----------------------------------------------------------------------
 
@@ -603,7 +1302,7 @@ pub const Scene = struct {
     pub fn removeChildren(self: *Scene, parent_idx: u32) void {
         const parent_id = ElementId{
             .index = parent_idx,
-            .gen   = self.elements.gen.items[parent_idx],
+            .gen = self.elements.gen.items[parent_idx],
         };
         // Collect all direct children first (iterator is invalidated by remove)
         var children_buf: [256]ElementId = undefined;
@@ -625,7 +1324,7 @@ pub const Scene = struct {
     fn removeSubtree(self: *Scene, idx: u32) void {
         const id = ElementId{
             .index = idx,
-            .gen   = self.elements.gen.items[idx],
+            .gen = self.elements.gen.items[idx],
         };
         // Remove children first (depth-first)
         var children_buf: [256]ElementId = undefined;
@@ -778,10 +1477,10 @@ pub const Scene = struct {
         // R51: margin (compare each field)
         const emm = empty.layout.margin;
         const rm = resolved.layout.margin;
-        if (!std.meta.eql(rm.top, emm.top))    final_layout.margin.top    = rm.top;
-        if (!std.meta.eql(rm.right, emm.right)) final_layout.margin.right  = rm.right;
+        if (!std.meta.eql(rm.top, emm.top)) final_layout.margin.top = rm.top;
+        if (!std.meta.eql(rm.right, emm.right)) final_layout.margin.right = rm.right;
         if (!std.meta.eql(rm.bottom, emm.bottom)) final_layout.margin.bottom = rm.bottom;
-        if (!std.meta.eql(rm.left, emm.left))   final_layout.margin.left   = rm.left;
+        if (!std.meta.eql(rm.left, emm.left)) final_layout.margin.left = rm.left;
 
         // Sync layout padding from the resolved style (style padding drives layout spacing).
         // Only apply if the layout hasn't been explicitly set via a Tailwind class.
@@ -800,7 +1499,7 @@ pub const Scene = struct {
             const prop = attr.name[6..];
             const raw_value: []const u8 = switch (attr.value) {
                 .literal => |s| s,
-                .bind    => continue, // bind paths are not evaluated during instantiate
+                .bind => continue, // bind paths are not evaluated during instantiate
             };
             applyInlineStyle(prop, raw_value, &final_style);
         }
@@ -811,6 +1510,12 @@ pub const Scene = struct {
         var start_hidden: bool = false;
         for (desc.attrs) |attr| {
             if (std.mem.eql(u8, attr.name, "text")) {
+                text_val = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => |s| s,
+                };
+            } else if (kind == .tab_item and std.mem.eql(u8, attr.name, "label")) {
+                // R76: store tab label in _text for use by the tab bar renderer.
                 text_val = switch (attr.value) {
                     .literal => |s| s,
                     .bind => |s| s,
@@ -912,6 +1617,197 @@ pub const Scene = struct {
         }
         self._saved_display.items[id.index] = final_layout.display;
 
+        // R62: selection state
+        try self._selection.ensureTotalCapacity(self.gpa, needed);
+        if (self._selection.items.len <= id.index) {
+            self._selection.items.len = needed;
+        }
+        self._selection.items[id.index] = .{};
+
+        // R63: textarea state
+        try self._textarea_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._textarea_state.items.len <= id.index) {
+            self._textarea_state.items.len = needed;
+        }
+        self._textarea_state.items[id.index] = .{};
+
+        // R71: radio state
+        try self._radio_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._radio_state.items.len <= id.index) {
+            self._radio_state.items.len = needed;
+        }
+        self._radio_state.items[id.index] = .{};
+
+        // R72: slider state
+        try self._slider_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._slider_state.items.len <= id.index) {
+            self._slider_state.items.len = needed;
+        }
+        self._slider_state.items[id.index] = .{};
+
+        // R73: progress state
+        try self._progress_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._progress_state.items.len <= id.index) {
+            self._progress_state.items.len = needed;
+        }
+        self._progress_state.items[id.index] = .{};
+
+        // R76: tabs state
+        try self._tabs_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._tabs_state.items.len <= id.index) {
+            self._tabs_state.items.len = needed;
+        }
+        self._tabs_state.items[id.index] = .{};
+
+        // R77: accordion state
+        try self._accordion_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._accordion_state.items.len <= id.index) {
+            self._accordion_state.items.len = needed;
+        }
+        self._accordion_state.items[id.index] = .{};
+
+        // R78: date picker state
+        try self._date_picker_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._date_picker_state.items.len <= id.index) {
+            self._date_picker_state.items.len = needed;
+        }
+        self._date_picker_state.items[id.index] = .{};
+
+        // R7B: avatar state
+        try self._avatar_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._avatar_state.items.len <= id.index) {
+            self._avatar_state.items.len = needed;
+        }
+        self._avatar_state.items[id.index] = .{};
+
+        // R7B: badge state
+        try self._badge_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._badge_state.items.len <= id.index) {
+            self._badge_state.items.len = needed;
+        }
+        self._badge_state.items[id.index] = .{};
+
+        // R7C: tooltip
+        try self._tooltip.ensureTotalCapacity(self.gpa, needed);
+        if (self._tooltip.items.len <= id.index) {
+            self._tooltip.items.len = needed;
+        }
+        self._tooltip.items[id.index] = null;
+
+        // R7D: context menu index
+        try self._context_menu_idx.ensureTotalCapacity(self.gpa, needed);
+        if (self._context_menu_idx.items.len <= id.index) {
+            self._context_menu_idx.items.len = needed;
+        }
+        self._context_menu_idx.items[id.index] = 0xFF;
+
+        // R79: data table state
+        try self._table_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._table_state.items.len <= id.index) {
+            self._table_state.items.len = needed;
+        }
+        self._table_state.items[id.index] = .{};
+
+        // R71: parse radio attributes (group, value)
+        if (kind == .radio) {
+            var rs = &self._radio_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "group")) {
+                    rs.group_id = hashGroupName(attr_val);
+                } else if (std.mem.eql(u8, attr.name, "value")) {
+                    rs.value_str = attr_val;
+                } else if (std.mem.eql(u8, attr.name, "selected")) {
+                    rs.selected = std.mem.eql(u8, attr_val, "true");
+                }
+            }
+        }
+
+        // R72: parse slider attributes (min, max, step, value)
+        if (kind == .slider) {
+            var ss = &self._slider_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "min")) {
+                    if (markup.parseFloat(attr_val)) |v| ss.min = v;
+                } else if (std.mem.eql(u8, attr.name, "max")) {
+                    if (markup.parseFloat(attr_val)) |v| ss.max = v;
+                } else if (std.mem.eql(u8, attr.name, "step")) {
+                    if (markup.parseFloat(attr_val)) |v| ss.step = v;
+                } else if (std.mem.eql(u8, attr.name, "value")) {
+                    if (markup.parseFloat(attr_val)) |v| {
+                        ss.value = std.math.clamp(v, ss.min, ss.max);
+                    }
+                }
+            }
+        }
+
+        // R73: parse progress_bar attributes (value, indeterminate)
+        if (kind == .progress_bar) {
+            var ps = &self._progress_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "value")) {
+                    if (markup.parseFloat(attr_val)) |v| ps.value = std.math.clamp(v, 0.0, 1.0);
+                } else if (std.mem.eql(u8, attr.name, "indeterminate")) {
+                    ps.indeterminate = std.mem.eql(u8, attr_val, "true");
+                }
+            }
+        }
+
+        // R78: parse date_picker attributes (disabled, value)
+        if (kind == .date_picker) {
+            var dp = &self._date_picker_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "disabled")) {
+                    dp.disabled = std.mem.eql(u8, attr_val, "true");
+                } else if (std.mem.eql(u8, attr.name, "value")) {
+                    if (parseDateStr(attr_val)) |v| dp.value = v;
+                }
+            }
+        }
+
+        // R7B: parse avatar attributes (size, initials)
+        if (kind == .avatar) {
+            var av = &self._avatar_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "size")) {
+                    if (markup.parseFloat(attr_val)) |v| av.size_px = v;
+                } else if (std.mem.eql(u8, attr.name, "initials") and attr_val.len >= 1) {
+                    av.initials[0] = attr_val[0];
+                    av.initials[1] = if (attr_val.len >= 2) attr_val[1] else 0;
+                }
+            }
+        }
+
+        // R7C: parse tooltip attribute
+        for (desc.attrs) |attr| {
+            if (std.mem.eql(u8, attr.name, "tooltip")) {
+                self._tooltip.items[id.index] = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => |s| s,
+                };
+                break;
+            }
+        }
+
         // Apply if= hidden state after element is registered
         if (start_hidden) {
             self.setHidden(id.index, true);
@@ -920,6 +1816,69 @@ pub const Scene = struct {
         // --- Recurse into children ---
         for (desc.children) |child| {
             _ = try self.instantiateNode(child, tokens, id);
+        }
+
+        // R76: Post-process Tabs after children — count tab_items and hide all but first.
+        if (kind == .tabs) {
+            const ts = &self._tabs_state.items[id.index];
+            var child_idx = self.elements.first_child.items[id.index];
+            var tab_i: u32 = 0;
+            while (child_idx != NONE) : (child_idx = self.elements.next_sibling.items[child_idx]) {
+                if (child_idx < self._kind.items.len and self._kind.items[child_idx] == .tab_item) {
+                    self.setHidden(child_idx, tab_i != 0);
+                    tab_i += 1;
+                }
+            }
+            ts.tab_count = tab_i;
+        }
+
+        // R77: Post-process Accordion after children — find body child and hide it initially.
+        if (kind == .accordion) {
+            const as_ = &self._accordion_state.items[id.index];
+            var body_idx: u32 = NONE;
+
+            // First pass: look for slot="body" attribute on a child.
+            var child_idx = self.elements.first_child.items[id.index];
+            var desc_i: usize = 0;
+            while (child_idx != NONE and desc_i < desc.children.len) {
+                const child_desc = desc.children[desc_i];
+                var is_body = false;
+                for (child_desc.attrs) |attr| {
+                    if (std.mem.eql(u8, attr.name, "slot")) {
+                        const val: []const u8 = switch (attr.value) {
+                            .literal => |s| s,
+                            .bind => "",
+                        };
+                        if (std.mem.eql(u8, val, "body")) {
+                            is_body = true;
+                            break;
+                        }
+                    }
+                }
+                if (is_body) {
+                    body_idx = child_idx;
+                    break;
+                }
+                child_idx = self.elements.next_sibling.items[child_idx];
+                desc_i += 1;
+            }
+
+            // Fall back: second child is body if no slot="body" found.
+            if (body_idx == NONE) {
+                var ci: u32 = 0;
+                child_idx = self.elements.first_child.items[id.index];
+                while (child_idx != NONE) : (child_idx = self.elements.next_sibling.items[child_idx]) {
+                    if (ci == 1) {
+                        body_idx = child_idx;
+                        break;
+                    }
+                    ci += 1;
+                }
+            }
+
+            as_.body_idx = body_idx;
+            // Accordion starts collapsed — hide the body.
+            if (body_idx != NONE) self.setHidden(body_idx, true);
         }
 
         return id;

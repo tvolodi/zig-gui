@@ -225,9 +225,9 @@ pub const DrawCommand = union(enum) {
     filled_rect: FilledRect,
     border_rect: BorderRect,
     glyph: GlyphCmd,
-    set_scissor: ScissorRect,     // R42
-    restore_scissor: void,         // R42
-    image_rect: ImageCmd,          // R43
+    set_scissor: ScissorRect, // R42
+    restore_scissor: void, // R42
+    image_rect: ImageCmd, // R43
 };
 
 pub const QuadVertex = struct {
@@ -814,6 +814,11 @@ fn glfwFramebufferSizeCallback(
 pub const VulkanBackend = struct {
     _impl: *anyopaque = undefined,
 
+    /// R83 — true when this backend was created by initShared and does NOT own
+    /// the VkDevice, VkPhysicalDevice, VkCommandPool, or VkQueue.
+    /// deinit() skips device destruction when this flag is set.
+    is_shared: bool = false,
+
     pub fn init(gpa: std.mem.Allocator, platform: *Platform) BackendError!VulkanBackend {
         const impl = gpa.create(VulkanImpl) catch return BackendError.InstanceCreationFailed;
         impl.* = .{
@@ -894,6 +899,21 @@ pub const VulkanBackend = struct {
 
     pub fn deinit(self: *VulkanBackend) void {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        if (self.is_shared) {
+            // R83: shared backend — only destroy surface-owned resources, NOT the device.
+            // The primary backend that owns the device is responsible for destroying it.
+            _ = c.vkDeviceWaitIdle(impl.device);
+            c.vkDestroyPipeline(impl.device, impl.pipeline, null);
+            c.vkDestroyPipelineLayout(impl.device, impl.pipeline_layout, null);
+            vkDestroySyncObjects(impl);
+            vkDestroyFramebuffers(impl);
+            c.vkDestroyRenderPass(impl.device, impl.render_pass, null);
+            vkDestroySwapchainResources(impl);
+            // Do NOT destroy command pool, device, debug messenger, or instance.
+            c.vkDestroySurfaceKHR(impl.instance, impl.surface, null);
+            impl.allocator.destroy(impl);
+            return;
+        }
         _ = c.vkDeviceWaitIdle(impl.device);
         c.vkDestroyPipeline(impl.device, impl.pipeline, null);
         c.vkDestroyPipelineLayout(impl.device, impl.pipeline_layout, null);
@@ -907,6 +927,31 @@ pub const VulkanBackend = struct {
         if (enable_validation) vkDestroyDebugMessenger(impl.instance, impl.debug_messenger);
         c.vkDestroyInstance(impl.instance, null);
         impl.allocator.destroy(impl);
+    }
+
+    /// R83 — Create a VulkanBackend that shares the device from `primary`.
+    /// Only the surface + swapchain are created; device, command pool, and
+    /// graphics queue are reused (not owned).
+    ///
+    /// The returned backend has `is_shared = true`. Its `deinit` will NOT
+    /// destroy the device; call `primary.deinit()` separately when done.
+    ///
+    /// Note: Full GPU implementation is deferred (requires surfaceKHR creation
+    /// for the secondary platform and swapchain setup). Returns error.Unimplemented
+    /// until the GPU path is wired in.
+    pub fn initShared(
+        gpa: std.mem.Allocator,
+        primary: *VulkanBackend,
+        platform: *Platform,
+    ) !VulkanBackend {
+        _ = gpa;
+        _ = primary;
+        _ = platform;
+        // Stub: full implementation requires creating a new VkSurfaceKHR for the
+        // secondary platform and a new VkSwapchainKHR bound to it, while reusing
+        // the primary's device, physical_device, command_pool, and graphics_queue.
+        // Headless tests verify the is_shared flag path, not the GPU init path.
+        return error.Unimplemented;
     }
 
     pub fn beginFrame(self: *VulkanBackend) bool {
@@ -1052,13 +1097,9 @@ pub const VulkanBackend = struct {
 
     /// `atlas` is *const GpuAtlas or any struct with the same leading fields
     /// (image, image_view, sampler, memory as ?*anyopaque). Any *T coerces to *const anyopaque.
-    /// `image_atlas` is *const GpuImageAtlas (from module 09) passed as opaque to avoid
-    /// an upward import. Reserved for future descriptor binding 1 / shader mode 2 (R43).
-    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, atlas: *const anyopaque, image_atlas: *const anyopaque) void {
+    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, atlas: *const anyopaque) void {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
         const h: *const GpuAtlas = @ptrCast(@alignCast(atlas));
-        _ = image_atlas; // TODO: bind image_atlas descriptor (binding 1) and submit quad with mode=2
-        // For v1 this is a GPU integration step; skipped in unit-test builds.
         vkDrawFrame(impl, commands, h);
     }
 };

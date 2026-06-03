@@ -37,6 +37,37 @@ pub const AppOptions = app_impl.AppOptions;
 // App — three-method public API (R10)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// R80 — Navigator re-exports
+// ---------------------------------------------------------------------------
+pub const Navigator = @import("navigator.zig").Navigator;
+pub const ScreenFn = @import("navigator.zig").ScreenFn;
+pub const NavEntry = @import("navigator.zig").NavEntry;
+pub const PendingNav = @import("navigator.zig").PendingNav;
+pub const ScreenEntry = @import("navigator.zig").ScreenEntry;
+
+// ---------------------------------------------------------------------------
+// R81 — AppState re-export
+// ---------------------------------------------------------------------------
+pub const AppState = @import("app_state.zig").AppState;
+
+// ---------------------------------------------------------------------------
+// R82 — PersistentSettings re-export
+// ---------------------------------------------------------------------------
+pub const PersistentSettings = @import("persistent_settings.zig").PersistentSettings;
+
+// ---------------------------------------------------------------------------
+// R83 — MultiWindowApp re-exports
+// ---------------------------------------------------------------------------
+pub const MultiWindowApp = @import("multi_window.zig").MultiWindowApp;
+pub const WindowEntry = @import("multi_window.zig").WindowEntry;
+pub const WindowId = @import("multi_window.zig").WindowId;
+// Note: multi_window.WindowOptions is intentionally not re-exported here because
+// types.zig already exports mod01.WindowOptions under that name (R10 API).
+// Callers that need the multi-window window-open options use:
+//   @import("multi_window.zig").WindowOptions  or
+//   app_types.MultiWindowApp ... WindowOptions via multi_window.zig directly.
+
 pub const App = struct {
     _inner: app_impl.AppInner,
 

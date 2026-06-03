@@ -5,7 +5,7 @@
 > roughly by dependency, and tagged with a milestone. Detailed requirements for each item
 > live in (or will live in) `docs/requirements/`.
 >
-> **Status key:** `done` · `in-progress` · `planned` · `post-v1`
+> **Status key:** `done` · `in-progress` · `planned` · `post-v2`
 
 ---
 
@@ -102,53 +102,53 @@ The authoring surface covers the common cases without forcing escape to raw Zig.
 
 ---
 
-## Milestone 6 — Text completeness `planned`
+## Milestone 6 — Text completeness `done`
 
 Text rendering covers what a desktop app actually needs.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M6-01 | **Bold and italic variants** — load regular + bold (+ optional italic) faces from the same font family; `font-bold` / `font-italic` classes | 02 |
-| M6-02 | **Mixed font sizes in one scene** — `text-sm` / `text-base` / `text-lg` per element, already in the class resolver but needs measurement + atlas keying per size | 02, 07 |
-| M6-03 | **Text selection** — mouse drag selects a range; keyboard extend-selection; visual highlight rect behind selected glyphs | M1-02, 09 |
-| M6-04 | **Multi-line text input** — `<Textarea>` widget; newline handling, vertical scroll within the widget | M3-03 |
-| M6-05 | **Font fallback** — if a codepoint is absent from the primary font, try a fallback font before rendering a replacement glyph | 02 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M6-01 | **Bold and italic variants** — load regular + bold (+ optional italic) faces from the same font family; `font-bold` / `font-italic` classes | 02 | [R60](requirements/R60_bold_italic_variants.md) | `done` |
+| M6-02 | **Mixed font sizes in one scene** — `text-sm` / `text-base` / `text-lg` per element, already in the class resolver but needs measurement + atlas keying per size | 02, 07 | [R61](requirements/R61_mixed_font_sizes.md) | `done` |
+| M6-03 | **Text selection** — mouse drag selects a range; keyboard extend-selection; visual highlight rect behind selected glyphs | M1-02, 09 | [R62](requirements/R62_text_selection.md) | `done` |
+| M6-04 | **Multi-line text input** — `<Textarea>` widget; newline handling, vertical scroll within the widget | M3-03 | [R63](requirements/R63_textarea.md) | `done` |
+| M6-05 | **Font fallback** — if a codepoint is absent from the primary font, try a fallback font before rendering a replacement glyph | 02 | [R64](requirements/R64_font_fallback.md) | `done` |
 
 ---
 
-## Milestone 7 — Component library `planned`
+## Milestone 7 — Component library `done`
 
 Widgets beyond the seven core kinds.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M7-01 | **Checkbox** — spec'd in M3-05; library-level polished version with label slot | M3-05 |
-| M7-02 | **Radio group** | M3-01 |
-| M7-03 | **Slider** | M1-02 |
-| M7-04 | **Progress bar / spinner** | M4 |
-| M7-05 | **Toast / notification** — timed overlay in a corner | M4-02 |
-| M7-06 | **Modal dialog** — blocking overlay with content slot | M4-02 |
-| M7-07 | **Tabs** | M2-01 |
-| M7-08 | **Accordion / collapsible** | M2-01 |
-| M7-09 | **Date picker** | M3-03, M7-06 |
-| M7-10 | **Data table** — virtualized rows, sortable columns | M3-06 |
-| M7-11 | **Separator / divider** — trivial 1px line | 09 |
-| M7-12 | **Avatar / badge** | M4-04 |
-| M7-13 | **Tooltip** | M4-02 |
-| M7-14 | **Context menu** | M4-02, M1-02 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M7-01 | **Checkbox** — polished, with label slot | M3-05 | [R70](requirements/R70_checkbox_polished.md) | `done` |
+| M7-02 | **Radio group** | M3-01 | [R71](requirements/R71_radio_group.md) | `done` |
+| M7-03 | **Slider** | M1-02 | [R72](requirements/R72_slider.md) | `done` |
+| M7-04 | **Progress bar / spinner** | M4 | [R73](requirements/R73_progress_spinner.md) | `done` |
+| M7-05 | **Toast / notification** — timed overlay in a corner | M4-02 | [R74](requirements/R74_toast_notification.md) | `done` |
+| M7-06 | **Modal dialog** — blocking overlay with content slot | M4-02 | [R75](requirements/R75_modal_dialog.md) | `done` |
+| M7-07 | **Tabs** | M2-01 | [R76](requirements/R76_tabs.md) | `done` |
+| M7-08 | **Accordion / collapsible** | M2-01 | [R77](requirements/R77_accordion.md) | `done` |
+| M7-09 | **Date picker** | M3-03, M7-06 | [R78](requirements/R78_date_picker.md) | `done` |
+| M7-10 | **Data table** — virtualized rows, sortable columns | M3-06 | [R79](requirements/R79_data_table.md) | `done` |
+| M7-11 | **Separator / divider** — trivial 1px line | 09 | [R7A](requirements/R7A_separator.md) | `done` |
+| M7-12 | **Avatar / badge** | M4-04 | [R7B](requirements/R7B_avatar_badge.md) | `done` |
+| M7-13 | **Tooltip** | M4-02 | [R7C](requirements/R7C_tooltip.md) | `done` |
+| M7-14 | **Context menu** | M4-02, M1-02 | [R7D](requirements/R7D_context_menu.md) | `done` |
 
 ---
 
-## Milestone 8 — App-level concerns `planned`
+## Milestone 8 — App-level concerns `done`
 
 Structure for building a real multi-screen application.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M8-01 | **Screen / navigation model** — named screens, push/pop history stack, screen transition | M1-01 |
-| M8-02 | **Application state store** — a top-level signal tree accessible from any screen | M2-01 |
-| M8-03 | **Persistent settings** — read/write a small key-value store to disk (window size, theme preference) | M1-01 |
-| M8-04 | **Multi-window** — open a second `Platform` + `Scene` pair; share font and GPU device | M1-01 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M8-01 | **Screen / navigation model** — named screens, push/pop history stack, deferred screen transitions | M1-01 | [R80](requirements/R80_screen_navigation.md) | `done` |
+| M8-02 | **Application state store** — a top-level signal tree accessible from any screen | M2-01 | [R81](requirements/R81_app_state_store.md) | `done` |
+| M8-03 | **Persistent settings** — read/write a small key-value store to disk (window size, theme preference) | M1-01 | [R82](requirements/R82_persistent_settings.md) | `done` |
+| M8-04 | **Multi-window** — open a second `Platform` + `Scene` pair; share font and GPU device | M1-01 | [R83](requirements/R83_multi_window.md) | `done` |
 
 ---
 
@@ -156,33 +156,171 @@ Structure for building a real multi-screen application.
 
 Makes building with the framework fast and observable.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M9-01 | **Debug overlay** — toggle with a hotkey; draws element bounds, shows computed rect and applied style on hover | M1-02, 09 |
-| M9-02 | **Scene dump** — `Scene.debugPrint()` writes the element tree with kinds, rects, and styles to stderr | 07 |
-| M9-03 | **Performance counters** — frame time, draw command count, dirty element count displayed in debug overlay | M1-01, M9-01 |
-| M9-04 | **Theme live-swap** — change light/dark or swap a palette at runtime without restart | M2-01, 05 |
-| M9-05 | **Accessibility: font scaling** — a global font-size multiplier applied to the type scale tokens | 05, 06 |
-| M9-06 | **Accessibility: high-contrast mode** — a high-contrast palette variant | 05 |
+| ID | Feature | Depends on | Requirements |
+|---|---|---|---|
+| M9-01 | **Debug overlay** — toggle with F1; draws element bounds, shows computed rect and applied style on hover | M1-02, 09 | [R90](requirements/R90_debug_overlay.md) |
+| M9-02 | **Scene dump** — `Scene.debugPrint()` writes the element tree with kinds, rects, and styles to stderr | 07 | [R91](requirements/R91_scene_dump.md) |
+| M9-03 | **Performance counters** — frame time, draw command count, dirty element count displayed in debug overlay | M1-01, M9-01 | [R92](requirements/R92_performance_counters.md) |
+| M9-04 | **Theme live-swap** — change light/dark or swap a palette at runtime without restart | M2-01, 05 | [R93](requirements/R93_theme_live_swap.md) |
+| M9-05 | **Accessibility: font scaling** — a global font-size multiplier applied to the type scale tokens | 05, 06 | [R94](requirements/R94_font_scaling.md) |
+| M9-06 | **Accessibility: high-contrast mode** — a high-contrast palette variant | 05 | [R95](requirements/R95_high_contrast.md) |
 
 ---
 
-## Post-v1 (explicit non-goals until decided otherwise)
+## Milestone 10 — Production hardening `planned`
 
-These are out of scope until a human decision records them in `00_constitution.md`.
+Makes the framework safe and observable when shipped as a real binary.
 
-| Feature | Reason deferred |
-|---|---|
-| macOS / web / mobile | INV-1.2 — Windows + Linux only |
-| Complex-script shaping (Arabic, CJK) | INV-1.3 — Latin + Cyrillic only |
-| Accessibility tree / screen reader | INV-1.4 |
-| DX12 / Metal backend | INV-2.1 |
-| CSS cascade / specificity | INV-4.2 |
-| `pattern` / `$ref` / combinators in JSON Schema | Explicit non-goal in module 08 spec |
-| Animations / transitions | No timeline model exists yet |
-| Charts / data visualization | Separate concern |
-| Auto-update / CDN delivery | Separate concern |
-| Plugin / extension system | INV-1.1 — no speculative extension points |
+| ID | Feature | Depends on |
+|---|---|---|
+| M10-01 | **Error boundary / recovery** — catch panics or errors from `ScreenFn` / callbacks; display a fallback screen instead of crashing | M8-01 |
+| M10-02 | **Memory budget enforcement** — configurable arena size ceiling; graceful `OutOfMemory` surface (log + fallback screen) instead of undefined behavior | M0 |
+| M10-03 | **Release logging** — structured `std.log` wrapper writing to a rolling file on disk; `App.init` accepts an optional log path | M1-01 |
+| M10-04 | **Graceful startup failure** — if Vulkan is unavailable, display a native OS error dialog instead of crashing to stderr | M1-01 |
+| M10-05 | **Window state persistence** — auto save/restore window position, size, and maximised state via `PersistentSettings` | M8-03 |
+
+---
+
+## Milestone 11 — Input completeness `planned`
+
+Fills the gaps in the current event model.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M11-01 | **Mouse cursor shapes** — change the OS cursor (arrow, text-beam, resize, hand, crosshair) based on hovered element; uses `glfwSetCursor` | M1-02 |
+| M11-02 | **Drag-and-drop (intra-window)** — register elements as drag sources or drop targets; deliver `drag_start`, `drag_move`, `drag_end`, `drop` events | M1-02 |
+| M11-03 | **Right-click event routing** — expose a generic `on_right_click: CallbackFn` on any element, independent of the context-menu registry | M7-14 |
+| M11-04 | **Double-click detection** — `mouse_button_double` event variant with configurable timing threshold (default 250 ms) | M1-02 |
+| M11-05 | **Keyboard shortcuts / accelerators** — register global key combinations (`Ctrl+S`, `Ctrl+Z`) that fire a `CallbackFn` regardless of focused element | M1-02 |
+| M11-06 | **Touch / trackpad gesture support** — swipe-to-scroll and pinch-to-zoom gesture events from GLFW touch callbacks | M1-02 |
+
+---
+
+## Milestone 12 — Layout engine extensions `planned`
+
+Unlocks common layout patterns that are awkward or impossible today.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M12-01 | **Absolute positioning** — `position: absolute` removes an element from flow and places it at `(x, y)` relative to its nearest positioned ancestor | 04 |
+| M12-02 | **Sticky positioning** — `position: sticky` keeps an element at a fixed offset from its scroll container when scrolled past | M3-06, M12-01 |
+| M12-03 | **Wrapping flex rows** — `flex-wrap` support in the layout engine; currently flex containers are non-wrapping only | 04 |
+| M12-04 | **Aspect-ratio constraint** — `aspect-square` / `aspect-w-N aspect-h-N` locks width-to-height ratio during layout | 04 |
+| M12-05 | **Z-index on normal elements** — `z-N` class reorders overlapping siblings within the same layer, without the overlay system | 04, 09 |
+
+---
+
+## Milestone 13 — Rendering quality `planned`
+
+Closes the gap between functional and polished.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M13-01 | **Gradient fills** — `bg-gradient-to-{r,b,br}` with two token-sourced stop colors; emitted as a texture tile | 09, 05 |
+| M13-02 | **Rounded content clipping** — clip element content (images, children) to the rounded-corner boundary of its container | 09 |
+| M13-03 | **Subpixel glyph rendering** — RGB-subpixel atlas channels + ClearType-style fragment shader for crisp text at 12–14 px | 02, 09 |
+| M13-04 | **Vector icons via SDF** — `SdfAtlas` for single-color SVG-path icons that scale without re-rasterization | 09 |
+| M13-05 | **Anti-aliased filled shapes** — 1 px feather at rect and circle edges via coverage mask in the fragment shader | 09 |
+| M13-06 | **HiDPI / display-scale awareness** — read monitor content scale from `glfwGetMonitorContentScale` and multiply all px values; expose `dpi_scale` on `AppInner` | M1-01 |
+
+---
+
+## Milestone 14 — Animation `planned`
+
+A minimal, principled animation model that fits the architecture.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M14-01 | **Animation timeline** — `AnimTimeline` drives a `f32` value from 0→1 over a duration with an easing function; ticks mark subscribed elements dirty | M2-01 |
+| M14-02 | **Style transitions** — `transition-{opacity,background,border}` Tailwind class triggers an `AnimTimeline` when the value changes; blends old and new `ComputedStyle` fields over the duration | M14-01, 09 |
+| M14-03 | **Enter / exit animations** — `animate-in` / `animate-out` classes play a fade+translate when an element's `isHidden` state changes | M14-01, M5-03 |
+| M14-04 | **Spinner and progress animation** — `ProgressBar` indeterminate mode and `Spinner` use a proper `AnimTimeline` instead of marking dirty every frame | M14-01, M7-04 |
+| M14-05 | **Reduced-motion respect** — `prefer_reduced_motion: bool` on `AppInner` disables all `AnimTimeline` playback; set by the app from OS accessibility settings | M14-01 |
+
+---
+
+## Milestone 15 — Internationalisation `planned`
+
+Extends the text model within the Latin + Cyrillic scope.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M15-01 | **Number formatting** — `formatInt(n, locale)` and `formatFloat(n, locale)` helpers applying thousands separators and decimal symbols per a locale config | — |
+| M15-02 | **Date / time formatting** — `formatDate(DateValue, locale)` with day/month/year order and separator per locale | M7-09 |
+| M15-03 | **String table** — build-time tool reads `strings.en.txt` and emits a Zig `const`-table; `t("key")` resolves at comptime; supports one additional locale file | 05 |
+| M15-04 | **RTL layout direction** — `direction: rtl` flag on `LayoutNode` reverses the main flex axis and mirrors text layout coordinates; prerequisite for Hebrew if scope expands | 04 |
+
+---
+
+## Milestone 16 — Platform integrations `planned`
+
+Connects the framework to the OS in ways users expect from a desktop app.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M16-01 | **System tray** — `Tray` struct adds an icon to the OS notification area with a popup menu; Win32 + libnotify (Linux) | M8-04 |
+| M16-02 | **Native file-open dialog** — `Platform.showOpenDialog(filters) ?[]const u8` wraps Win32 `GetOpenFileName` / GTK `GtkFileChooserDialog` | M1-01 |
+| M16-03 | **Native file-save dialog** — `Platform.showSaveDialog(default_name) ?[]const u8` | M16-02 |
+| M16-04 | **OS native color-scheme detection** — read the OS light/dark preference at startup and apply it as the initial theme mode | M9-04 |
+| M16-05 | **MIME clipboard** — extend `Platform.setClipboard` / `getClipboard` to carry a MIME type alongside text; enables copying images and rich text | M3-07 |
+
+---
+
+## Milestone 17 — Accessibility `planned`
+
+Promotes the framework items that were previously deferred from the post-v1 list.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M17-01 | **Accessibility tree** — a parallel `AccessNode` tree mirroring the element tree; one node per live element with role, name, and state properties | 07 |
+| M17-02 | **AT-SPI bridge (Linux)** — expose the `AccessNode` tree over D-Bus AT-SPI2 so screen readers (Orca) can narrate widgets | M17-01 |
+| M17-03 | **UIA bridge (Windows)** — expose the `AccessNode` tree over the Windows UI Automation COM interface so Narrator and NVDA can narrate widgets | M17-01 |
+| M17-04 | **ARIA-like roles in markup** — `role="button"`, `role="list"`, `aria-label="..."` attributes on any markup node populate the `AccessNode` | M17-01, 06 |
+| M17-05 | **Screen-reader-only text** — `sr-only` Tailwind class renders an element invisible but present in the accessibility tree | M17-01 |
+
+---
+
+## Milestone 18 — JSON Schema completeness `planned`
+
+Lifts the remaining deferred keywords from module 08.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M18-01 | **`pattern` validation** — regex validation in schema forms using a vendored regex engine (human decision required per INV-5.6 before implementing) | 08 |
+| M18-02 | **`$ref` resolution** — resolve `$ref` URIs within the same schema document; enables shared sub-schema definitions | 08 |
+| M18-03 | **`allOf` / `anyOf` / `oneOf` combinators** — validate a value against multiple sub-schemas with and/or/exactly-one semantics | 08 |
+| M18-04 | **`dependentRequired`** — conditionally require fields based on the presence of other fields | 08 |
+| M18-05 | **`if` / `then` / `else` conditional schemas** — apply a sub-schema based on whether the value validates against a condition | 08 |
+| M18-06 | **Array add / remove UI** — `+` / `−` controls for array-type fields in a mounted `Form`; currently v1 renders existing items only | 08, M7-06 |
+
+---
+
+## Milestone 19 — Auto-update / delivery `planned`
+
+Ships the binary to end users.
+
+| ID | Feature | Depends on |
+|---|---|---|
+| M19-01 | **Update manifest check** — on startup, fetch a JSON manifest from a configured URL and compare the bundled version string; notify the user if a newer version exists | M10-03 |
+| M19-02 | **Delta download** — download only a binary diff (bsdiff format) between the current and next version; apply in-process | M19-01 |
+| M19-03 | **Staged update** — write the new binary to a temp path, verify its checksum, then rename atomically on next launch (same pattern as `PersistentSettings.flush`) | M19-02 |
+| M19-04 | **Update UI** — toast notification with "Update available — restart to apply" action; progress bar during download | M19-02, M7-05 |
+| M19-05 | **App installer / packaging** — `zig build package` step that bundles the binary, font assets, and a version manifest into a zip (Windows) or tar.gz (Linux) | M19-03 |
+
+---
+
+## Version 2 (post-v1 — requires explicit decision in `00_constitution.md`)
+
+These require architectural decisions that go beyond the current scope invariants.
+A human override recorded in `00_constitution.md` is required before any work begins.
+
+| Feature | Blocking invariant | What must change |
+|---|---|---|
+| **macOS / web / mobile** | INV-1.2 — Windows + Linux only | Lift INV-1.2; add a Metal backend (macOS) or WebGPU backend (web); new windowing surface layer per platform |
+| **Complex-script shaping (Arabic, CJK)** | INV-1.3 — Latin + Cyrillic only | Lift INV-1.3; add HarfBuzz as an approved dependency (INV-5.6); add bidirectional text model |
+| **DX12 / Metal backend** | INV-2.1 — Vulkan only | Lift INV-2.1; implement the backend seam that INV-2.1 explicitly permits but defers |
+| **CSS cascade / specificity** | INV-4.2 — flat utility classes only | Lift INV-4.2; replace the flat resolver with a cascade engine; breaking change to all existing markup |
+| **Charts / data visualization** | Separate concern | Define a chart-command vocabulary alongside `DrawCommand`; needs GPU curve primitives (M13) as foundation |
 
 ---
 
@@ -192,4 +330,6 @@ These are out of scope until a human decision records them in `00_constitution.m
 - Items within a milestone can be parallelized unless one lists another as a dependency.
 - When an item is ready to implement, write a `docs/requirements/RXX_name.md` file with
   the full behavioral specification before starting any code.
-- When an item is done, tick it and update `docs/HOW_TO_USE.md` accordingly.
+- When an item is done: tick it, update `docs/HOW_TO_USE.md`, and update
+  `docs/requirements/DEMO_APP.md` to cover the new feature in the Showcase application.
+  All three updates are required — a milestone is not done until all three are complete.

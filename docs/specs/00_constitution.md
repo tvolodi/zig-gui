@@ -34,15 +34,14 @@ not act on the disagreement.
   Rationale: A single Vulkan backend covers both. Do NOT write platform-specific UI code
   paths beyond the windowing/surface layer. Do NOT add macOS, web, or mobile code.
 
-- **INV-1.3 — Text is Latin and Cyrillic only.**
-  Rationale: No complex-script shaping, no bidirectional text, no Arabic/CJK. Do NOT pull
-  in HarfBuzz or any complex text-shaping dependency. A glyph atlas with kerning and basic
-  line breaking is the entire text model. If a task seems to need complex shaping, it is
-  out of scope — surface it.
-
-- **INV-1.4 — Accessibility tree is out of scope for v1.**
-  Rationale: Personal tool. Do NOT spend effort on screen-reader trees, ARIA-equivalents,
-  or focus-announcement systems. Keyboard navigation IS in scope where a spec requires it.
+- **INV-1.3 — No complex-script shaping; fallback glyph lookup for symbols and emoji is permitted.**
+  Rationale: No bidirectional text, no Arabic/CJK shaping. Do NOT pull in HarfBuzz or any
+  complex text-shaping dependency. A glyph atlas with kerning and basic line breaking is the
+  entire text model. If a task seems to need complex shaping, it is out of scope — surface it.
+  Fallback font lookup via `stbtt_FindGlyphIndex` (to render emoji, symbols, or extended
+  Unicode codepoints from a secondary TTF) is explicitly permitted: it adds no shaping, only
+  a glyph-index check. This was authorized by the project owner on 2026-06-03 when R64
+  (font fallback) was approved.
 
 ---
 
@@ -178,6 +177,10 @@ Do NOT introduce a dependency from a lower number onto a higher one.
 
 Anything not in this list (DataTable, auto-update/CDN delivery, virtualization, charts)
 is post-v1 and must not be started without a human decision.
+
+NOTE (2026-06-03, human override): DataTable (M7-10) and row virtualization are
+approved for Milestone 7. See R79_data_table.md. This overrides the post-v1
+classification.
 
 ---
 

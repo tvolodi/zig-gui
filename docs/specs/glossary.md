@@ -50,6 +50,17 @@ See: R23 (M2-04), `src/app/binding.zig`.
 
 ---
 
+## REPLACEMENT_CODEPOINT
+
+Unicode codepoint U+FFFD (REPLACEMENT CHARACTER) used by `layoutParagraphEx` when no font
+in the fallback chain covers a requested codepoint. If U+FFFD itself is also absent from
+every font in the chain, the glyph is silently skipped. Defined as
+`text.REPLACEMENT_CODEPOINT: u21 = 0xFFFD` in `src/02/types.zig`.
+
+See: R64 (M6-05), `src/02/types.zig`.
+
+---
+
 ## TextBinding
 
 A registered connection between one `Signal([]const u8)` and one element index. Stores a
@@ -437,3 +448,519 @@ Bold+italic falls back to bold (no synthesised bold-italic). Each slot's `Font.v
 at init time so `layoutParagraph` can construct correct atlas keys without a signature change.
 
 See: R60, `src/app/font_family.zig`.
+
+---
+
+## TextSelection
+
+A byte-offset selection range stored in the `Scene._selection` parallel array (R62).
+Contains `anchor` (where the drag/selection started) and `active` (where it currently ends).
+When `anchor == active`, the selection is collapsed (no visible highlight).
+`isEmpty()` returns true for a collapsed selection; `range()` returns a normalised
+`{lo, hi}` struct where `lo <= hi`. Used for both read-only `.text` elements (mouse
+drag to select) and editable `.input` elements (replaces `InputState.selection_start`).
+Selection highlight is rendered by the R62 block in `buildDrawList` as `filled_rect`
+commands using `tokens.accent` with `a = 80`.
+
+See: R62 (M6-03), `src/07/types.zig`.
+
+## TextareaState
+
+Per-element state struct for `.textarea` widgets (R63). Holds:
+- `line_starts` — `ArrayListUnmanaged(u32)` of byte offsets for each line's first character (line 0 starts at byte 0).
+- `scroll_y` — vertical scroll offset in pixels.
+- `content_h` — total rendered content height (line_count × line_h), updated by `buildDrawList`.
+- `container_h` — visible area height, set from the computed layout rect.
+
+Indexed by `ElementId.index`, stored in `Scene._textarea_state` (parallel to `InputState`).
+Added in R63.
+
+See: R63 (M6-04), `src/07/types.zig`.
+
+---
+
+## accordion
+
+A widget with a clickable header and a collapsible body. Clicking the header toggles the
+`AccordionState.open` flag and shows/hides the body element via `setHidden`. Children are
+identified by a `slot="header"` / `slot="body"` attribute or by positional order (first child
+= header, second child = body). Tag in markup: `"Accordion"`.
+
+See: R77, `src/07/types.zig` `AccordionState`, `src/09/types.zig`.
+
+---
+
+## active tab
+
+The currently selected tab in a `<Tabs>` widget. Its panel is visible while all other tab
+panels are hidden via `setHidden`. Tracked by `TabsState.active_tab` (zero-based index of
+the visible `<TabItem>`).
+
+See: R76, `src/07/types.zig` `TabsState`.
+
+---
+
+## auto-dismiss
+
+Behavior where a toast notification or tooltip automatically hides after a configured
+duration without requiring user interaction. For toasts, the duration is a fixed frame count
+(configurable per `ToastManager` instance). For tooltips, the tooltip remains visible as
+long as the cursor stays over the element.
+
+See: R74, R7C, `src/app/toast.zig`, `src/app/tooltip.zig`.
+
+---
+
+## avatar
+
+A circular widget showing a user representation: either an image tile drawn from `ImageAtlas`
+(when `AvatarState.has_image = true`) or two uppercase initials rendered on a token-derived
+background color chosen by `initialsColor()` (initials fallback). State stored in
+`AvatarState` in `Scene._avatar_state`. Tag in markup: `"Avatar"`.
+
+See: R7B, `src/07/types.zig` `AvatarState`, `src/09/types.zig`.
+
+---
+
+## backdrop
+
+A semi-transparent full-screen `FilledRect` drawn behind a modal dialog panel via the
+`OverlayLayer`. Its purpose is to visually dim the background and signal that the UI is
+blocked. Created and owned by `DialogManager`; removed when the dialog closes.
+
+See: R75, `src/app/dialog.zig`.
+
+---
+
+## badge
+
+A small overlay pill showing a short text label (up to 8 bytes) and a `BadgeColor` status.
+Used to annotate avatars or other elements. State stored in `BadgeState` in
+`Scene._badge_state`. Tag in markup: `"Badge"`.
+
+See: R7B, `src/07/types.zig` `BadgeState`, `src/09/types.zig`.
+
+---
+
+## BadgeColor
+
+An enum `{ default, success, warning, error_c }` controlling the background color of a badge
+element. Each variant maps to a theme token color. Stored in `BadgeState.color`.
+
+See: R7B, `src/07/types.zig` `BadgeState`.
+
+---
+
+## calendar grid
+
+The month-view grid inside a date picker popup showing the days of the current navigation
+month. Driven by `DatePickerState.nav_year` / `DatePickerState.nav_month`. Day cells are
+computed using `date_util.zig` calendar math (first weekday of month, days in month).
+Selecting a day writes a `DateValue` into the picker state and closes the popup.
+
+See: R78, `src/07/types.zig` `DatePickerState`, `src/app/date_util.zig`.
+
+---
+
+## CellTextFn
+
+`*const fn(row_ptr: *anyopaque, col: u8, buf: []u8) u8`. A callback that writes the display
+text for cell `(row, col)` into `buf` and returns the byte count written. Stored in
+`DataTableRows.cell_fn`. Called each frame by the data table renderer for each visible cell.
+
+See: R79, `src/07/types.zig` `DataTableRows`.
+
+---
+
+## context menu
+
+A popup menu triggered by right-clicking an element. Registered via
+`ContextMenuManager.register(target_idx, items)`. When the user right-clicks a registered
+element the menu opens at the cursor position; clicking an item invokes its `CallbackFn`;
+clicking outside or pressing Escape closes it. Managed by `ContextMenuManager` in
+`src/app/context_menu.zig`.
+
+See: R7D, `src/app/context_menu.zig`.
+
+---
+
+## ContextMenuItem
+
+`struct { label: []const u8, callback: CallbackFn, disabled: bool }`. One entry in a context
+menu. A `disabled` item is rendered with reduced opacity and its `callback` is not invoked
+when clicked.
+
+See: R7D, `src/app/context_menu.zig`.
+
+---
+
+## ContextMenuManager
+
+The `src/app/context_menu.zig` struct that stores up to 16 registered context menus, handles
+open/close/highlight/invoke state, and builds `OverlayLayer` draw commands for the menu
+panel. Held by `App` and ticked each frame. Menus are keyed by element index.
+
+See: R7D, `src/app/context_menu.zig`.
+
+---
+
+## data table
+
+A virtualized tabular widget displaying rows of data via a `CellTextFn` callback. Supports
+sortable column headers (clicking a header cycles through ascending/descending/unsorted).
+Only visible rows are rendered (virtualized). State stored in `DataTableState` in
+`Scene._datatable_state`. Data source passed via `DataTableRows`.
+
+See: R79, `src/07/types.zig` `DataTableState`, `DataTableRows`.
+
+---
+
+## DataTableRows
+
+`struct { row_ptr: *anyopaque, row_size: usize, row_count: u32, cell_fn: CellTextFn }`.
+The data source passed to a data table widget. `row_ptr` points to the first element of a
+contiguous array of any row type; `row_size` is `@sizeOf` that type. The renderer computes
+the pointer to row `i` as `row_ptr + i * row_size`.
+
+See: R79, `src/07/types.zig` `DataTableRows`.
+
+---
+
+## date picker
+
+A widget combining a text input (showing a formatted date string) with a calendar popup for
+date selection. Clicking the input opens the popup; selecting a day closes it and stores the
+result as a `DateValue`. Navigation arrows change `nav_year`/`nav_month`. State stored in
+`DatePickerState` in `Scene._datepicker_state`. Uses `date_util.zig` for calendar math.
+
+See: R78, `src/07/types.zig` `DatePickerState`, `src/app/date_util.zig`.
+
+---
+
+## DateValue
+
+`struct { year: u16, month: u8, day: u8 }`. The value type stored by a date picker widget.
+`month` is 1-based (1 = January). Stored in `DatePickerState.value`.
+
+See: R78, `src/07/types.zig` `DatePickerState`.
+
+---
+
+## DialogManager
+
+The `src/app/dialog.zig` struct that opens, maintains, and closes a modal dialog. Stores the
+focused element index before opening and restores it on close. Builds a backdrop `FilledRect`
+and a panel subtree via `OverlayLayer`. Implements a focus trap while the dialog is open.
+Held by `App`.
+
+See: R75, `src/app/dialog.zig`.
+
+---
+
+## focus trap
+
+A behavior where Tab/Shift-Tab keyboard navigation is confined to the elements inside an
+open modal dialog. While the dialog is open, `Scene.setFocus` wraps around within
+`DialogManager.focusable_indices` instead of cycling through all `Scene.focusable_indices`.
+Released when the dialog closes and focus is restored to the previously focused element.
+
+See: R75, `src/app/dialog.zig`.
+
+---
+
+## frame_count
+
+A `u64` counter on `Scene` incremented by exactly 1 each frame by the app run loop. Used by
+animated widgets — spinner rotation, indeterminate progress bar fill, and tooltip hover-delay
+timing — to derive animation state without requiring wall-clock time. Animations are therefore
+deterministic and reproducible.
+
+See: R73, R74, R7C, `src/07/types.zig` `Scene.frame_count`.
+
+---
+
+## group_id
+
+A `u16` value stored in `RadioState` that groups sibling `<Radio>` elements into a
+mutually-exclusive selection set. All `<Radio>` elements sharing the same `group_id` in the
+same scene form a radio group. Used by `Scene.selectRadio()` to deselect all other radios in
+the group when one is selected.
+
+See: R71, `src/07/types.zig` `RadioState`.
+
+---
+
+## hover delay
+
+The 500-frame pause between first hovering over an element and the tooltip appearing.
+Implemented by `TooltipManager` using `scene.frame_count`: the manager records the frame at
+which hover started and shows the tooltip only after 500 frames have elapsed.
+
+See: R7C, `src/app/tooltip.zig`.
+
+---
+
+## indeterminate
+
+A progress bar mode where the total duration is unknown; the fill animates continuously as a
+bouncing block rather than representing a fixed fraction. Activated when
+`ProgressState.indeterminate = true`. Animation position is derived from `scene.frame_count`
+so it advances exactly one step per frame.
+
+See: R73, `src/07/types.zig` `ProgressState`.
+
+---
+
+## initials fallback
+
+When an avatar has no image (`AvatarState.has_image = false`), two uppercase initials from
+`AvatarState.initials` are rendered as text on a background color chosen by `initialsColor()`.
+`initialsColor()` derives the color deterministically from the initials bytes using a modulo
+index into a small palette of token-sourced colors, so the same initials always produce the
+same color.
+
+See: R7B, `src/07/types.zig` `AvatarState`, `src/09/types.zig` `initialsColor`.
+
+---
+
+## label slot
+
+A child element auto-created from a widget's `label` markup attribute during
+`Scene.instantiate()`. For example, `<Checkbox label="Accept terms">` auto-creates a
+`Text` child element whose content is the value of the `label` attribute. The widget owns
+this child; it is positioned and styled as part of the widget's layout.
+
+See: R70, `src/07/types.zig` `Scene.instantiate`.
+
+---
+
+## modal dialog
+
+A blocking overlay that prevents interaction with the rest of the UI until dismissed.
+Rendered as a `backdrop` (semi-transparent full-screen rect) plus a panel subtree built from
+`OverlayLayer` slots. Managed by `DialogManager` in `src/app/dialog.zig`. While open, a
+focus trap confines Tab navigation to the dialog's elements.
+
+See: R75, `src/app/dialog.zig`.
+
+---
+
+## NONE
+
+Sentinel value `u32 = std.math.maxInt(u32)` (4,294,967,295). Used as a "no element" marker
+in struct fields that hold element indices (e.g. `Scene.focused_idx` when no element has
+focus). Defined as `pub const NONE: u32 = std.math.maxInt(u32)` at module scope in
+`src/07/types.zig`.
+
+See: `src/07/types.zig`.
+
+---
+
+## progress bar
+
+A widget showing task completion as a filled rect proportional to a `[0.0, 1.0]` value.
+May be *indeterminate* (animated bouncing fill) when the total is unknown. State stored in
+`ProgressState` in `Scene._progress_state`. Tag in markup: `"Progress"`.
+
+See: R73, `src/07/types.zig` `ProgressState`, `src/09/types.zig`.
+
+---
+
+## radio group
+
+A set of `<Radio>` elements sharing the same `group_id: u16`. Exactly one radio in a group
+may be selected at a time. Selecting one radio calls `Scene.selectRadio()`, which marks that
+radio's `RadioState.selected = true` and sets `selected = false` on all other radios in the
+group. Tag in markup: `"Radio"`.
+
+See: R71, `src/07/types.zig` `RadioState`, `Scene.selectRadio`.
+
+---
+
+## separator
+
+A stateless widget rendering a single 1 px line — horizontal by default, vertical when its
+parent is a row flex container. Styled with `tokens.border_default`. No interaction, no
+children, no state struct. Uses `WidgetKind.separator`. Tag in markup: `"Separator"`.
+
+See: R7A, `src/07/types.zig`, `src/09/types.zig`.
+
+---
+
+## slider
+
+A widget that presents a continuous numeric value in a range `[min, max]`. Rendered as a
+horizontal track with a filled portion up to the current value and a draggable thumb.
+Supports an optional `step` (defaults to 0 meaning continuous). Drag events update
+`SliderState.value`, clamped to `[min, max]` and snapped to `step`. State stored in
+`SliderState` in `Scene._slider_state`. Tag in markup: `"Slider"`.
+
+See: R72, `src/07/types.zig` `SliderState`, `src/09/types.zig`.
+
+---
+
+## slot attribute
+
+A `slot="header"` or `slot="body"` attribute on a child element inside an `<Accordion>`.
+Tells `Scene.instantiate` which child is the accordion header and which is the body.
+Falls back to positional order (first child = header, second child = body) when the attribute
+is absent.
+
+See: R77, `src/07/types.zig` `Scene.instantiate`.
+
+---
+
+## spinner
+
+A circular loading indicator that rotates based on `scene.frame_count`. Rendered as a
+partial arc whose start angle advances each frame. Uses `WidgetKind.spinner`. No user
+interaction; no configurable state beyond size/color from the style system.
+Tag in markup: `"Spinner"`.
+
+See: R73, `src/07/types.zig`, `src/09/types.zig`.
+
+---
+
+## tab bar
+
+The row of tab header buttons at the top of a `<Tabs>` widget. Each button corresponds to
+one `<TabItem>` child. Clicking a button calls `Scene.selectTab(tabs_idx, tab_index)`, which
+updates `TabsState.active_tab` and hides all non-active tab panels.
+
+See: R76, `src/07/types.zig` `TabsState`.
+
+---
+
+## tab panel
+
+The content area shown when a tab is active. Corresponds to a `<TabItem>` element. Hidden
+via `setHidden(idx, true)` when not the active tab; revealed via `setHidden(idx, false)` when
+selected.
+
+See: R76, `src/07/types.zig` `TabsState`.
+
+---
+
+## TabsState
+
+Per-element state for a `<Tabs>` widget. Contains `active_tab: u8`, the zero-based index of
+the currently visible `<TabItem>`. Updated by `Scene.selectTab()`. Stored in
+`Scene._tabs_state`.
+
+See: R76, `src/07/types.zig` `TabsState`.
+
+---
+
+## thumb
+
+The draggable indicator on a slider widget that shows and sets the current value. Rendered
+as a small circle positioned along the slider track at `(value - min) / (max - min)` of the
+track width. Drag events on the thumb update `SliderState.value`.
+
+See: R72, `src/07/types.zig` `SliderState`, `src/09/types.zig`.
+
+---
+
+## toast
+
+A transient notification that appears in a screen corner for a fixed frame duration and then
+auto-dismisses. Created by `ToastManager.push(message, kind)`. `ToastKind` controls
+background color: `info` (blue), `success` (green), `warning` (yellow), `error_` (red).
+Rendered via `OverlayLayer`. Managed by `ToastManager` in `src/app/toast.zig`.
+
+See: R74, `src/app/toast.zig`.
+
+---
+
+## ToastKind
+
+Enum `{ info, success, warning, error_ }` controlling the background color of a toast
+notification. Each variant maps to a semantic status token from `src/05/types.zig`.
+
+See: R74, `src/app/toast.zig`.
+
+---
+
+## ToastManager
+
+The `src/app/toast.zig` struct that queues, times, and dismisses toast notifications. Holds
+up to a fixed number of concurrent toasts. `tick(frame_count)` decrements each toast's
+remaining duration and removes expired ones. `buildOverlay()` emits `OverlayLayer` draw
+commands for all active toasts. Held by `App`.
+
+See: R74, `src/app/toast.zig`.
+
+---
+
+## tooltip
+
+A small text popup that appears after a 500-frame hover delay over an element that carries a
+`tooltip` attribute in markup. The text is the attribute value. Rendered via `OverlayLayer`
+near the cursor. Managed by `TooltipManager` in `src/app/tooltip.zig`.
+
+See: R7C, `src/app/tooltip.zig`.
+
+---
+
+## TooltipManager
+
+The `src/app/tooltip.zig` struct that tracks hover state, manages the hover delay timer
+using `scene.frame_count`, and renders the tooltip overlay. On each frame, if the hovered
+element has a `tooltip` attribute and the delay has elapsed, a draw command is pushed to the
+`OverlayLayer`. Held by `App`.
+
+See: R7C, `src/app/tooltip.zig`.
+
+---
+
+## track
+
+The background bar of a slider or progress bar over which the thumb moves (slider) or the
+fill advances (progress bar). Rendered as a full-width `FilledRect` using the widget's base
+background token; the filled portion is a second `FilledRect` using the accent token drawn
+on top.
+
+See: R72, R73, `src/09/types.zig`.
+
+---
+
+## AppState(T)
+
+A comptime-generic container wrapping a user-defined struct `T` whose fields are `Signal`
+instances (or any type with a `deinit` method). Owned by the application entry point and
+shared across screens via the `ctx` argument to `Navigator.push`. Provides `get()` returning
+`*T` for direct signal access. Optionally exposed as a thread-local singleton via
+`setGlobal` / `getGlobal`. Defined in `src/app/app_state.zig`.
+
+---
+
+## PersistentSettings
+
+A line-oriented key-value store written to the platform user-data directory
+(`%APPDATA%\<app>\settings.txt` on Windows, `~/.config/<app>/settings.txt` on Linux).
+Supports u32, i32, f32, bool, and string values. Writes are deferred until `flush()` is
+called. Flush is atomic (write-to-tmp then rename). Defined in
+`src/app/persistent_settings.zig`.
+
+See: R82 (M8-03).
+
+See: R81 (M8-02).
+
+---
+
+## MultiWindowApp
+
+A top-level application host that owns multiple `WindowEntry` instances and drives a single
+frame loop for all of them. Shares one `VkDevice`, one `GlyphAtlas`, and one `GpuAtlas`
+across all windows. Secondary windows are created via `VulkanBackend.initShared` so they
+do not own the device. Each window has its own `Scene`, `VulkanBackend` (surface +
+swapchain), `BindingSet`, and `OverlayLayer`. Defined in `src/app/multi_window.zig`.
+
+See: R83 (M8-04).
+
+## WindowId
+
+A `u16` opaque handle identifying one `WindowEntry` within a `MultiWindowApp`. Value `0`
+is reserved/invalid. Allocated monotonically; not reused after `closeWindow`.
+
+See: R83 (M8-04), `src/app/multi_window.zig`.
