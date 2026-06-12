@@ -458,6 +458,9 @@ pub const AppInner = struct {
                 self.dispatchEvents(evs);
             }
 
+            // R12: a pending resize must force a redraw even when no scene element is dirty.
+            if (self.pending_resize != null) self.scene.elements.markAllDirty();
+
             // M2-02: Skip GPU work when nothing has changed.
             if (!self.scene.elements.hasDirty()) {
                 if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
@@ -691,6 +694,9 @@ pub const AppInner = struct {
                     std.log.err("runWithNav: drainPending failed: {}", .{err});
                 };
             }
+
+            // R12: a pending resize must force a redraw even when no scene element is dirty.
+            if (self.pending_resize != null) self.scene.elements.markAllDirty();
 
             // M2-02: Skip GPU work when nothing has changed (bypass in screenshot mode).
             if (self._screenshot_frames == 0 and !self.scene.elements.hasDirty()) {
