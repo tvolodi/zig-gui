@@ -674,7 +674,23 @@ pub fn buildDrawList(
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
-                    try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, elem_font, effective_alpha);
+                    // Buttons: center text horizontally. Measure using atlas bitmap widths as a
+                    // proxy for advance; use full computed rect as clip zone to avoid padding clipping.
+                    const text_rect = if (kind == .button) blk: {
+                        const px_u16: u16 = @intFromFloat(style.font_size);
+                        const text_w = computeTextX(0, str, @intCast(str.len), px_u16, atlas);
+                        const offset_x: f32 = if (text_w > 0 and text_w < computed.w)
+                            @round((computed.w - text_w) * 0.5)
+                        else
+                            style.padding.left;
+                        break :blk store_mod.Rect{
+                            .x = computed.x + offset_x,
+                            .y = computed.y,
+                            .w = computed.w - offset_x,
+                            .h = computed.h,
+                        };
+                    } else computed;
+                    try emitGlyphs(&list, alloc, id, str, text_rect, &style, atlas, elem_font, effective_alpha);
                 }
             }
         }
