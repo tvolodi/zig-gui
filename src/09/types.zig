@@ -612,8 +612,8 @@ pub fn buildDrawList(
             } });
         }
 
-        // 2. Border
-        if (style.border_width > 0) {
+        // 2. Border (skip for checkbox/radio — they draw their own box border in step 4)
+        if (style.border_width > 0 and kind != .checkbox and kind != .radio) {
             try list.append(alloc, .{ .border_rect = .{
                 .rect = toRect09(computed),
                 .color = toColor09(applyOpacity(style.border_color, effective_alpha)),
@@ -759,12 +759,15 @@ pub fn buildDrawList(
                     .color = toColor09(applyOpacity(bg_col, effective_alpha)),
                     .radius = 2.0,
                 } });
-                // Box border.
-                const border_col = if (st.hovered) tokens.border_strong else tokens.border_default;
+                // Box border: focus = blue ring, hover = strong, else default.
+                const border_col = if (pseudo.focus) theme_mod.Color.hex(0x0066FF)
+                    else if (st.hovered) tokens.border_strong
+                    else tokens.border_default;
+                const border_w: f32 = if (pseudo.focus) 2.0 else 1.5;
                 try list.append(alloc, .{ .border_rect = .{
                     .rect = .{ .x = bx, .y = by, .w = S, .h = S },
                     .color = toColor09(applyOpacity(border_col, effective_alpha)),
-                    .width = 1.5,
+                    .width = border_w,
                 } });
                 if (st.checked) {
                     // Checkmark: short left-down stroke + long right-up stroke.
