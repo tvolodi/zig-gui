@@ -1559,6 +1559,12 @@ pub const Scene = struct {
                     .literal => |s| s,
                     .bind => |s| s,
                 };
+            } else if ((kind == .input or kind == .textarea) and std.mem.eql(u8, attr.name, "placeholder")) {
+                // Store placeholder as the text slot; renderer shows it only when input is empty.
+                text_val = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => |s| s,
+                };
             } else if (kind == .tab_item and std.mem.eql(u8, attr.name, "label")) {
                 // R76: store tab label in _text for use by the tab bar renderer.
                 text_val = switch (attr.value) {

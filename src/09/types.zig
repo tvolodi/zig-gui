@@ -410,7 +410,7 @@ pub fn buildDrawList(
             const content_h = ss.content_height;
             const container_h = if (ss.container_height > 0) ss.container_height else computed.h;
             if (content_h > container_h and container_h > 0) {
-                const bar_w: f32 = 6.0;
+                const bar_w: f32 = 10.0;
                 const track_x = computed.x + computed.w - bar_w;
                 const track_y = computed.y;
                 const track_h = computed.h;
@@ -488,6 +488,22 @@ pub fn buildDrawList(
             const sel_r = sel.range();
 
             // 3. For each line: emit glyph commands + selection highlights.
+            // Show placeholder when textarea is empty.
+            if (text_content.len == 0) {
+                if (scene.textOf(id)) |placeholder| {
+                    if (placeholder.len > 0) {
+                        var ph_style = style;
+                        ph_style.text_color = tokens.text_muted;
+                        const ph_rect = store_mod.Rect{
+                            .x = computed.x + style.padding.left,
+                            .y = computed.y + style.padding.top,
+                            .w = computed.w - style.padding.left - style.padding.right,
+                            .h = computed.h - style.padding.top - style.padding.bottom,
+                        };
+                        try emitGlyphs(&list, alloc, id, placeholder, ph_rect, &ph_style, atlas, ta_font, effective_alpha);
+                    }
+                }
+            }
             const num_lines = ts.line_starts.items.len;
             if (num_lines > 0) {
                 for (ts.line_starts.items, 0..) |line_start, li| {
@@ -506,9 +522,9 @@ pub fn buildDrawList(
                     const line_text = text_content[effective_start..effective_end];
 
                     const line_rect = store_mod.Rect{
-                        .x = computed.x,
+                        .x = computed.x + style.padding.left,
                         .y = line_y,
-                        .w = computed.w,
+                        .w = computed.w - style.padding.left - style.padding.right,
                         .h = line_h,
                     };
 
@@ -653,8 +669,8 @@ pub fn buildDrawList(
             }
         }
 
-        // 3. Text glyphs (checkbox/radio/badge emit their text in step 4 with custom style)
-        if (kind != .checkbox and kind != .radio and kind != .badge) {
+        // 3. Text glyphs (inputs/textarea/checkbox/radio/badge emit in step 4 with custom placement)
+        if (kind != .checkbox and kind != .radio and kind != .badge and kind != .input and kind != .textarea) {
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
@@ -684,15 +700,28 @@ pub fn buildDrawList(
             .input => {
                 // Input cursor (R32). Selection highlight handled by R62 block above.
                 const inp = scene.inputStateOf(id.index);
-                // Bug 1 fix: emit live input text (inp.text.items), which is never
-                // covered by scene.textOf(id) since inputs have no text= attribute.
+                // Text and cursor start at the content area (inside padding).
+                const inp_x = computed.x + style.padding.left;
+                const inp_content = store_mod.Rect{
+                    .x = inp_x,
+                    .y = computed.y,
+                    .w = computed.w - style.padding.left - style.padding.right,
+                    .h = computed.h,
+                };
+                const inp_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
                 if (inp.text.items.len > 0) {
-                    const inp_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
-                    try emitGlyphs(&list, alloc, id, inp.text.items, computed, &style, atlas, inp_font, effective_alpha);
+                    try emitGlyphs(&list, alloc, id, inp.text.items, inp_content, &style, atlas, inp_font, effective_alpha);
+                } else if (scene.textOf(id)) |placeholder| {
+                    // Render placeholder with muted color when input is empty.
+                    if (placeholder.len > 0) {
+                        var ph_style = style;
+                        ph_style.text_color = tokens.text_muted;
+                        try emitGlyphs(&list, alloc, id, placeholder, inp_content, &ph_style, atlas, inp_font, effective_alpha);
+                    }
                 }
                 if (inp.active) {
                     const px_u16: u16 = @intFromFloat(style.font_size);
-                    const cursor_x = computeTextX(computed.x, inp.text.items, inp.cursor, px_u16, atlas);
+                    const cursor_x = computeTextX(inp_x, inp.text.items, inp.cursor, px_u16, atlas);
                     try list.append(alloc, .{ .filled_rect = .{
                         .rect = .{ .x = cursor_x, .y = computed.y + 2.0, .w = 1.5, .h = computed.h - 4.0 },
                         .color = .{ .r = 30, .g = 30, .b = 30, .a = 220 },
@@ -722,18 +751,26 @@ pub fn buildDrawList(
                     .width = 1.5,
                 } });
                 if (st.checked) {
-                    // Bug 3 fix: draw a proper ✓ tick shape.
-                    // Left (descending) leg: short rect from lower-left to the elbow.
+                    // Checkmark: short left-down stroke + long right-up stroke.
+                    const ck = toColor09(applyOpacity(tokens.accent_text, effective_alpha));
+                    const t = S * 0.13; // stroke thickness
+                    // Left leg: goes from bottom-left of tick down-right to elbow.
                     try list.append(alloc, .{ .filled_rect = .{
-                        .rect = .{ .x = bx + S * 0.15, .y = by + S * 0.55, .w = S * 0.20, .h = S * 0.30 },
-                        .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
-                        .radius = 0,
+                        .rect = .{ .x = bx + S * 0.15, .y = by + S * 0.50, .w = t, .h = S * 0.28 },
+                        .color = ck, .radius = 1,
                     } });
-                    // Right (ascending) leg: taller rect from the elbow up to the upper-right.
                     try list.append(alloc, .{ .filled_rect = .{
-                        .rect = .{ .x = bx + S * 0.28, .y = by + S * 0.30, .w = S * 0.15, .h = S * 0.55 },
-                        .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
-                        .radius = 0,
+                        .rect = .{ .x = bx + S * 0.15, .y = by + S * 0.64, .w = S * 0.22, .h = t },
+                        .color = ck, .radius = 1,
+                    } });
+                    // Right leg: goes from elbow up-right to top-right corner.
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = bx + S * 0.33, .y = by + S * 0.25, .w = t, .h = S * 0.42 },
+                        .color = ck, .radius = 1,
+                    } });
+                    try list.append(alloc, .{ .filled_rect = .{
+                        .rect = .{ .x = bx + S * 0.33, .y = by + S * 0.25, .w = S * 0.38, .h = t },
+                        .color = ck, .radius = 1,
                     } });
                 }
                 // Emit label text to the right of the box.

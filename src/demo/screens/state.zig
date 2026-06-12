@@ -86,9 +86,9 @@ pub fn build(
     const inc_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "+" } }};
     const val_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "0" } }};
 
-    const btn_dec  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10", .attrs = &dec_attrs };
+    const btn_dec  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10 text-xl", .attrs = &dec_attrs };
     const ctr_val  = NodeDesc{ .tag = "Text",   .classes = "text-xl w-10", .attrs = &val_attrs };
-    const btn_inc  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10", .attrs = &inc_attrs };
+    const btn_inc  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10 text-xl", .attrs = &inc_attrs };
 
     const ctr_row_children = [3]NodeDesc{ btn_dec, ctr_val, btn_inc };
     const ctr_row = NodeDesc{ .tag = "Row", .classes = "gap-4 items-center", .children = &ctr_row_children };

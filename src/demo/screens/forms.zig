@@ -210,7 +210,7 @@ pub fn build(
     // --- Textarea ---
     const notes_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Notes" } }};
     const notes_lbl   = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &notes_lbl_attrs };
-    const notes_val_attrs = [1]Attr{.{ .name = "value", .value = .{ .literal = "Type here\xE2\x80\xA6" } }};
+    const notes_val_attrs = [1]Attr{.{ .name = "placeholder", .value = .{ .literal = "Type here\xE2\x80\xA6" } }};
     const notes_ta   = NodeDesc{ .tag = "Textarea", .classes = "w-full h-32", .attrs = &notes_val_attrs };
     const notes_children = [2]NodeDesc{ notes_lbl, notes_ta };
     const notes_group = NodeDesc{ .tag = "Column", .classes = "gap-1", .children = &notes_children };
