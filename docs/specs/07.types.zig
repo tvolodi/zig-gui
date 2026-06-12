@@ -226,17 +226,17 @@ pub const InstantiateError = error{
 pub const BadgeColor = enum { default, success, warning, error_c };
 
 pub const BadgeState = struct {
-    text:  [8]u8      = .{0} ** 8,
+    text: [8]u8 = .{0} ** 8,
     color: BadgeColor = .default,
 };
 
 pub const CellTextFn = *const fn (row_ptr: *anyopaque, col: u8, buf: []u8) u8;
 
 pub const DataTableRows = struct {
-    row_ptr:   *anyopaque,
-    row_size:  usize,
+    row_ptr: *anyopaque,
+    row_size: usize,
     row_count: u32,
-    cell_fn:   CellTextFn,
+    cell_fn: CellTextFn,
 };
 
 pub const Scene = struct {

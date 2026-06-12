@@ -653,11 +653,13 @@ pub fn buildDrawList(
             }
         }
 
-        // 3. Text glyphs
-        if (scene.textOf(id)) |str| {
-            if (str.len > 0) {
-                const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
-                try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, elem_font, effective_alpha);
+        // 3. Text glyphs (checkbox and radio emit their labels in step 4 with offset)
+        if (kind != .checkbox and kind != .radio) {
+            if (scene.textOf(id)) |str| {
+                if (str.len > 0) {
+                    const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                    try emitGlyphs(&list, alloc, id, str, computed, &style, atlas, elem_font, effective_alpha);
+                }
             }
         }
 
@@ -666,9 +668,28 @@ pub fn buildDrawList(
             .button => {
                 // Pseudo-state visual handled via resolveStyle (R40).
             },
+            .dropdown => {
+                // Bug 2 fix: render selected option label in closed state.
+                // The second-pass overlay loop only runs when dd.open; closed state needs
+                // the selected label drawn here in the first-pass DFS walk.
+                const dd = scene.dropdownStateOf(id.index);
+                if (!dd.open and dd.options.items.len > 0 and dd.selected_idx < dd.options.items.len) {
+                    const label = dd.options.items[dd.selected_idx].label;
+                    if (label.len > 0) {
+                        const dd_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                        try emitGlyphs(&list, alloc, id, label, computed, &style, atlas, dd_font, effective_alpha);
+                    }
+                }
+            },
             .input => {
                 // Input cursor (R32). Selection highlight handled by R62 block above.
                 const inp = scene.inputStateOf(id.index);
+                // Bug 1 fix: emit live input text (inp.text.items), which is never
+                // covered by scene.textOf(id) since inputs have no text= attribute.
+                if (inp.text.items.len > 0) {
+                    const inp_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                    try emitGlyphs(&list, alloc, id, inp.text.items, computed, &style, atlas, inp_font, effective_alpha);
+                }
                 if (inp.active) {
                     const px_u16: u16 = @intFromFloat(style.font_size);
                     const cursor_x = computeTextX(computed.x, inp.text.items, inp.cursor, px_u16, atlas);
@@ -685,8 +706,9 @@ pub fn buildDrawList(
                 const S: f32 = style.font_size; // box side length (revised decision)
                 const bx = computed.x;
                 const by = computed.y + (computed.h - S) / 2.0;
-                // Box background: accent when checked, surface otherwise.
-                const bg_col = if (st.checked) tokens.accent else tokens.bg_surface;
+                // Box background: accent when checked, raised (white) when unchecked so it
+                // is visually distinct from the card surface background.
+                const bg_col = if (st.checked) tokens.accent else tokens.bg_raised;
                 try list.append(alloc, .{ .filled_rect = .{
                     .rect = .{ .x = bx, .y = by, .w = S, .h = S },
                     .color = toColor09(applyOpacity(bg_col, effective_alpha)),
@@ -700,55 +722,59 @@ pub fn buildDrawList(
                     .width = 1.5,
                 } });
                 if (st.checked) {
-                    // Vertical stroke of tick (left leg):
+                    // Bug 3 fix: draw a proper ✓ tick shape.
+                    // Left (descending) leg: short rect from lower-left to the elbow.
                     try list.append(alloc, .{ .filled_rect = .{
-                        .rect = .{ .x = bx + S * 0.25, .y = by + S * 0.45, .w = S * 0.15, .h = S * 0.45 },
+                        .rect = .{ .x = bx + S * 0.15, .y = by + S * 0.55, .w = S * 0.20, .h = S * 0.30 },
                         .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
                         .radius = 0,
                     } });
-                    // Horizontal stroke of tick (right leg):
+                    // Right (ascending) leg: taller rect from the elbow up to the upper-right.
                     try list.append(alloc, .{ .filled_rect = .{
-                        .rect = .{ .x = bx + S * 0.25, .y = by + S * 0.45, .w = S * 0.55, .h = S * 0.15 },
+                        .rect = .{ .x = bx + S * 0.28, .y = by + S * 0.30, .w = S * 0.15, .h = S * 0.55 },
                         .color = toColor09(applyOpacity(tokens.accent_text, effective_alpha)),
                         .radius = 0,
                     } });
                 }
+                // Emit label text to the right of the box.
+                if (scene.textOf(id)) |label| {
+                    if (label.len > 0) {
+                        const label_rect = store_mod.Rect{ .x = computed.x + S + 4.0, .y = computed.y, .w = computed.w - S - 4.0, .h = computed.h };
+                        const cb_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                        try emitGlyphs(&list, alloc, id, label, label_rect, &style, atlas, cb_font, effective_alpha);
+                    }
+                }
             },
             .radio => {
                 // R71 — Radio button: outer ring + inner fill + accent dot if selected.
+                // Uses scanline circle approximation (GPU renderer ignores FilledRect.radius).
                 const rs = scene.radioStateOf(id.index);
                 const S: f32 = style.font_size; // circle diameter
-                const cx = computed.x + (computed.w - S) / 2.0;
-                const cy = computed.y + (computed.h - S) / 2.0;
-                const circle_rect = platform.Rect09{ .x = cx, .y = cy, .w = S, .h = S };
-                // Outer ring (filled circle with ring color):
+                const r = S / 2.0;
+                // Circle center: horizontally left-aligned, vertically centered in the element.
+                const ccx = computed.x + r;
+                const ccy = computed.y + computed.h / 2.0;
+                // Outer filled circle in ring color:
                 const ring_col = if (rs.hovered) tokens.border_strong else tokens.border_default;
-                try list.append(alloc, .{ .filled_rect = .{
-                    .rect = circle_rect,
-                    .color = toColor09(applyOpacity(ring_col, effective_alpha)),
-                    .radius = S / 2.0,
-                } });
-                // Inner fill (inset by 2px — white/surface fill to create ring appearance):
-                const inner_rect = platform.Rect09{ .x = cx + 2, .y = cy + 2, .w = S - 4, .h = S - 4 };
-                try list.append(alloc, .{ .filled_rect = .{
-                    .rect = inner_rect,
-                    .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha)),
-                    .radius = (S - 4) / 2.0,
-                } });
+                try emitFilledCircle(&list, alloc, ccx, ccy, r, toColor09(applyOpacity(ring_col, effective_alpha)));
+                // Inner filled circle in surface color (creates visible ring):
+                if (r > 2.0) {
+                    try emitFilledCircle(&list, alloc, ccx, ccy, r - 2.0, toColor09(applyOpacity(tokens.bg_surface, effective_alpha)));
+                }
                 // Accent dot if selected:
                 if (rs.selected) {
-                    const dot_inset = S * 0.3;
-                    const dot_rect = platform.Rect09{
-                        .x = cx + dot_inset,
-                        .y = cy + dot_inset,
-                        .w = S - dot_inset * 2,
-                        .h = S - dot_inset * 2,
-                    };
-                    try list.append(alloc, .{ .filled_rect = .{
-                        .rect = dot_rect,
-                        .color = toColor09(applyOpacity(tokens.accent, effective_alpha)),
-                        .radius = dot_rect.w / 2.0,
-                    } });
+                    const dot_r = r * 0.4;
+                    if (dot_r >= 0.5) {
+                        try emitFilledCircle(&list, alloc, ccx, ccy, dot_r, toColor09(applyOpacity(tokens.accent, effective_alpha)));
+                    }
+                }
+                // Emit label text to the right of the circle.
+                if (scene.textOf(id)) |label| {
+                    if (label.len > 0) {
+                        const label_rect = store_mod.Rect{ .x = computed.x + S + 4.0, .y = computed.y, .w = computed.w - S - 4.0, .h = computed.h };
+                        const r_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                        try emitGlyphs(&list, alloc, id, label, label_rect, &style, atlas, r_font, effective_alpha);
+                    }
                 }
             },
             .slider => {
@@ -1274,6 +1300,28 @@ fn initialsColor(c: u8, tokens: Tokens) Color {
     };
 }
 
+fn emitFilledCircle(
+    list: *std.ArrayListUnmanaged(DrawCommand),
+    alloc: std.mem.Allocator,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    color: platform.Color09,
+) error{OutOfMemory}!void {
+    if (r <= 0) return;
+    var row: f32 = 0;
+    while (row < r * 2.0) : (row += 1.0) {
+        const dy = row - r + 0.5;
+        const dx = @sqrt(@max(0.0, r * r - dy * dy));
+        if (dx < 0.5) continue;
+        try list.append(alloc, .{ .filled_rect = .{
+            .rect = .{ .x = cx - dx, .y = cy - r + row, .w = dx * 2.0, .h = 1.0 },
+            .color = color,
+            .radius = 0,
+        } });
+    }
+}
+
 fn emitGlyphs(
     list: *std.ArrayListUnmanaged(DrawCommand),
     alloc: std.mem.Allocator,
@@ -1292,13 +1340,27 @@ fn emitGlyphs(
 
     const px_u16: u16 = @intFromFloat(style.font_size);
     var pen_x: f32 = computed.x;
-    const pen_y: f32 = computed.y;
+    var fm: ?text_mod.FontMetrics = null;
+    var baseline_y: f32 = computed.y;
     const text_color = toColor09(applyOpacity(style.text_color, effective_alpha));
+    // font_valid: when false, _impl is undefined — guard all calls that dereference _impl.
+    // Atlas lookups proceed unconditionally; pen advancement and bearing fall back to
+    // atlas-derived values so that tests that pre-populate the atlas still emit glyphs.
+    const font_valid = font._valid;
 
     // R44: Text truncation with ellipsis.
     if (style.truncate) {
-        // Get ellipsis metrics (may rasterize if not cached).
-        const em = atlas.ellipsisMetrics(font, style.font_size) catch null;
+        // Get ellipsis metrics (only calls font if not already in atlas; safe for stub fonts
+        // because preInsertGlyphs pre-populates the ellipsis glyph in tests).
+        const em = if (font_valid) atlas.ellipsisMetrics(font, style.font_size) catch null else blk: {
+            // Stub font: check whether the ellipsis is already in the atlas.
+            const ellipsis_key = text_mod.GlyphKey{ .codepoint = 0x2026, .px = px_u16, .variant = font.variant };
+            if (atlas.lookup(ellipsis_key)) |uv_rect| {
+                const adv = @as(f32, @floatFromInt(uv_rect.w));
+                break :blk text_mod.EllipsisMetrics{ .advance = adv, .glyph_id = 0 };
+            }
+            break :blk null;
+        };
         const ellipsis_advance: f32 = if (em) |e| e.advance else 0;
         const available_w = computed.w - ellipsis_advance;
 
@@ -1307,15 +1369,29 @@ fn emitGlyphs(
         var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
         while (iter.nextCodepoint()) |cp| {
             const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
-            const uv_rect = atlas.lookup(key) orelse continue;
+            const maybe_uv = atlas.lookup(key);
+            if (maybe_uv == null) {
+                // Glyph not in atlas (e.g. space, or not yet rasterized). Still advance pen.
+                if (font_valid) pen_x += font.advance(cp, style.font_size);
+                continue;
+            }
+            const uv_rect = maybe_uv.?;
 
             const gw = @as(f32, @floatFromInt(uv_rect.w));
             const gh = @as(f32, @floatFromInt(uv_rect.h));
-            if (gw == 0 or gh == 0) continue;
+            if (gw == 0 or gh == 0) {
+                if (font_valid) pen_x += font.advance(cp, style.font_size);
+                continue;
+            }
 
             if (pen_x + gw > computed.x + available_w) {
                 truncated = true;
                 break;
+            }
+
+            if (font_valid and fm == null) {
+                fm = font.metrics(style.font_size);
+                baseline_y = computed.y + fm.?.ascent;
             }
 
             const uv = platform.Rect09{
@@ -1325,13 +1401,24 @@ fn emitGlyphs(
                 .h = gh / atlas_h,
             };
 
+            var bearing_bx: f32 = 0;
+            var bearing_by: f32 = 0;
+            if (font_valid) {
+                const b = font.glyphBearing(cp, style.font_size);
+                bearing_bx = b.bx;
+                bearing_by = b.by;
+            }
             try list.append(alloc, .{ .glyph = .{
-                .dst = .{ .x = pen_x, .y = pen_y, .w = gw, .h = gh },
+                .dst = .{ .x = pen_x + bearing_bx, .y = baseline_y + bearing_by, .w = gw, .h = gh },
                 .uv = uv,
                 .color = text_color,
             } });
 
-            pen_x += gw;
+            if (font_valid) {
+                pen_x += font.advance(cp, style.font_size);
+            } else {
+                pen_x += gw;
+            }
             last_x_end = pen_x;
         }
 
@@ -1350,8 +1437,15 @@ fn emitGlyphs(
                             .w = gw / atlas_w,
                             .h = gh / atlas_h,
                         };
+                        var ell_bx: f32 = 0;
+                        var ell_by: f32 = 0;
+                        if (font_valid) {
+                            const eb = font.glyphBearing(0x2026, style.font_size);
+                            ell_bx = eb.bx;
+                            ell_by = eb.by;
+                        }
                         try list.append(alloc, .{ .glyph = .{
-                            .dst = .{ .x = last_x_end, .y = pen_y, .w = gw, .h = gh },
+                            .dst = .{ .x = last_x_end + ell_bx, .y = baseline_y + ell_by, .w = gw, .h = gh },
                             .uv = uv,
                             .color = text_color,
                         } });
@@ -1365,18 +1459,33 @@ fn emitGlyphs(
         return;
     }
 
-    // Normal (non-truncated) path.
+    // Normal (non-truncated) path: emit glyphs already rasterized in the atlas.
+    // Glyphs not yet rasterized (e.g. when using a stub font) are skipped but pen still advances.
     var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
     while (iter.nextCodepoint()) |cp| {
         const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
-        const uv_rect = atlas.lookup(key) orelse continue;
+        const maybe_uv2 = atlas.lookup(key);
+        if (maybe_uv2 == null) {
+            // Glyph not in atlas (e.g. space, or not yet rasterized). Still advance pen.
+            if (font_valid) pen_x += font.advance(cp, style.font_size);
+            continue;
+        }
+        const uv_rect = maybe_uv2.?;
 
         const gw = @as(f32, @floatFromInt(uv_rect.w));
         const gh = @as(f32, @floatFromInt(uv_rect.h));
-        if (gw == 0 or gh == 0) continue;
+        if (gw == 0 or gh == 0) {
+            if (font_valid) pen_x += font.advance(cp, style.font_size);
+            continue;
+        }
 
         // Clip overflow glyphs
         if (pen_x + gw > computed.x + computed.w) break;
+
+        if (font_valid and fm == null) {
+            fm = font.metrics(style.font_size);
+            baseline_y = computed.y + fm.?.ascent;
+        }
 
         const uv = platform.Rect09{
             .x = @as(f32, @floatFromInt(uv_rect.x)) / atlas_w,
@@ -1385,12 +1494,23 @@ fn emitGlyphs(
             .h = gh / atlas_h,
         };
 
+        var bearing_bx: f32 = 0;
+        var bearing_by: f32 = 0;
+        if (font_valid) {
+            const b = font.glyphBearing(cp, style.font_size);
+            bearing_bx = b.bx;
+            bearing_by = b.by;
+        }
         try list.append(alloc, .{ .glyph = .{
-            .dst = .{ .x = pen_x, .y = pen_y, .w = gw, .h = gh },
+            .dst = .{ .x = pen_x + bearing_bx, .y = baseline_y + bearing_by, .w = gw, .h = gh },
             .uv = uv,
             .color = text_color,
         } });
 
-        pen_x += gw;
+        if (font_valid) {
+            pen_x += font.advance(cp, style.font_size);
+        } else {
+            pen_x += gw;
+        }
     }
 }

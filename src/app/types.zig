@@ -53,8 +53,9 @@ pub const AppState = @import("app_state.zig").AppState;
 
 // ---------------------------------------------------------------------------
 // R82 — PersistentSettings re-export
+// (persistent_settings.zig is in the app.zig module; re-export through app_impl)
 // ---------------------------------------------------------------------------
-pub const PersistentSettings = @import("persistent_settings.zig").PersistentSettings;
+pub const PersistentSettings = app_impl.persistent_settings_mod.PersistentSettings;
 
 // ---------------------------------------------------------------------------
 // R83 — MultiWindowApp re-exports
@@ -68,6 +69,36 @@ pub const WindowId = @import("multi_window.zig").WindowId;
 //   @import("multi_window.zig").WindowOptions  or
 //   app_types.MultiWindowApp ... WindowOptions via multi_window.zig directly.
 
+// ---------------------------------------------------------------------------
+// M10 re-exports — pulled from app_impl to avoid multi-module file conflicts.
+// (All new M10 .zig files are imported by app.zig, which is module app.zig.
+//  types.zig re-exports them via app_impl to keep each file in one module.)
+// ---------------------------------------------------------------------------
+
+// RA2 — FileLogger
+pub const FileLogger = app_impl.file_logger_mod.FileLogger;
+
+// RA1 — BudgetedArena
+pub const BudgetedArena = app_impl.budgeted_arena_mod.BudgetedArena;
+
+// RA3 — showErrorDialog, initOrDialog
+pub const showErrorDialog = app_impl.startup_error_mod.showErrorDialog;
+
+// RA4 — WindowStateManager, SavedWindowState
+pub const WindowStateManager = app_impl.window_state_mod.WindowStateManager;
+pub const SavedWindowState = app_impl.window_state_mod.SavedWindowState;
+
+// RA0 — ErrorBoundary, buildFallbackScreen
+pub const ErrorBoundary = app_impl.error_boundary_mod.ErrorBoundary;
+pub const buildFallbackScreen = app_impl.error_boundary_mod.buildFallbackScreen;
+
+// R74 — ToastManager / ToastKind (used by demo screens via GlobalState)
+pub const ToastManager = @import("toast.zig").ToastManager;
+pub const ToastKind    = @import("toast.zig").ToastKind;
+
+// R75 — DialogManager
+pub const DialogManager = @import("dialog.zig").DialogManager;
+
 pub const App = struct {
     _inner: app_impl.AppInner,
 
@@ -77,6 +108,10 @@ pub const App = struct {
 
     pub fn run(self: *App) void {
         self._inner.run();
+    }
+
+    pub fn runWithNav(self: *App, nav: *Navigator) void {
+        self._inner.runWithNav(nav);
     }
 
     pub fn deinit(self: *App) void {

@@ -195,6 +195,38 @@ pub const Navigator = struct {
         self.pending = .{ .replace = .{ .name = name, .ctx = ctx } };
     }
 
+    // -----------------------------------------------------------------------
+    // RA0 — Error boundary integration
+    // -----------------------------------------------------------------------
+
+    /// Push a new screen with error boundary protection.
+    /// When `boundary.call(...)` returns false:
+    ///   1. scene.reset() is called.
+    ///   2. buildFallbackScreen is called.
+    ///   3. The failed screen does NOT appear on the stack.
+    ///   4. Returns normally (original error captured in `boundary`).
+    /// Returns error.ScreenNotFound if the name is not registered.
+    pub fn pushWithBoundary(
+        self: *Navigator,
+        name: []const u8,
+        ctx: ?*anyopaque,
+        scene: *Scene,
+        tokens: Tokens,
+        app: *anyopaque,
+        boundary: *@import("error_boundary.zig").ErrorBoundary,
+    ) !void {
+        const idx = self.findScreen(name) orelse return error.ScreenNotFound;
+        scene.reset();
+        const ok = boundary.call(self.screens.items[idx].build, scene, tokens, app, ctx);
+        if (!ok) {
+            // Call failed: build fallback scene. Do NOT push onto stack.
+            scene.reset();
+            @import("error_boundary.zig").buildFallbackScreen(boundary, scene, tokens);
+            return;
+        }
+        try self.stack.append(self.gpa, .{ .screen_idx = idx, .ctx = ctx });
+    }
+
     /// Drain any pending navigation request. Called by runWithNav at the top of each frame.
     pub fn drainPending(self: *Navigator, scene: *Scene, tokens: Tokens, app: *anyopaque) !void {
         const p = self.pending;
@@ -205,6 +237,26 @@ pub const Navigator = struct {
             .push => |info| try self.push(info.name, info.ctx, scene, tokens, app),
             .pop => try self.pop(scene, tokens, app),
             .replace => |info| try self.replace(info.name, info.ctx, scene, tokens, app),
+        }
+    }
+
+    /// Drain pending navigation with error boundary protection (RA0).
+    /// Push/replace operations use pushWithBoundary; pop is unchanged.
+    pub fn drainPendingWithBoundary(
+        self: *Navigator,
+        scene: *Scene,
+        tokens: Tokens,
+        app: *anyopaque,
+        boundary: *@import("error_boundary.zig").ErrorBoundary,
+    ) !void {
+        const p = self.pending;
+        if (p == .none) return;
+        self.pending = .none;
+        switch (p) {
+            .none => {},
+            .push => |info| try self.pushWithBoundary(info.name, info.ctx, scene, tokens, app, boundary),
+            .pop => try self.pop(scene, tokens, app),
+            .replace => |info| try self.pushWithBoundary(info.name, info.ctx, scene, tokens, app, boundary),
         }
     }
 };

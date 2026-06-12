@@ -100,11 +100,21 @@ fn solveNode(
 
     // Resolve node's own size
     const node_w = resolveWidth(s.get(id), avail, avail.max_w);
-    const node_h = resolveHeight(s.get(id), avail, avail.max_h);
+    const node_h_raw = resolveHeight(s.get(id), avail, avail.max_h);
+    // For block elements with height=auto (resolves to 0), use measured height as
+    // the intrinsic size so Text/Button nodes get their natural content height.
+    const node_h = blk: {
+        const disp_check = s.get(id).display;
+        if (disp_check == .block and node_h_raw == 0) {
+            if (s.get(id).measured) |m| break :blk m.h;
+        }
+        break :blk node_h_raw;
+    };
 
-    // Clamp to non-negative
-    const w = @max(0.0, node_w);
-    const h = @max(0.0, node_h);
+    // Clamp to non-negative and enforce parent's minimum constraints.
+    // avail.min_w/min_h come from the parent (e.g. stretch in block/flex) and must be honoured.
+    const w = @max(avail.min_w, node_w);
+    const h = @max(avail.min_h, node_h);
 
     // Determine display type and lay out children
     const disp = s.get(id).display;
@@ -170,11 +180,14 @@ fn solveBlock(
         // Available width for the child after its own margins
         const child_content_w = @max(0.0, content_w - margin_left_px - margin_right_px);
 
+        // For overflow:hidden containers (ScrollView) children may grow taller than the
+        // viewport — the clip happens at render time, not layout time. Let height be free.
+        const is_scroll = s.get(id).overflow == .hidden;
         const child_avail = Constraints{
             .min_w = child_content_w,
             .max_w = child_content_w,
-            .min_h = content_h,
-            .max_h = if (content_h > 0) content_h else std.math.inf(f32),
+            .min_h = if (is_scroll) 0.0 else content_h,
+            .max_h = if (is_scroll) std.math.inf(f32) else if (content_h > 0) content_h else std.math.inf(f32),
         };
 
         // Determine x offset: mx-auto centers the child
@@ -259,12 +272,16 @@ fn solveFlex(
                 .px => |v| v,
                 .percent => |v| main_size * (v / 100.0),
                 .auto => blk: {
-                    // Fall back to declared width (row) or height (column)
+                    // Fall back to declared width (row) or height (column).
+                    // When the declared dimension is also auto, use measured intrinsic size.
                     const dim = if (direction == .row) child.width else child.height;
                     break :blk switch (dim) {
                         .px => |v| v,
                         .percent => |v| main_size * (v / 100.0),
-                        .auto => 0.0,
+                        .auto => if (child.measured) |m|
+                            if (direction == .row) m.w else m.h
+                        else
+                            0.0,
                     };
                 },
             };
@@ -411,6 +428,8 @@ fn solveFlex(
         origin_x + padding.left + main_offset
     else
         origin_y + padding.top + main_offset;
+    var max_child_cross: f32 = 0.0;
+    var total_main_extent: f32 = 0.0;
 
     for (children) |*c| {
         const child_main_pos = @round(cursor_main_f32);
@@ -468,13 +487,40 @@ fn solveFlex(
 
         // Recurse into child (lay out its subtree)
         const child_size = solveNode(s, c.id, child_avail, child_x, child_y);
-        _ = child_size;
 
-        // Advance cursor cumulatively
-        cursor_main_f32 += c.final_size + inter_gap;
+        // Track actual cross-axis extent for auto-sized containers.
+        const child_cross_actual = if (direction == .row) child_size.h else child_size.w;
+        if (child_cross_actual > max_child_cross) max_child_cross = child_cross_actual;
+
+        // Advance cursor: use the larger of planned final_size and actual solved size.
+        // This handles containers whose height was 0 during phase 1 (e.g. flex rows
+        // with no explicit height) but expanded after solving their own children.
+        const child_main_actual = if (direction == .row) child_size.w else child_size.h;
+        const effective_advance = @max(c.final_size, child_main_actual);
+        total_main_extent += effective_advance;
+        cursor_main_f32 += effective_advance + inter_gap;
     }
+    // Subtract trailing inter_gap that was added after the last child.
+    const children_main_size = if (n > 0)
+        total_main_extent + @as(f32, @floatFromInt(n - 1)) * inter_gap
+    else
+        0.0;
 
-    return Size{ .w = container_w, .h = container_h };
+    // Derive auto sizes from children on each axis.
+    const actual_h: f32 = if (container_h > 0)
+        container_h
+    else if (direction == .column)
+        children_main_size + padding.top + padding.bottom
+    else
+        max_child_cross + padding.top + padding.bottom;
+    const actual_w: f32 = if (container_w > 0)
+        container_w
+    else if (direction == .row)
+        children_main_size + padding.left + padding.right
+    else
+        max_child_cross + padding.left + padding.right;
+
+    return Size{ .w = actual_w, .h = actual_h };
 }
 
 // ---------------------------------------------------------------------------

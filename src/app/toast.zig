@@ -113,8 +113,8 @@ pub const ToastManager = struct {
         }
 
         // Build draw commands for all active toasts.
-        var cmds = std.ArrayList(DrawCommand).init(alloc);
-        errdefer cmds.deinit();
+        var cmds: std.ArrayList(DrawCommand) = .empty;
+        errdefer cmds.deinit(alloc);
 
         const atlas_w = @as(f32, @floatFromInt(glyph_atlas.width));
         const atlas_h = @as(f32, @floatFromInt(glyph_atlas.height));
@@ -128,13 +128,13 @@ pub const ToastManager = struct {
             const border = toastBorder(t.kind, tokens);
 
             // Background.
-            try cmds.append(.{ .filled_rect = .{
+            try cmds.append(alloc, .{ .filled_rect = .{
                 .rect = .{ .x = toast_x, .y = toast_y, .w = TOAST_W, .h = TOAST_H },
                 .color = toC09(bg),
                 .radius = tokens.radius_sm,
             } });
             // Border.
-            try cmds.append(.{ .border_rect = .{
+            try cmds.append(alloc, .{ .border_rect = .{
                 .rect = .{ .x = toast_x, .y = toast_y, .w = TOAST_W, .h = TOAST_H },
                 .color = toC09(border),
                 .width = 1,
@@ -159,7 +159,7 @@ pub const ToastManager = struct {
                     const uv_y = @as(f32, @floatFromInt(g.uv.y)) / atlas_h;
                     const uv_w = g.dest_w / atlas_w;
                     const uv_h = g.dest_h / atlas_h;
-                    try cmds.append(.{ .glyph = .{
+                    try cmds.append(alloc, .{ .glyph = .{
                         .dst = .{
                             .x = toast_x + 12 + g.dest_x,
                             .y = toast_y + (TOAST_H - tokens.text_sm) / 2.0 + g.dest_y,
@@ -173,7 +173,7 @@ pub const ToastManager = struct {
             }
         }
 
-        const slice = try cmds.toOwnedSlice();
+        const slice = try cmds.toOwnedSlice(alloc);
         self.current_cmds = slice;
         overlay.setSlot(self.overlay_id, slice);
     }

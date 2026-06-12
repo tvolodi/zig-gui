@@ -16,6 +16,7 @@ const store_mod = @import("../03/types.zig");
 const theme = @import("../05/types.zig");
 const markup = @import("../06/types.zig");
 const font_family_mod = @import("../app/font_family.zig");
+const debug = @import("debug.zig");
 
 // ---------------------------------------------------------------------------
 // Re-exports used by the acceptance test
@@ -92,12 +93,14 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
     return switch (kind) {
         .row => .{ .display = .flex, .direction = .row },
         .column => .{ .display = .flex, .direction = .column },
+        .card => .{ .display = .flex, .direction = .column },
         .scrollview => .{ .display = .block, .overflow = .hidden },
         .textarea => .{ .display = .block, .overflow = .hidden },
         .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 1 } },
-        .radio => .{ .display = .flex, .direction = .row, .align_items = .center },
-        .slider => .{ .display = .block, .height = .{ .px = 24 } },
-        .progress_bar => .{ .display = .block, .height = .{ .px = 8 } },
+        .checkbox => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
+        .radio => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
+        .slider => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
+        .progress_bar => .{ .display = .block, .height = .{ .px = 8 }, .flex_shrink = 0, .min_size = .{ .h = 8 } },
         .spinner => .{ .display = .block, .width = .{ .px = 24 }, .height = .{ .px = 24 } },
         .tabs => .{ .display = .flex, .direction = .column },
         .tab_item => .{ .display = .block },
@@ -117,7 +120,9 @@ pub fn defaultStyleFor(kind: WidgetKind, tokens: Tokens) ComputedStyle {
         .card => theme.cardSurface(tokens),
         .input, .dropdown, .textarea => theme.inputDefault(tokens),
         .separator => ComputedStyle{ .background = tokens.border_default },
-        .text, .row, .column, .checkbox, .scrollview, .image, .icon, .radio, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table => ComputedStyle{},
+        .text => ComputedStyle{ .text_color = tokens.text_body, .font_size = tokens.text_base },
+        .checkbox, .radio => ComputedStyle{ .text_color = tokens.text_body },
+        .row, .column, .scrollview, .image, .icon, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table => ComputedStyle{},
     };
 }
 
@@ -259,7 +264,7 @@ pub const AvatarState = struct {
 pub const BadgeColor = enum { default, success, warning, error_c };
 
 pub const BadgeState = struct {
-    text:  [8]u8      = .{0} ** 8,
+    text: [8]u8 = .{0} ** 8,
     color: BadgeColor = .default,
 };
 
@@ -290,10 +295,10 @@ pub const DataColumn = struct {
 pub const CellTextFn = *const fn (row_ptr: *anyopaque, col: u8, buf: []u8) u8;
 
 pub const DataTableRows = struct {
-    row_ptr:  *anyopaque,
+    row_ptr: *anyopaque,
     row_size: usize,
     row_count: u32,
-    cell_fn:  CellTextFn,
+    cell_fn: CellTextFn,
 };
 
 pub const DataTableState = struct {
@@ -496,6 +501,12 @@ pub const Scene = struct {
     // R79 — Data table state parallel array
     _table_state: std.ArrayListUnmanaged(DataTableState) = .empty,
 
+    // R93 — Class string parallel array for theme live-swap (one entry per element).
+    // Stores the `NodeDesc.classes` slice (owned by the markup arena — no copy needed).
+    // Used by rebuildStyles to re-run class resolution after a theme change.
+    // NOTE: Inline style:* overrides are NOT preserved through a theme swap (v1 limitation).
+    _classes: std.ArrayListUnmanaged([]const u8) = .empty,
+
     // R73 — Frame counter and timestamp for animation (updated each frame by app).
     frame_count: u64 = 0,
     frame_time_ms: u64 = 0,
@@ -547,6 +558,7 @@ pub const Scene = struct {
         self._context_menu_idx.deinit(self.gpa);
         for (self._table_state.items) |*ts| ts.sorted_indices.deinit(self.gpa);
         self._table_state.deinit(self.gpa);
+        self._classes.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -581,6 +593,7 @@ pub const Scene = struct {
         self._tooltip.clearRetainingCapacity();
         self._context_menu_idx.clearRetainingCapacity();
         self._table_state.clearRetainingCapacity();
+        self._classes.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -605,8 +618,21 @@ pub const Scene = struct {
         return id;
     }
 
-    /// Measure every text-bearing element and fill its LayoutNode.measured.
-    /// `font` is the fallback face used when self.font_family is null (acceptance test path).
+    // -----------------------------------------------------------------------
+    // R91 — Scene dump (forwarding wrappers)
+    // -----------------------------------------------------------------------
+
+    /// Write a human-readable indented element tree to stderr (R91).
+    pub fn debugPrint(self: *const Scene) void {
+        debug.debugPrintScene(self);
+    }
+
+    /// Write a one-line summary (live/total/dirty/focused) to stderr (R91).
+    pub fn debugPrintStats(self: *const Scene) void {
+        debug.debugPrintSceneStats(self);
+    }
+
+    /// Measure every text-bearing element and fill its LayoutNode.measured.    /// `font` is the fallback face used when self.font_family is null (acceptance test path).
     /// When self.font_family is set (app path, R60), per-element bold/italic face is selected.
     pub fn measurePass(self: *Scene, font: *text.Font, atlas: *text.GlyphAtlas) text.FontError!void {
         for (self._text.items, 0..) |maybe_str, i| {
@@ -619,6 +645,24 @@ pub const Scene = struct {
             const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, str, style.font_size, 1e6, self.font_family);
             defer self.gpa.free(para.glyphs);
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
+        }
+
+        // Rasterize dropdown option labels so their glyphs are in the atlas before
+        // the second-pass overlay renderer calls emitGlyphs on them.
+        for (self._dropdown_state.items, 0..) |*dd, i| {
+            if (dd.options.items.len == 0) continue;
+            if (i >= self._style.items.len) break;
+            const style = self._style.items[i];
+            const effective_font = if (self.font_family) |fam|
+                fam.face(style.font_bold, style.font_italic)
+            else
+                font;
+            for (dd.options.items) |opt| {
+                if (opt.label.len == 0) continue;
+                const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, opt.label, style.font_size, 1e6, self.font_family);
+                defer self.gpa.free(para.glyphs);
+                // Side-effect only: rasterize glyphs into atlas. Measured size not needed here.
+            }
         }
     }
 
@@ -1520,6 +1564,12 @@ pub const Scene = struct {
                     .literal => |s| s,
                     .bind => |s| s,
                 };
+            } else if ((kind == .checkbox or kind == .radio) and std.mem.eql(u8, attr.name, "label")) {
+                // R70/R71: store checkbox/radio label text so the renderer can display it.
+                text_val = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => |s| s,
+                };
             } else if (std.mem.eql(u8, attr.name, "if")) {
                 switch (attr.value) {
                     .literal => |s| {
@@ -1707,6 +1757,42 @@ pub const Scene = struct {
             self._table_state.items.len = needed;
         }
         self._table_state.items[id.index] = .{};
+
+        // R93: class string (for theme live-swap / rebuildStyles)
+        try self._classes.ensureTotalCapacity(self.gpa, needed);
+        if (self._classes.items.len <= id.index) {
+            self._classes.items.len = needed;
+        }
+        self._classes.items[id.index] = desc.classes;
+
+        // Parse input/textarea value= attribute to pre-populate the text buffer.
+        if (kind == .input or kind == .textarea) {
+            for (desc.attrs) |attr| {
+                if (!std.mem.eql(u8, attr.name, "value")) continue;
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (attr_val.len > 0) {
+                    var inp = &self._input_state.items[id.index];
+                    try inp.text.appendSlice(self.gpa, attr_val);
+                    inp.cursor = @intCast(attr_val.len);
+
+                    // Textarea requires line_starts to be populated; without it
+                    // the renderer gates all text output on line_starts.len > 0.
+                    if (kind == .textarea) {
+                        var ts = &self._textarea_state.items[id.index];
+                        try ts.line_starts.append(self.gpa, 0); // line 0 always starts at 0
+                        for (attr_val, 0..) |byte, i| {
+                            if (byte == '\n') {
+                                try ts.line_starts.append(self.gpa, @intCast(i + 1));
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
 
         // R71: parse radio attributes (group, value)
         if (kind == .radio) {

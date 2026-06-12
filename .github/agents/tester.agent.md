@@ -76,9 +76,28 @@ Write a structured report for every failing module:
 <path to the file and function most likely at fault>
 ```
 
+## Cleaning up temp test artifacts
+
+`std.testing.TmpDir` on Zig 0.16 creates directories with random names relative to the
+current working directory (e.g. `3DtCKUh_Cn-Q8-oR/`). After running any test target,
+delete these directories so they do not pollute the working tree:
+
+```powershell
+# After running tests, clean up any leftover TmpDir directories at repo root.
+# These contain only test_settings.txt or *.log files from M10 test suites.
+Get-ChildItem -Directory | Where-Object { $_.Name -match '^[A-Za-z0-9_-]{16,}$' `
+    -and (Test-Path (Join-Path $_.FullName "test_settings.txt") `
+       -or (Get-ChildItem $_.FullName -Filter "*.log").Count -gt 0) } `
+  | Remove-Item -Recurse -Force
+```
+
+Run this cleanup command after every test run that includes: `test-settings`,
+`test-window-state`, `test-file-logger`, `test-budget-arena`.
+
 ## What you NEVER do
 
 - Edit `acceptance_test.zig` or any test file
 - Edit production code to work around a test
 - Mark a test as "expected failure" or skip it
 - Report a test as passing when it is not
+- Leave `TmpDir` artifacts in the repo root after a test run

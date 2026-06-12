@@ -197,6 +197,8 @@ constitution and is a flag for human review.
 - **Key rule (INV-4.3):** A component style references tokens, NEVER raw palette values or
   hex literals. The acceptance test verifies this directly.
 - `ComputedStyle` is defined here (lowest module that needs it) and shared upward.
+- **M9 — `Tokens.scaled(factor)`:** Pure function that multiplies all five text-size fields (`text_xs`…`text_xl`) by `factor` and clamps each to `[6, 96]`. Call with `factor = 1.0` for an unscaled copy.
+- **M9 — `Palette.highContrast()` / `highContrastDark()`:** Built-in high-contrast palettes (WCAG AA). Available as `Theme.hc_light` / `Theme.hc_dark` convenience constants on the `Theme` struct.
 
 ### Module 06 — Markup + style
 - **Goal:** `.ui` parser → `NodeDesc` tree; Tailwind-subset class resolver → `ComputedStyle`
@@ -279,6 +281,8 @@ constitution and is a flag for human review.
 - **R7B — Avatar (M7 Phase 3):** Image mode: `ImageCmd` with `dst`/`uv`/`tint` fields. Initials mode: circle background (`initialsColor` from char modulo 8-color palette) + initials text + border.
 - **R79 — Badge (M7 Phase 3):** Pill `filled_rect` + count text. Background uses `tokens.err` when no explicit color set. Zero count renders as empty string.
 - **R79 — Data Table (M7 Phase 3):** `set_scissor` + header row (column headers, dividers) + virtualized data rows + `restore_scissor`. Only `visible_count = ceil(view_h / row_height) + 1` rows emitted per frame.
+- **M9 — `_classes` parallel array (R90/R93/R95):** `_classes: ArrayListUnmanaged([]const u8)` stores the raw CSS class string for each element at instantiation. Used by `rebuildStyles` in the app layer to re-resolve element styles when the active theme changes at runtime. Populated in `instantiateNode` from `desc.classes`; cleared in `reset()`.
+- **M9 — `debugPrint` / `debugPrintStats` forwarding methods (R91):** Scene exposes two forwarding methods that delegate to free functions in `src/07/debug.zig`. The free functions own the DFS traversal and stderr formatting; Scene never touches stderr directly.
 
 ### App layer — Milestone 1 (src/app/)
 - **Goal:** Single `App.run()` entry point that owns and drives all modules. Wires together
@@ -316,6 +320,11 @@ constitution and is a flag for human review.
 - **R75 — `DialogManager` (`src/app/dialog.zig`):** Wire into app: `var dialog = DialogManager.init(&overlay); defer dialog.deinit(alloc);`. Call `dialog.buildOverlay(w, h, tokens, &overlay, alloc)` each frame when open. `dialog.open(content_idx, &scene)` hides the rest of the scene and traps focus; `dialog.close(&scene)` restores it.
 - **R7C — `TooltipManager` (`src/app/tooltip.zig`):** Fields in `AppInner`: `tooltip_manager: TooltipManager = .{}`. `deinit` called in `AppInner.deinit`. Mouse move handler calls `onHover(idx, text, now_ms)` / `onLeave(idx)` based on hit-testing `_tooltip[]`. `isPending()` checked in `hasAnimatedElements`. `tick` called once per frame to build overlay.
 - **R7D — `ContextMenuManager` (`src/app/context_menu.zig`):** Fields in `AppInner`: `context_menu_manager: ContextMenuManager = .{}`. `deinit` called in `AppInner.deinit`. Right-click (`mb.button == .right`) opens menu via `openAt(menu_idx, x, y, &overlay, tokens, &font_family.regular, &atlas_cpu, gpa)` when `contextMenuIdxOf(hit) != 0xFF`.
+- **M9 — `DebugOverlay` (`src/app/debug_overlay.zig`):** Toggled by F1 in `handleKey`. `updateHover` iterates elements in REVERSE order, skips hidden+zero-size. `buildDebugDrawList` emits `border_rect` for every live element + an info panel for the hovered element. Border color encodes role: hovered=accent, focusable=info, container=ok, other=warn.
+- **M9 — `PerfHud` (`src/app/perf_hud.zig`):** Maintains a 16-entry ring buffer of frame times. `record(FrameCounters)` pushes to the ring; `smoothFrameMs()` averages non-zero entries. `buildHudDrawList(alloc, enabled, viewport_w, tokens, font, atlas)` returns nil-length slice (fast path) when `!enabled`.
+- **M9 — Theme live-swap pattern:** `setTheme(theme)` → scale tokens → `rebuildStyles()` → `markAllDirty()`. `rebuildStyles` calls `defaultStyleFor(kind, tokens)` + `resolveStyleForIdx(idx, base)` (which calls `markup_mod.resolveClasses(classes, tokens)`) for every live element. `toggleTheme` flips `_current_mode` and calls `setTheme(Theme.build(_current_palette, mode))`.
+- **M9 — Font scale pattern:** `setFontScale(factor)` clamps to `[0.5, 4.0]`, stores in `_font_scale`, rebuilds tokens via `Theme.build(_current_palette, _current_mode).tokens.scaled(factor)`, calls `rebuildStyles()` + `markAllDirty()`.
+- **M9 — Frame loop additions:** After `buildDrawList`, append debug/HUD draw lists before `drawFrame`. Record `_frame_start_ns = std.time.nanoTimestamp()` at `beginFrame`; compute `elapsed_ms` after `endFrame`; call `perf_hud.record(FrameCounters{…})`.
 - **Viewport constraints:** stored as `AppInner.viewport_constraints: Constraints` and updated
   on every resize. Passed to `layout.solve` each frame. No `LayoutEngine.setViewport` method
   exists in module 04 — the App layer owns this state.
@@ -447,6 +456,7 @@ A module is done when:
 - `zig test` against any unit test file (`src/NN/NN_test.zig`) passes with zero failures.
 - Every checkbox in its `checklist.md` is ticked.
 - `docs/requirements/DEMO_APP.md` has been updated to cover the new feature.
+- **`zig build visual-check` passes** (required for any change touching rendering, layout, or styling).
 - Module 01 additionally requires a manual visual confirmation on both Windows and Linux.
 
 ### 11.1 Frozen acceptance tests vs. agent-written unit tests
@@ -459,6 +469,72 @@ A module is done when:
 The key distinction: **INV-5.3 protects the acceptance test file itself, not the testing infrastructure.**
 A test-designer agent creates new test files. If those tests become obsolete (code changes), they're updated via
 normal code maintenance, not preserved forever.
+
+### 11.2 Visual verification — required for any rendering change
+
+Unit tests and acceptance tests verify data structures and logic paths. They cannot catch:
+- text rendered transparent (wrong default color)
+- layout that computes non-zero rects but emits invisible draw commands
+- a widget kind that falls through to a no-op rendering branch
+- theme tokens that produce unreadable contrast
+
+**Rule: if a task touches `buildDrawList`, `defaultStyleFor`, any `*State` render path, or any
+`ComputedStyle` field — run `zig build visual-check` and confirm it passes before declaring done.**
+
+#### The automated visual check
+
+```powershell
+zig build visual-check
+```
+
+This single command:
+1. Builds the demo binary (`zig build`)
+2. Runs it for 3 frames with a real Vulkan swapchain (`--screenshot-frames 3`)
+3. Reads the rendered frame back from GPU memory to CPU
+4. Writes a PNG to `testdata/screenshot_actual.png`
+5. Runs `src/tools/visual_check.zig` — fails (exit 1) if the PNG is all-black
+
+A passing run looks like:
+```
+PASS: screenshot 'testdata/screenshot_actual.png' — 42.3% non-zero IDAT bytes
+```
+
+A failing run (blank frame) looks like:
+```
+FAIL: screenshot appears blank — 0.1% non-zero IDAT bytes (threshold 5.0%)
+```
+
+The check requires a display (GLFW opens a real window briefly). It does **not** require
+manual intervention — it is fully automated and returns exit code 0/1.
+
+#### How it works
+
+`AppOptions.screenshot_frames` (> 0) triggers the readback path in `AppInner.runWithNav`:
+after the Nth frame, `VulkanBackend.readbackFrameRgba` blits the swapchain image to a
+host-visible buffer, swaps BGRA→RGBA, and returns the pixel data. `src/app/png_writer.zig`
+encodes it to an uncompressed PNG (zlib store blocks, no external deps).
+`src/tools/visual_check.zig` checks that the IDAT payload has > 5% non-zero bytes —
+a blank (all-black) frame compresses to near-zero entropy.
+
+#### What "obviously wrong" looks like
+
+| Symptom | Likely cause |
+|---|---|
+| `visual-check` fails: 0% non-zero bytes | `buildDrawList` returns empty or all elements zero-size |
+| `visual-check` passes but image shows no text | `text_color.a == 0` — check `defaultStyleFor(.text)` |
+| Layout correct, glyphs invisible | `font_size = 0` in `ComputedStyle` default |
+| Widgets present but wrong color | Token reference resolves to wrong palette entry |
+| Content clipped at viewport edge | `h-full`/`w-full` not resolving in layout |
+
+#### Attaching the screenshot for human review
+
+After `zig build visual-check` passes the automated check, attach the PNG for human review:
+
+```powershell
+# Screenshot is at testdata/screenshot_actual.png — attach it to the conversation
+```
+
+The agent reads the file with the `Read` tool (it supports PNG) and describes what it sees.
 
 ---
 

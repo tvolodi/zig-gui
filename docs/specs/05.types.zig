@@ -95,6 +95,58 @@ pub const Palette = struct {
             .base = 4,
         };
     }
+
+    /// R95 — A high-contrast palette meeting WCAG 2.1 AA requirements for all semantic token roles.
+    pub fn highContrast() Palette {
+        return .{
+            .gray_50 = Color.hex(0xFFFFFF),
+            .gray_100 = Color.hex(0xF0F0F0),
+            .gray_200 = Color.hex(0x767676),
+            .gray_400 = Color.hex(0x595959),
+            .gray_600 = Color.hex(0x3A3A3A),
+            .gray_800 = Color.hex(0x1A1A1A),
+            .gray_900 = Color.hex(0x000000),
+
+            .accent_200 = Color.hex(0x4A90D9),
+            .accent_400 = Color.hex(0x0055CC),
+            .accent_600 = Color.hex(0x003D99),
+
+            .ok_400 = Color.hex(0x1A6B00),
+            .warn_400 = Color.hex(0x7A4F00),
+            .err_400 = Color.hex(0xCC0000),
+            .info_400 = Color.hex(0x0055BB),
+
+            .white = Color.hex(0xFFFFFF),
+            .black = Color.hex(0x000000),
+            .base = 4,
+        };
+    }
+
+    /// R95 — High-contrast dark palette — white text on near-black background.
+    pub fn highContrastDark() Palette {
+        return .{
+            .gray_50 = Color.hex(0xFFFFFF),
+            .gray_100 = Color.hex(0xE8E8E8),
+            .gray_200 = Color.hex(0xC8C8C8),
+            .gray_400 = Color.hex(0x9E9E9E),
+            .gray_600 = Color.hex(0x3A3A3A),
+            .gray_800 = Color.hex(0x1A1A1A),
+            .gray_900 = Color.hex(0x000000),
+
+            .accent_200 = Color.hex(0xFFE066),
+            .accent_400 = Color.hex(0xFFCC00),
+            .accent_600 = Color.hex(0xCC9900),
+
+            .ok_400 = Color.hex(0x66DD00),
+            .warn_400 = Color.hex(0xFFAA00),
+            .err_400 = Color.hex(0xFF5555),
+            .info_400 = Color.hex(0x55AAFF),
+
+            .white = Color.hex(0xFFFFFF),
+            .black = Color.hex(0x000000),
+            .base = 4,
+        };
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -229,6 +281,21 @@ pub const Tokens = struct {
             .text_lg = 18,
             .text_xl = 24,
         };
+    }
+
+    /// R94 — Return a copy of the tokens with all five type-scale sizes multiplied by `factor`.
+    /// factor = 1.0 → no change. factor = 1.5 → 50% larger.
+    /// All other tokens (colors, spacing, radii) are unaffected.
+    /// The result is clamped: each size is at least 6 px and at most 96 px.
+    pub fn scaled(self: Tokens, factor: f32) Tokens {
+        var result = self;
+        const clamp = std.math.clamp;
+        result.text_xs = clamp(self.text_xs * factor, 6, 96);
+        result.text_sm = clamp(self.text_sm * factor, 6, 96);
+        result.text_base = clamp(self.text_base * factor, 6, 96);
+        result.text_lg = clamp(self.text_lg * factor, 6, 96);
+        result.text_xl = clamp(self.text_xl * factor, 6, 96);
+        return result;
     }
 };
 
@@ -376,6 +443,8 @@ pub fn cardSurface(t: Tokens) ComputedStyle {
 
 pub const Theme = struct {
     tokens: Tokens,
+    palette: Palette,
+    mode: Mode,
 
     pub fn build(palette: Palette, mode: Mode) Theme {
         return .{
@@ -383,6 +452,13 @@ pub const Theme = struct {
                 .light => Tokens.light(palette),
                 .dark => Tokens.dark(palette),
             },
+            .palette = palette,
+            .mode = mode,
         };
     }
+
+    /// R95 — Convenience constant: light high-contrast theme.
+    pub const hc_light = Theme.build(Palette.highContrast(), .light);
+    /// R95 — Convenience constant: dark high-contrast theme.
+    pub const hc_dark = Theme.build(Palette.highContrastDark(), .dark);
 };

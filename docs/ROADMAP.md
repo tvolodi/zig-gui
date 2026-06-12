@@ -152,32 +152,32 @@ Structure for building a real multi-screen application.
 
 ---
 
-## Milestone 9 — Developer experience `planned`
+## Milestone 9 — Developer experience `done`
 
 Makes building with the framework fast and observable.
 
-| ID | Feature | Depends on | Requirements |
-|---|---|---|---|
-| M9-01 | **Debug overlay** — toggle with F1; draws element bounds, shows computed rect and applied style on hover | M1-02, 09 | [R90](requirements/R90_debug_overlay.md) |
-| M9-02 | **Scene dump** — `Scene.debugPrint()` writes the element tree with kinds, rects, and styles to stderr | 07 | [R91](requirements/R91_scene_dump.md) |
-| M9-03 | **Performance counters** — frame time, draw command count, dirty element count displayed in debug overlay | M1-01, M9-01 | [R92](requirements/R92_performance_counters.md) |
-| M9-04 | **Theme live-swap** — change light/dark or swap a palette at runtime without restart | M2-01, 05 | [R93](requirements/R93_theme_live_swap.md) |
-| M9-05 | **Accessibility: font scaling** — a global font-size multiplier applied to the type scale tokens | 05, 06 | [R94](requirements/R94_font_scaling.md) |
-| M9-06 | **Accessibility: high-contrast mode** — a high-contrast palette variant | 05 | [R95](requirements/R95_high_contrast.md) |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M9-01 | **Debug overlay** — toggle with F1; draws element bounds, shows computed rect and applied style on hover | M1-02, 09 | [R90](requirements/R90_debug_overlay.md) | `done` |
+| M9-02 | **Scene dump** — `Scene.debugPrint()` writes the element tree with kinds, rects, and styles to stderr | 07 | [R91](requirements/R91_scene_dump.md) | `done` |
+| M9-03 | **Performance counters** — frame time, draw command count, dirty element count displayed in debug overlay | M1-01, M9-01 | [R92](requirements/R92_performance_counters.md) | `done` |
+| M9-04 | **Theme live-swap** — change light/dark or swap a palette at runtime without restart | M2-01, 05 | [R93](requirements/R93_theme_live_swap.md) | `done` |
+| M9-05 | **Accessibility: font scaling** — a global font-size multiplier applied to the type scale tokens | 05, 06 | [R94](requirements/R94_font_scaling.md) | `done` |
+| M9-06 | **Accessibility: high-contrast mode** — a high-contrast palette variant | 05 | [R95](requirements/R95_high_contrast.md) | `done` |
 
 ---
 
-## Milestone 10 — Production hardening `planned`
+## Milestone 10 — Production hardening `done`
 
 Makes the framework safe and observable when shipped as a real binary.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M10-01 | **Error boundary / recovery** — catch panics or errors from `ScreenFn` / callbacks; display a fallback screen instead of crashing | M8-01 |
-| M10-02 | **Memory budget enforcement** — configurable arena size ceiling; graceful `OutOfMemory` surface (log + fallback screen) instead of undefined behavior | M0 |
-| M10-03 | **Release logging** — structured `std.log` wrapper writing to a rolling file on disk; `App.init` accepts an optional log path | M1-01 |
-| M10-04 | **Graceful startup failure** — if Vulkan is unavailable, display a native OS error dialog instead of crashing to stderr | M1-01 |
-| M10-05 | **Window state persistence** — auto save/restore window position, size, and maximised state via `PersistentSettings` | M8-03 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M10-01 | **Error boundary / recovery** — catch panics or errors from `ScreenFn` / callbacks; display a fallback screen instead of crashing | M8-01 | [RA0](requirements/RA0_error_boundary.md) | `done` |
+| M10-02 | **Memory budget enforcement** — configurable arena size ceiling; graceful `OutOfMemory` surface (log + fallback screen) instead of undefined behavior | M0 | [RA1](requirements/RA1_memory_budget.md) | `done` |
+| M10-03 | **Release logging** — structured `std.log` wrapper writing to a rolling file on disk; `App.init` accepts an optional log path | M1-01 | [RA2](requirements/RA2_release_logging.md) | `done` |
+| M10-04 | **Graceful startup failure** — if Vulkan is unavailable, display a native OS error dialog instead of crashing to stderr | M1-01 | [RA3](requirements/RA3_graceful_startup.md) | `done` |
+| M10-05 | **Window state persistence** — auto save/restore window position, size, and maximised state via `PersistentSettings` | M8-03 | [RA4](requirements/RA4_window_state_persistence.md) | `done` |
 
 ---
 

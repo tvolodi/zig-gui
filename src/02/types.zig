@@ -333,6 +333,9 @@ pub const Font = struct {
     _impl: *anyopaque = undefined,
     /// R60 — variant this font face represents (set by FontFamily.init; default .regular).
     variant: FontVariant = .regular,
+    /// True only when _impl points to a valid FontImpl (set by initFromBytes).
+    /// Stub fonts created via .{ ._impl = undefined } leave this false.
+    _valid: bool = false,
 
     pub fn initFromBytes(gpa: std.mem.Allocator, ttf: []const u8) FontError!Font {
         const impl = try gpa.create(FontImpl);
@@ -343,7 +346,7 @@ pub const Font = struct {
         if (c.stbtt_InitFont(&impl.info, impl.ttf_data.ptr, 0) == 0) {
             return FontError.InvalidFont;
         }
-        return Font{ ._impl = impl };
+        return Font{ ._impl = impl, ._valid = true };
     }
 
     pub fn deinit(self: *Font) void {
@@ -373,6 +376,21 @@ pub const Font = struct {
         c.stbtt_GetCodepointHMetrics(&impl.info, @intCast(codepoint), &adv, &lsb);
         const scale = c.stbtt_ScaleForPixelHeight(&impl.info, px);
         return @as(f32, @floatFromInt(adv)) * scale;
+    }
+
+    /// Return the bitmap bearing offsets (ix0, iy0) for a codepoint at the given pixel size.
+    /// Uses stbtt_GetCodepointBitmapBox — does NOT rasterize the glyph (cheap).
+    /// bx = horizontal offset from pen to left edge of bitmap (ix0).
+    /// by = vertical offset from baseline to top edge of bitmap (iy0, typically negative).
+    pub fn glyphBearing(self: *Font, codepoint: u21, px: f32) struct { bx: f32, by: f32 } {
+        const impl: *FontImpl = @ptrCast(@alignCast(self._impl));
+        const scale = c.stbtt_ScaleForPixelHeight(&impl.info, px);
+        var ix0: c_int = 0;
+        var iy0: c_int = 0;
+        var ix1: c_int = 0;
+        var iy1: c_int = 0;
+        c.stbtt_GetCodepointBitmapBox(&impl.info, @intCast(codepoint), 0, scale, &ix0, &iy0, &ix1, &iy1);
+        return .{ .bx = @as(f32, @floatFromInt(ix0)), .by = @as(f32, @floatFromInt(iy0)) };
     }
 
     /// `kern`-table kerning between two codepoints in pixels (often <= 0). 0 if absent or if

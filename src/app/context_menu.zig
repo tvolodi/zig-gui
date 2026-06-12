@@ -171,19 +171,28 @@ pub const ContextMenuManager = struct {
             total_h += if (item.separator) sep_h else item_h;
         }
 
-        var cmds = std.ArrayList(DrawCommand).init(gpa);
-        errdefer cmds.deinit();
+        var cmds: std.ArrayList(DrawCommand) = .empty;
+        errdefer cmds.deinit(gpa);
+
+        // Helper: convert mod05 Color to Color09.
+        const C = mod01.Color09;
+        const c09 = struct {
+            fn f(col: mod05.Color) C {
+                return .{ .r = col.r, .g = col.g, .b = col.b, .a = col.a };
+            }
+        }.f;
 
         // Background panel.
-        cmds.append(.{ .quad = .{
-            .x = self.pos_x,
-            .y = self.pos_y,
-            .w = menu_w,
-            .h = total_h,
-            .color = tokens.bg_surface,
+        cmds.append(gpa, .{ .filled_rect = .{
+            .rect = .{ .x = self.pos_x, .y = self.pos_y, .w = menu_w, .h = total_h },
+            .color = c09(tokens.bg_surface),
             .radius = radius,
-            .border_width = 1.0,
-            .border_color = tokens.border_default,
+        } }) catch {};
+        cmds.append(gpa, .{ .border_rect = .{
+            .rect = .{ .x = self.pos_x, .y = self.pos_y, .w = menu_w, .h = total_h },
+            .color = c09(tokens.border_default),
+            .width = 1.0,
+            .radius = radius,
         } }) catch {};
 
         // Items.
@@ -191,15 +200,10 @@ pub const ContextMenuManager = struct {
         for (menu.items[0..menu.count], 0..) |*item, i| {
             if (item.separator) {
                 // Horizontal rule.
-                cmds.append(.{ .quad = .{
-                    .x = self.pos_x + 8.0,
-                    .y = cursor_y + 4.0,
-                    .w = menu_w - 16.0,
-                    .h = 1.0,
-                    .color = tokens.border_default,
+                cmds.append(gpa, .{ .filled_rect = .{
+                    .rect = .{ .x = self.pos_x + 8.0, .y = cursor_y + 4.0, .w = menu_w - 16.0, .h = 1.0 },
+                    .color = c09(tokens.border_default),
                     .radius = 0,
-                    .border_width = 0,
-                    .border_color = tokens.border_default,
                 } }) catch {};
                 cursor_y += sep_h;
                 continue;
@@ -207,15 +211,10 @@ pub const ContextMenuManager = struct {
 
             const is_highlighted = (i == self.highlight);
             if (is_highlighted) {
-                cmds.append(.{ .quad = .{
-                    .x = self.pos_x + 2.0,
-                    .y = cursor_y,
-                    .w = menu_w - 4.0,
-                    .h = item_h,
-                    .color = tokens.accent,
+                cmds.append(gpa, .{ .filled_rect = .{
+                    .rect = .{ .x = self.pos_x + 2.0, .y = cursor_y, .w = menu_w - 4.0, .h = item_h },
+                    .color = c09(tokens.accent),
                     .radius = 4.0,
-                    .border_width = 0,
-                    .border_color = tokens.accent,
                 } }) catch {};
             }
 
@@ -229,31 +228,32 @@ pub const ContextMenuManager = struct {
                 else
                     tokens.text_body;
 
-                var para = mod02.layoutParagraph(gpa, font, atlas, label, font_size, menu_w - pad_x * 2.0) catch {
+                const para = mod02.layoutParagraph(gpa, font, atlas, label, font_size, menu_w - pad_x * 2.0) catch {
                     cursor_y += item_h;
                     continue;
                 };
-                defer para.deinit(gpa);
+                defer gpa.free(para.glyphs);
 
-                const text_y = cursor_y + (item_h - para.height) * 0.5;
+                const atlas_w = @as(f32, @floatFromInt(atlas.width));
+                const atlas_h_f = @as(f32, @floatFromInt(atlas.height));
+                const text_y = cursor_y + (item_h - para.extent.h) * 0.5;
                 for (para.glyphs) |g| {
-                    cmds.append(.{ .glyph = .{
-                        .x = self.pos_x + pad_x + g.x,
-                        .y = text_y + g.y,
-                        .w = g.w,
-                        .h = g.h,
-                        .uv_x = g.uv_x,
-                        .uv_y = g.uv_y,
-                        .uv_w = g.uv_w,
-                        .uv_h = g.uv_h,
-                        .color = text_color,
+                    if (g.dest_w == 0 or g.dest_h == 0) continue;
+                    const uv_x = @as(f32, @floatFromInt(g.uv.x)) / atlas_w;
+                    const uv_y = @as(f32, @floatFromInt(g.uv.y)) / atlas_h_f;
+                    const uv_w = g.dest_w / atlas_w;
+                    const uv_h = g.dest_h / atlas_h_f;
+                    cmds.append(gpa, .{ .glyph = .{
+                        .dst = .{ .x = self.pos_x + pad_x + g.dest_x, .y = text_y + g.dest_y, .w = g.dest_w, .h = g.dest_h },
+                        .uv = .{ .x = uv_x, .y = uv_y, .w = uv_w, .h = uv_h },
+                        .color = c09(text_color),
                     } }) catch {};
                 }
             }
             cursor_y += item_h;
         }
 
-        self.current_cmds = try cmds.toOwnedSlice();
+        self.current_cmds = try cmds.toOwnedSlice(gpa);
         layer.setSlot(self.overlay_id, self.current_cmds.?);
     }
 };

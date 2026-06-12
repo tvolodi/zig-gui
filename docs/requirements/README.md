@@ -129,3 +129,20 @@ Implementation order:
 5. **R75 fifth** (Modal dialog requires the overlay layer and focus trapping; depends on the overlay work from step 4 being settled)
 6. **R78 sixth** (Date picker requires the modal dialog from R75 and text input from M3-03)
 7. **R79 last** (Data table is the most complex; requires scroll container from M3-06 and all rendering features from M4)
+
+## Milestone 10 — Production hardening
+
+| File | Roadmap item | Status |
+|---|---|---|
+| [RA0_error_boundary.md](RA0_error_boundary.md) | M10-01 — Error boundary / recovery | `done` |
+| [RA1_memory_budget.md](RA1_memory_budget.md) | M10-02 — Memory budget enforcement | `done` |
+| [RA2_release_logging.md](RA2_release_logging.md) | M10-03 — Release logging | `done` |
+| [RA3_graceful_startup.md](RA3_graceful_startup.md) | M10-04 — Graceful startup failure | `done` |
+| [RA4_window_state_persistence.md](RA4_window_state_persistence.md) | M10-05 — Window state persistence | `done` |
+
+Implementation order:
+1. **RA2 first** (FileLogger is standalone; no dependencies on other M10 items; needed by RA0 for logging captured errors)
+2. **RA1 second** (BudgetedArena wraps the existing arena; standalone; needed by RA0 which may produce OOM)
+3. **RA3 third** (showErrorDialog is standalone platform code; no M10 inter-dependencies)
+4. **RA4 fourth** (WindowStateManager builds on PersistentSettings from M8-03; standalone)
+5. **RA0 last** (ErrorBoundary depends on Navigator from M8-01; wires together the above logging/memory pieces)

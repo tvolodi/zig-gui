@@ -1051,6 +1051,131 @@ pub const VulkanBackend = struct {
         vkRecreateSwapchain(impl) catch {};
     }
 
+    /// Read the last rendered frame back to CPU memory and write it as a PNG.
+    /// Must be called after endFrame() on the same frame.  Blocks until GPU idle.
+    /// `pixels_rgba` receives raw RGBA bytes (width*height*4); caller must free.
+    pub fn readbackFrameRgba(self: *VulkanBackend, gpa: std.mem.Allocator) ![]u8 {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const w = impl.swapchain_extent.width;
+        const h = impl.swapchain_extent.height;
+        if (w == 0 or h == 0) return error.ZeroSize;
+
+        // Wait for GPU to finish all work.
+        _ = c.vkDeviceWaitIdle(impl.device);
+
+        const n_bytes: u64 = @as(u64, w) * h * 4;
+
+        // Create host-visible staging buffer.
+        var buf_info = std.mem.zeroes(c.VkBufferCreateInfo);
+        buf_info.sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buf_info.size = n_bytes;
+        buf_info.usage = c.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        buf_info.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+        var staging_buf: c.VkBuffer = null;
+        if (c.vkCreateBuffer(impl.device, &buf_info, null, &staging_buf) != c.VK_SUCCESS)
+            return error.GpuReadbackFailed;
+        defer c.vkDestroyBuffer(impl.device, staging_buf, null);
+
+        var mem_req = std.mem.zeroes(c.VkMemoryRequirements);
+        c.vkGetBufferMemoryRequirements(impl.device, staging_buf, &mem_req);
+
+        var alloc_info = std.mem.zeroes(c.VkMemoryAllocateInfo);
+        alloc_info.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = mem_req.size;
+        alloc_info.memoryTypeIndex = findMemoryType(impl, mem_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) catch
+            return error.GpuReadbackFailed;
+        var staging_mem: c.VkDeviceMemory = null;
+        if (c.vkAllocateMemory(impl.device, &alloc_info, null, &staging_mem) != c.VK_SUCCESS)
+            return error.GpuReadbackFailed;
+        defer c.vkFreeMemory(impl.device, staging_mem, null);
+        _ = c.vkBindBufferMemory(impl.device, staging_buf, staging_mem, 0);
+
+        // Record a one-shot command buffer.
+        var cb_info = std.mem.zeroes(c.VkCommandBufferAllocateInfo);
+        cb_info.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cb_info.commandPool = impl.command_pool;
+        cb_info.level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cb_info.commandBufferCount = 1;
+        var cb: c.VkCommandBuffer = null;
+        _ = c.vkAllocateCommandBuffers(impl.device, &cb_info, &cb);
+        defer c.vkFreeCommandBuffers(impl.device, impl.command_pool, 1, &cb);
+
+        var begin_info = std.mem.zeroes(c.VkCommandBufferBeginInfo);
+        begin_info.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        _ = c.vkBeginCommandBuffer(cb, &begin_info);
+
+        // Use the most recently presented swapchain image.
+        const img_idx = impl.current_image_index;
+        const img = impl.swapchain_images[img_idx];
+
+        // Transition: PRESENT_SRC → TRANSFER_SRC
+        {
+            var b = std.mem.zeroes(c.VkImageMemoryBarrier);
+            b.sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            b.newLayout = c.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            b.srcAccessMask = c.VK_ACCESS_MEMORY_READ_BIT;
+            b.dstAccessMask = c.VK_ACCESS_TRANSFER_READ_BIT;
+            b.srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED;
+            b.image = img;
+            b.subresourceRange.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+            b.subresourceRange.levelCount = 1;
+            b.subresourceRange.layerCount = 1;
+            c.vkCmdPipelineBarrier(cb, c.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, c.VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, null, 0, null, 1, &b);
+        }
+
+        // Copy image to buffer.
+        var region = std.mem.zeroes(c.VkBufferImageCopy);
+        region.imageSubresource.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = .{ .width = w, .height = h, .depth = 1 };
+        c.vkCmdCopyImageToBuffer(cb, img, c.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging_buf, 1, &region);
+
+        // Transition back: TRANSFER_SRC → PRESENT_SRC
+        {
+            var b = std.mem.zeroes(c.VkImageMemoryBarrier);
+            b.sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = c.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            b.newLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            b.srcAccessMask = c.VK_ACCESS_TRANSFER_READ_BIT;
+            b.dstAccessMask = c.VK_ACCESS_MEMORY_READ_BIT;
+            b.srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED;
+            b.image = img;
+            b.subresourceRange.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+            b.subresourceRange.levelCount = 1;
+            b.subresourceRange.layerCount = 1;
+            c.vkCmdPipelineBarrier(cb, c.VK_PIPELINE_STAGE_TRANSFER_BIT, c.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, null, 0, null, 1, &b);
+        }
+
+        _ = c.vkEndCommandBuffer(cb);
+
+        var submit = std.mem.zeroes(c.VkSubmitInfo);
+        submit.sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cb;
+        _ = c.vkQueueSubmit(impl.graphics_queue, 1, &submit, null);
+        _ = c.vkQueueWaitIdle(impl.graphics_queue);
+
+        // Map and copy — BGRA → RGBA swap.
+        var mapped: ?*anyopaque = null;
+        _ = c.vkMapMemory(impl.device, staging_mem, 0, n_bytes, 0, &mapped);
+        const src: [*]const u8 = @ptrCast(mapped.?);
+        const rgba = try gpa.alloc(u8, @intCast(n_bytes));
+        var i: usize = 0;
+        while (i < n_bytes) : (i += 4) {
+            rgba[i + 0] = src[i + 2]; // R ← B
+            rgba[i + 1] = src[i + 1]; // G
+            rgba[i + 2] = src[i + 0]; // B ← R
+            rgba[i + 3] = src[i + 3]; // A
+        }
+        c.vkUnmapMemory(impl.device, staging_mem);
+
+        return rgba;
+    }
+
     pub fn swapchainImageCount(self: *VulkanBackend) u32 {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
         return @intCast(impl.swapchain_images.len);

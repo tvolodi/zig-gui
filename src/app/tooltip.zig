@@ -153,11 +153,11 @@ pub const TooltipManager = struct {
         if (tx < 4.0) tx = 4.0;
 
         // Build draw commands.
-        var cmds = std.ArrayList(DrawCommand).init(gpa);
-        errdefer cmds.deinit();
+        var cmds: std.ArrayList(DrawCommand) = .empty;
+        errdefer cmds.deinit(gpa);
 
         // Background quad.
-        cmds.append(.{ .quad = .{
+        cmds.append(gpa, .{ .quad = .{
             .x = tx,
             .y = ty,
             .w = box_w,
@@ -172,7 +172,7 @@ pub const TooltipManager = struct {
         const gx = tx + pad;
         const gy = ty + pad;
         for (para.glyphs) |g| {
-            cmds.append(.{ .glyph = .{
+            cmds.append(gpa, .{ .glyph = .{
                 .x = gx + g.x,
                 .y = gy + g.y,
                 .w = g.w,
@@ -185,7 +185,7 @@ pub const TooltipManager = struct {
             } }) catch {};
         }
 
-        self.current_cmds = try cmds.toOwnedSlice();
+        self.current_cmds = try cmds.toOwnedSlice(gpa);
         layer.setSlot(self.overlay_id, self.current_cmds.?);
     }
 };

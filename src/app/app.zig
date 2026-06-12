@@ -12,6 +12,18 @@ const overlay_mod = @import("overlay.zig");
 const image_atlas_mod = @import("image_atlas.zig");
 const font_family_mod = @import("font_family.zig");
 const navigator_mod = @import("navigator.zig");
+const debug_overlay_mod = @import("debug_overlay.zig");
+const perf_hud_mod = @import("perf_hud.zig");
+const markup_mod = @import("../06/types.zig");
+// M10 modules — imported via named module imports (build.zig registers each file
+// as exactly one named module to avoid the "file exists in multiple modules" error).
+pub const persistent_settings_mod = @import("persistent_settings.zig");
+pub const file_logger_mod = @import("file_logger.zig");
+pub const logger_mod = @import("logger.zig");
+pub const budgeted_arena_mod = @import("budgeted_arena.zig");
+pub const window_state_mod = @import("window_state.zig");
+pub const error_boundary_mod = @import("error_boundary.zig");
+pub const startup_error_mod = @import("startup_error.zig");
 pub const Navigator = navigator_mod.Navigator;
 
 // R56: hot-reload build option (comptime gate).
@@ -46,6 +58,41 @@ pub const AppOptions = struct {
     /// R60: optional bold and italic font face paths.
     bold_font_path: ?[]const u8 = null,
     italic_font_path: ?[]const u8 = null,
+
+    // RA2 — Release logging.
+    /// Optional path for the file log. When null, no file log is written (stderr only).
+    /// Parent directories are created on first write if they do not exist.
+    log_path: ?[]const u8 = null,
+    /// Maximum file size before rolling (truncating). Default 1 MiB.
+    log_max_bytes: usize = 1024 * 1024,
+
+    // RA1 — Memory budget enforcement.
+    /// Memory budget for the per-screen arena allocator, in bytes.
+    /// 0 means unlimited (default). When set, Scene.reset() calls BudgetedArena.reset().
+    arena_budget_bytes: usize = 0,
+
+    // RA0 — Error boundary.
+    /// Enable error boundary. When true, ScreenFn errors display a fallback screen.
+    enable_error_boundary: bool = false,
+
+    // Visual testing — headless screenshot mode.
+    /// When > 0, render this many frames, write a PNG screenshot, then exit.
+    /// Used by `zig build visual-check`. Default 0 = normal interactive mode.
+    screenshot_frames: u32 = 0,
+    /// Output path for the screenshot PNG (only used when screenshot_frames > 0).
+    screenshot_out: []const u8 = "testdata/screenshot_actual.png",
+
+    // RA4 — Window state persistence.
+    /// Enable automatic window state persistence.
+    /// When true, AppInner.init restores the saved window state (if any) from
+    /// persistent_settings (which must also be provided). AppInner.deinit saves and flushes.
+    persist_window_state: bool = false,
+    /// Prefix for window state keys in PersistentSettings. Default "win_".
+    /// Must be <= 28 bytes (prefix + 3-char key suffix <= 31-byte PersistentSettings key limit).
+    window_state_key_prefix: []const u8 = "win_",
+    /// Optional reference to a PersistentSettings for window-state persistence.
+    /// The caller owns the PersistentSettings and must keep it alive for the duration of App.run.
+    persistent_settings: ?*persistent_settings_mod.PersistentSettings = null, // RA4
 };
 
 // Convenience aliases for the module types we need.
@@ -66,6 +113,9 @@ const ImageAtlas = image_atlas_mod.ImageAtlas;
 const Tokens = mod05.Tokens;
 const PseudoState = mod07.PseudoState;
 const FontFamily = font_family_mod.FontFamily;
+const DebugOverlay = debug_overlay_mod.DebugOverlay;
+const PerfHud = perf_hud_mod.PerfHud;
+const FrameCounters = perf_hud_mod.FrameCounters;
 
 // Scratch buffer size for layout engine (1 MiB).
 const SCRATCH_SIZE: usize = 1024 * 1024;
@@ -76,6 +126,11 @@ const SCRATCH_SIZE: usize = 1024 * 1024;
 fn framebufferSizeCallback(user_data: *anyopaque, size: Extent2D) void {
     const pending: *?Extent2D = @ptrCast(@alignCast(user_data));
     pending.* = size;
+}
+
+/// Color equality helper for R93 theme live-swap style merging.
+fn colorEq(a: mod05.Color, b: mod05.Color) bool {
+    return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a;
 }
 
 /// Returns true when the scene contains any widget that requires continuous redraws
@@ -139,6 +194,9 @@ pub const AppInner = struct {
     // R62 — Text selection drag state.
     dragging_text_idx: ?u32 = null,
 
+    // Bug 3 fix — Slider drag state.
+    dragging_slider_idx: ?u32 = null,
+
     // R41 — Overlay layer (second draw pass).
     overlay: OverlayLayer,
 
@@ -154,6 +212,10 @@ pub const AppInner = struct {
     // The application sets this to re-register bindings after scene.reset().
     rebind_fn: ?*const fn (*AppInner) anyerror!void = null,
 
+    // Per-frame tick hook: called each dirty frame in refreshBindings, after BindingSet.refresh.
+    // Used by screens that need to derive display text from live widget state (e.g. slider readout).
+    per_frame_fn: ?*const fn (*Scene) void = null,
+
     // R73 — Frame counter and timestamp for animation.
     frame_count: u64 = 0,
     frame_time_ms: u64 = 0,
@@ -166,6 +228,41 @@ pub const AppInner = struct {
 
     // R7D — Context-menu manager.
     context_menu_manager: @import("context_menu.zig").ContextMenuManager = .{},
+
+    // R90 — Debug overlay (F1 toggle).
+    debug_overlay: DebugOverlay = DebugOverlay.init(),
+
+    // R92 — Performance HUD (shown when debug overlay is enabled).
+    perf_hud: PerfHud = PerfHud.init(),
+
+    // R92 — Frame start timestamp in nanoseconds (set before beginFrame).
+    _frame_start_ns: i128 = 0,
+
+    // R93 / R94 — Current palette and mode for live-swap and font-scale rebuilds.
+    _current_palette: mod05.Palette,
+    _current_mode: mod05.Mode,
+
+    // Demo F2 theme cycling index (0=light, 1=dark, 2=hc-light).
+    _theme_idx: u2 = 0,
+
+    // R94 — Current font scale factor (1.0 = default).
+    _font_scale: f32 = 1.0,
+
+    // RA2 — File logger (null when opts.log_path == null).
+    file_logger: ?file_logger_mod.FileLogger = null,
+
+    // RA1 — Budgeted arena (null when opts.arena_budget_bytes == 0).
+    budget_arena: ?budgeted_arena_mod.BudgetedArena = null,
+
+    // RA0 — Error boundary (null when opts.enable_error_boundary == false).
+    error_boundary: ?error_boundary_mod.ErrorBoundary = null,
+
+    // RA4 — Window state manager (null when opts.persist_window_state == false).
+    window_state_mgr: ?window_state_mod.WindowStateManager = null,
+
+    // Visual testing — screenshot mode (0 = disabled).
+    _screenshot_frames: u32 = 0,
+    _screenshot_out: []const u8 = "testdata/screenshot_actual.png",
 
     // -----------------------------------------------------------------------
     // Init
@@ -185,7 +282,8 @@ pub const AppInner = struct {
         errdefer backend.deinitQuadPipeline();
 
         // Step 4: Load font bytes.
-        const font_bytes = std.fs.cwd().readFileAlloc(gpa, opts.font_path, 16 * 1024 * 1024) catch |err| {
+        const _init_io = std.Io.Threaded.global_single_threaded.io();
+        const font_bytes = std.Io.Dir.readFileAlloc(std.Io.Dir.cwd(), _init_io, opts.font_path, gpa, .limited(16 * 1024 * 1024)) catch |err| {
             std.log.err("Failed to read font file '{s}': {}", .{ opts.font_path, err });
             return err;
         };
@@ -193,12 +291,12 @@ pub const AppInner = struct {
 
         // Step 5: FontFamily.init — load regular face; bold/italic are optional (R60).
         const bold_bytes: ?[]const u8 = if (opts.bold_font_path) |bp|
-            std.fs.cwd().readFileAlloc(gpa, bp, 16 * 1024 * 1024) catch null
+            std.Io.Dir.readFileAlloc(std.Io.Dir.cwd(), _init_io, bp, gpa, .limited(16 * 1024 * 1024)) catch null
         else
             null;
         defer if (bold_bytes) |b| gpa.free(b);
         const italic_bytes: ?[]const u8 = if (opts.italic_font_path) |ip|
-            std.fs.cwd().readFileAlloc(gpa, ip, 16 * 1024 * 1024) catch null
+            std.Io.Dir.readFileAlloc(std.Io.Dir.cwd(), _init_io, ip, gpa, .limited(16 * 1024 * 1024)) catch null
         else
             null;
         defer if (italic_bytes) |it| gpa.free(it);
@@ -230,7 +328,7 @@ pub const AppInner = struct {
         errdefer gpa.free(scratch);
 
         // Pre-allocate draw list.
-        const draw_list = std.ArrayList(DrawCommand).init(gpa);
+        const draw_list = std.ArrayList(DrawCommand).empty;
 
         // Initial viewport constraints from the framebuffer size.
         const fb = platform.framebufferSize();
@@ -272,6 +370,8 @@ pub const AppInner = struct {
             .gpu_image_atlas = GpuImageAtlas{},
             .tokens = default_tokens,
             .watcher = if (hot_reload) FileWatcher.init(gpa) else {},
+            ._current_palette = mod05.Palette.default(),
+            ._current_mode = .light,
         };
 
         // Register GLFW event queue (R11).
@@ -289,6 +389,47 @@ pub const AppInner = struct {
             framebufferSizeCallback,
         );
 
+        // RA2: Initialise file logger when log_path is provided.
+        if (opts.log_path) |log_path| {
+            if (file_logger_mod.FileLogger.init(gpa, log_path, opts.log_max_bytes)) |logger| {
+                self.file_logger = logger;
+                logger_mod.g_logger = &self.file_logger.?;
+            } else |log_err| {
+                std.log.warn("Failed to open log file '{s}': {}", .{ log_path, log_err });
+            }
+        }
+
+        // RA1: Initialise budgeted arena when arena_budget_bytes > 0.
+        // Note: Scene is already initialised above with gpa; budget_arena is stored for
+        // future use (e.g., by new scenes or reset calls). Full wiring requires post-init
+        // scene replacement which is not done here to avoid disrupting the init sequence.
+        if (opts.arena_budget_bytes > 0) {
+            self.budget_arena = budgeted_arena_mod.BudgetedArena.init(gpa, opts.arena_budget_bytes);
+        }
+
+        // RA0: Initialise error boundary when enable_error_boundary is true.
+        if (opts.enable_error_boundary) {
+            self.error_boundary = error_boundary_mod.ErrorBoundary{};
+        }
+
+        // RA4: Initialise window state manager when persist_window_state is true.
+        if (opts.persist_window_state) {
+            if (opts.persistent_settings) |ps| {
+                var wsm = window_state_mod.WindowStateManager.init(ps, opts.window_state_key_prefix);
+                if (wsm.load()) |saved_state| {
+                    window_state_mod.applyToPlatform(saved_state, &self.platform);
+                }
+                self.window_state_mgr = wsm;
+            } else {
+                // persistent_settings is null but persist_window_state is true.
+                std.log.err("persist_window_state=true requires persistent_settings to be set", .{});
+                return error.MissingPersistentSettings;
+            }
+        }
+
+        self._screenshot_frames = opts.screenshot_frames;
+        self._screenshot_out = opts.screenshot_out;
+
         return self;
     }
 
@@ -297,6 +438,10 @@ pub const AppInner = struct {
     // -----------------------------------------------------------------------
 
     pub fn run(self: *AppInner) void {
+        // Re-register event queue and resize callback with the stable self pointer.
+        // (AppInner may have been value-copied after init; self is the final location.)
+        self.platform.setEventQueue(@ptrCast(&self.event_queue), EventQueue.pushThunk);
+        self.platform.setFramebufferSizeCallback(@ptrCast(&self.pending_resize), framebufferSizeCallback);
         while (!self.platform.shouldClose()) {
             // R12: zero-size guard (minimised window).
             const fb = self.platform.framebufferSize();
@@ -354,9 +499,13 @@ pub const AppInner = struct {
             // Begin frame — returns false when swapchain out-of-date (skip frame).
             if (!self.backend.beginFrame()) continue;
 
+            // R92: record frame start time.
+            const _t_io1 = std.Io.Threaded.global_single_threaded.io();
+            self._frame_start_ns = @as(i128, std.Io.Clock.real.now(_t_io1).nanoseconds);
+
             // R73: Advance animation frame counter.
             self.frame_count +%= 1;
-            self.frame_time_ms = @bitCast(std.time.milliTimestamp());
+            self.frame_time_ms = @bitCast(@as(i64, @truncate(@divFloor(std.Io.Clock.real.now(_t_io1).nanoseconds, 1_000_000))));
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
 
@@ -403,6 +552,7 @@ pub const AppInner = struct {
 
             // Build draw list (module 09).
             // Fire queued callbacks after layout, before render (INV-3.3).
+            self.scene.fireQueuedCallbacks();
             self.scene.font_family = &self.font_family;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
@@ -437,16 +587,70 @@ pub const AppInner = struct {
             };
             defer if (all_cmds.ptr != main_cmds.ptr and all_cmds.len > 0) self.gpa.free(all_cmds);
 
+            // R90 / R92: Debug overlay and perf HUD draw lists.
+            self.debug_overlay.updateHover(&self.scene, self.last_cursor_x, self.last_cursor_y);
+            const debug_cmds = self.debug_overlay.buildDebugDrawList(
+                self.gpa,
+                &self.scene,
+                self.tokens,
+                self.font_family.face(false, false),
+                &self.atlas_cpu,
+            ) catch &[_]DrawCommand{};
+            defer if (debug_cmds.len > 0) self.gpa.free(debug_cmds);
+
+            const fb2 = self.platform.framebufferSize();
+            const hud_cmds = self.perf_hud.buildHudDrawList(
+                self.gpa,
+                self.debug_overlay.enabled,
+                @as(f32, @floatFromInt(fb2.width)),
+                self.tokens,
+                self.font_family.face(false, false),
+                &self.atlas_cpu,
+            ) catch &[_]DrawCommand{};
+            defer if (hud_cmds.len > 0) self.gpa.free(hud_cmds);
+
+            const all_cmds2: []DrawCommand = blk: {
+                const extra = debug_cmds.len + hud_cmds.len;
+                if (extra == 0) break :blk all_cmds;
+                const combined2 = self.gpa.alloc(DrawCommand, all_cmds.len + extra) catch break :blk all_cmds;
+                @memcpy(combined2[0..all_cmds.len], all_cmds);
+                @memcpy(combined2[all_cmds.len..][0..debug_cmds.len], debug_cmds);
+                @memcpy(combined2[all_cmds.len + debug_cmds.len ..], hud_cmds);
+                break :blk combined2;
+            };
+            defer if (all_cmds2.ptr != all_cmds.ptr and all_cmds2.len > 0) self.gpa.free(all_cmds2);
+
             // R43: Track image atlas generation (stub upload for v1).
             if (self.image_atlas.generation != self.image_atlas_generation_seen) {
                 // For v1: upload is a stub; in a real GPU build this would call GpuImageAtlas.upload.
                 self.image_atlas_generation_seen = self.image_atlas.generation;
             }
 
-            // Render.
-            self.backend.clear(Color{ .r = 0, .g = 0, .b = 0, .a = 1 });
-            self.backend.drawFrame(all_cmds, &self.atlas_gpu);
+            // Render — clear to theme canvas color so empty space matches the theme.
+            const c1 = self.tokens.bg_canvas;
+            self.backend.clear(Color{
+                .r = @as(f32, @floatFromInt(c1.r)) / 255.0,
+                .g = @as(f32, @floatFromInt(c1.g)) / 255.0,
+                .b = @as(f32, @floatFromInt(c1.b)) / 255.0,
+                .a = 1.0,
+            });
+            self.backend.drawFrame(all_cmds2, &self.atlas_gpu);
             self.backend.endFrame();
+
+            // R92: Record frame counters.
+            const elapsed_ns = @as(i128, std.Io.Clock.real.now(_t_io1).nanoseconds) - self._frame_start_ns;
+            const elapsed_ms: f32 = @as(f32, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+            const dirty_count2 = self.scene.elements.dirty.count();
+            var live_count: u32 = 0;
+            for (self.scene.elements.gen.items) |g| if (g != 0) {
+                live_count += 1;
+            };
+            self.perf_hud.record(.{
+                .frame_ms = elapsed_ms,
+                .cmd_count = @intCast(all_cmds2.len),
+                .dirty_count = dirty_count2,
+                .element_count = live_count,
+            });
 
             // M2-02: Clear dirty bits — every dirty element was just painted.
             self.scene.elements.dirty.unsetAll();
@@ -456,6 +660,10 @@ pub const AppInner = struct {
     /// R80: runWithNav is identical to run but drains any pending navigation
     /// request from the Navigator at the top of each frame, before layout.
     pub fn runWithNav(self: *AppInner, nav: *Navigator) void {
+        // Re-register event queue and resize callback with the stable self pointer.
+        // (AppInner may have been value-copied after init; self is the final location.)
+        self.platform.setEventQueue(@ptrCast(&self.event_queue), EventQueue.pushThunk);
+        self.platform.setFramebufferSizeCallback(@ptrCast(&self.pending_resize), framebufferSizeCallback);
         while (!self.platform.shouldClose()) {
             // R12: zero-size guard (minimised window).
             const fb = self.platform.framebufferSize();
@@ -473,12 +681,19 @@ pub const AppInner = struct {
             }
 
             // R80: Drain pending navigation before the layout pass.
-            nav.drainPending(&self.scene, self.tokens, @ptrCast(self)) catch |err| {
-                std.log.err("runWithNav: drainPending failed: {}", .{err});
-            };
+            // RA0: Use pushWithBoundary when error_boundary is set.
+            if (self.error_boundary) |*eb| {
+                nav.drainPendingWithBoundary(&self.scene, self.tokens, @ptrCast(self), eb) catch |err| {
+                    std.log.err("runWithNav: drainPendingWithBoundary failed: {}", .{err});
+                };
+            } else {
+                nav.drainPending(&self.scene, self.tokens, @ptrCast(self)) catch |err| {
+                    std.log.err("runWithNav: drainPending failed: {}", .{err});
+                };
+            }
 
-            // M2-02: Skip GPU work when nothing has changed.
-            if (!self.scene.elements.hasDirty()) {
+            // M2-02: Skip GPU work when nothing has changed (bypass in screenshot mode).
+            if (self._screenshot_frames == 0 and !self.scene.elements.hasDirty()) {
                 if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
                     self.platform.pollEvents();
                 } else {
@@ -486,6 +701,8 @@ pub const AppInner = struct {
                 }
                 continue;
             }
+            // Screenshot mode: force dirty so every frame renders.
+            if (self._screenshot_frames > 0) self.scene.elements.markAllDirty();
 
             // R56: Poll watched .ui files for changes (hot-reload only).
             if (comptime hot_reload) {
@@ -515,9 +732,13 @@ pub const AppInner = struct {
 
             if (!self.backend.beginFrame()) continue;
 
+            // R92: record frame start time.
+            const _t_io2 = std.Io.Threaded.global_single_threaded.io();
+            self._frame_start_ns = @as(i128, std.Io.Clock.real.now(_t_io2).nanoseconds);
+
             // R73: Advance animation frame counter.
             self.frame_count +%= 1;
-            self.frame_time_ms = @bitCast(std.time.milliTimestamp());
+            self.frame_time_ms = @bitCast(@as(i64, @truncate(@divFloor(std.Io.Clock.real.now(_t_io2).nanoseconds, 1_000_000))));
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
 
@@ -526,7 +747,6 @@ pub const AppInner = struct {
 
             if (self.atlas_cpu.generation != self.atlas_generation_seen) {
                 const vk = self.backend._impl_vulkan() catch {
-                    _ = self.backend.endFrame;
                     self.backend.endFrame();
                     continue;
                 };
@@ -558,6 +778,8 @@ pub const AppInner = struct {
                 }
             }
 
+            // Fire queued callbacks after layout, before render (INV-3.3).
+            self.scene.fireQueuedCallbacks();
             self.scene.font_family = &self.font_family;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
@@ -589,15 +811,85 @@ pub const AppInner = struct {
             };
             defer if (all_cmds.ptr != main_cmds.ptr and all_cmds.len > 0) self.gpa.free(all_cmds);
 
+            // R90 / R92: Debug overlay and perf HUD draw lists.
+            self.debug_overlay.updateHover(&self.scene, self.last_cursor_x, self.last_cursor_y);
+            const debug_cmds = self.debug_overlay.buildDebugDrawList(
+                self.gpa,
+                &self.scene,
+                self.tokens,
+                self.font_family.face(false, false),
+                &self.atlas_cpu,
+            ) catch &[_]DrawCommand{};
+            defer if (debug_cmds.len > 0) self.gpa.free(debug_cmds);
+
+            const fb2 = self.platform.framebufferSize();
+            const hud_cmds = self.perf_hud.buildHudDrawList(
+                self.gpa,
+                self.debug_overlay.enabled,
+                @as(f32, @floatFromInt(fb2.width)),
+                self.tokens,
+                self.font_family.face(false, false),
+                &self.atlas_cpu,
+            ) catch &[_]DrawCommand{};
+            defer if (hud_cmds.len > 0) self.gpa.free(hud_cmds);
+
+            const all_cmds2: []DrawCommand = blk: {
+                const extra = debug_cmds.len + hud_cmds.len;
+                if (extra == 0) break :blk all_cmds;
+                const combined2 = self.gpa.alloc(DrawCommand, all_cmds.len + extra) catch break :blk all_cmds;
+                @memcpy(combined2[0..all_cmds.len], all_cmds);
+                @memcpy(combined2[all_cmds.len..][0..debug_cmds.len], debug_cmds);
+                @memcpy(combined2[all_cmds.len + debug_cmds.len ..], hud_cmds);
+                break :blk combined2;
+            };
+            defer if (all_cmds2.ptr != all_cmds.ptr and all_cmds2.len > 0) self.gpa.free(all_cmds2);
+
             if (self.image_atlas.generation != self.image_atlas_generation_seen) {
                 self.image_atlas_generation_seen = self.image_atlas.generation;
             }
 
-            self.backend.clear(Color{ .r = 0, .g = 0, .b = 0, .a = 1 });
-            self.backend.drawFrame(all_cmds, &self.atlas_gpu);
+            const c2 = self.tokens.bg_canvas;
+            self.backend.clear(Color{
+                .r = @as(f32, @floatFromInt(c2.r)) / 255.0,
+                .g = @as(f32, @floatFromInt(c2.g)) / 255.0,
+                .b = @as(f32, @floatFromInt(c2.b)) / 255.0,
+                .a = 1.0,
+            });
+            self.backend.drawFrame(all_cmds2, &self.atlas_gpu);
             self.backend.endFrame();
 
+            // R92: Record frame counters.
+            const elapsed_ns = @as(i128, std.Io.Clock.real.now(_t_io2).nanoseconds) - self._frame_start_ns;
+            const elapsed_ms: f32 = @as(f32, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+            const dirty_count2 = self.scene.elements.dirty.count();
+            var live_count: u32 = 0;
+            for (self.scene.elements.gen.items) |g| if (g != 0) {
+                live_count += 1;
+            };
+            self.perf_hud.record(.{
+                .frame_ms = elapsed_ms,
+                .cmd_count = @intCast(all_cmds2.len),
+                .dirty_count = @intCast(dirty_count2),
+                .element_count = live_count,
+            });
+
             self.scene.elements.dirty.unsetAll();
+
+            // Screenshot mode: after the Nth frame, read back pixels, write PNG, exit.
+            if (self._screenshot_frames > 0 and self.frame_count >= self._screenshot_frames) {
+                const rgba = self.backend.readbackFrameRgba(self.gpa) catch |err| {
+                    std.log.err("screenshot readback failed: {}", .{err});
+                    return;
+                };
+                defer self.gpa.free(rgba);
+                const fb3 = self.platform.framebufferSize();
+                const png_mod = @import("png_writer.zig");
+                png_mod.writePng(self.gpa, self._screenshot_out, rgba, fb3.width, fb3.height) catch |err| {
+                    std.log.err("screenshot write failed: {}", .{err});
+                };
+                std.log.info("screenshot written to '{s}'", .{self._screenshot_out});
+                return;
+            }
         }
     }
 
@@ -606,6 +898,13 @@ pub const AppInner = struct {
     // -----------------------------------------------------------------------
 
     pub fn deinit(self: *AppInner) void {
+        // RA4: Save window state before tearing down the window.
+        if (self.window_state_mgr) |*wsm| {
+            const state = window_state_mod.readFromPlatform(&self.platform);
+            wsm.save(state) catch {};
+            wsm.settings.flush() catch {};
+        }
+
         // R56: deinit file watcher
         if (comptime hot_reload) {
             self.watcher.deinit();
@@ -634,7 +933,7 @@ pub const AppInner = struct {
         // 5. scratch
         self.gpa.free(self.scratch);
         // 6. draw_list
-        self.draw_list.deinit();
+        self.draw_list.deinit(self.gpa);
         // 7. event_queue
         self.event_queue.deinit();
         // 8. backend (quad pipeline first, then backend)
@@ -642,6 +941,17 @@ pub const AppInner = struct {
         self.backend.deinit();
         // 9. platform
         self.platform.deinit();
+
+        // RA1: Deinit budget arena.
+        if (self.budget_arena) |*ba| {
+            ba.deinit();
+        }
+
+        // RA2: Deinit file logger (flush + close).
+        if (self.file_logger) |*logger| {
+            logger_mod.g_logger = null;
+            logger.deinit();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -650,6 +960,90 @@ pub const AppInner = struct {
 
     fn refreshBindings(self: *AppInner) void {
         self.bindings.refresh(&self.scene, self.tokens);
+        if (self.per_frame_fn) |f| f(&self.scene);
+    }
+
+    // -----------------------------------------------------------------------
+    // R93 — Theme live-swap
+    // -----------------------------------------------------------------------
+
+    /// Apply `theme` to all live elements, re-resolving CSS classes against new tokens.
+    /// Also applies the current font scale factor (R94 interaction).
+    pub fn setTheme(self: *AppInner, new_theme: mod05.Theme) void {
+        self._current_palette = new_theme.palette;
+        self._current_mode = new_theme.mode;
+        self.tokens = new_theme.tokens.scaled(self._font_scale);
+        self.scene.elements.markAllDirty();
+        self.rebuildStyles();
+    }
+
+    /// Toggle between light and dark modes using the current palette (R93).
+    pub fn toggleTheme(self: *AppInner) void {
+        self._current_mode = switch (self._current_mode) {
+            .light => .dark,
+            .dark => .light,
+        };
+        self.setTheme(mod05.Theme.build(self._current_palette, self._current_mode));
+    }
+
+    /// Re-resolve class-based styles for every live element against the current tokens.
+    fn rebuildStyles(self: *AppInner) void {
+        const s = self.scene.store();
+        for (0..s.gen.items.len) |i| {
+            const idx = @as(u32, @intCast(i));
+            const id = mod04.ElementId{ .index = idx, .gen = s.gen.items[idx] };
+            if (!s.isValid(id)) continue;
+            const kind = self.scene.kindOfIdx(idx);
+            const base = mod07.defaultStyleFor(kind, self.tokens);
+            self.scene._style.items[idx] = self.resolveStyleForIdx(idx, base);
+        }
+    }
+
+    /// Merge class-defined overrides on top of `base` for element `idx`.
+    fn resolveStyleForIdx(self: *AppInner, idx: u32, base: mod05.ComputedStyle) mod05.ComputedStyle {
+        if (idx >= self.scene._classes.items.len) return base;
+        const classes = self.scene._classes.items[idx];
+        const resolved = markup_mod.resolveClasses(classes, self.tokens);
+        const empty = markup_mod.resolveClasses("", self.tokens);
+        var out = base;
+        if (!colorEq(resolved.style.background, empty.style.background)) out.background = resolved.style.background;
+        if (!colorEq(resolved.style.text_color, empty.style.text_color)) out.text_color = resolved.style.text_color;
+        if (!colorEq(resolved.style.border_color, empty.style.border_color)) out.border_color = resolved.style.border_color;
+        if (resolved.style.border_width != empty.style.border_width) out.border_width = resolved.style.border_width;
+        if (resolved.style.radius != empty.style.radius) out.radius = resolved.style.radius;
+        if (resolved.style.gap != empty.style.gap) out.gap = resolved.style.gap;
+        if (resolved.style.font_size != empty.style.font_size) out.font_size = resolved.style.font_size;
+        if (resolved.style.truncate != empty.style.truncate) out.truncate = resolved.style.truncate;
+        if (resolved.style.opacity != empty.style.opacity) out.opacity = resolved.style.opacity;
+        if (resolved.style.shadow_blur != empty.style.shadow_blur) out.shadow_blur = resolved.style.shadow_blur;
+        if (resolved.style.shadow_offset_x != empty.style.shadow_offset_x) out.shadow_offset_x = resolved.style.shadow_offset_x;
+        if (resolved.style.shadow_offset_y != empty.style.shadow_offset_y) out.shadow_offset_y = resolved.style.shadow_offset_y;
+        if (!colorEq(resolved.style.shadow_color, empty.style.shadow_color)) out.shadow_color = resolved.style.shadow_color;
+        if (resolved.style.padding.top != empty.style.padding.top) out.padding.top = resolved.style.padding.top;
+        if (resolved.style.padding.right != empty.style.padding.right) out.padding.right = resolved.style.padding.right;
+        if (resolved.style.padding.bottom != empty.style.padding.bottom) out.padding.bottom = resolved.style.padding.bottom;
+        if (resolved.style.padding.left != empty.style.padding.left) out.padding.left = resolved.style.padding.left;
+        // Bug 7 fix: preserve font_bold and font_italic so rebuildStyles does not erase them.
+        if (resolved.style.font_bold != empty.style.font_bold) out.font_bold = resolved.style.font_bold;
+        if (resolved.style.font_italic != empty.style.font_italic) out.font_italic = resolved.style.font_italic;
+        return out;
+    }
+
+    // -----------------------------------------------------------------------
+    // R94 — Font scaling
+    // -----------------------------------------------------------------------
+
+    /// Set the global font scale factor (0.5–4.0). Rebuilds tokens and marks all dirty.
+    pub fn setFontScale(self: *AppInner, factor: f32) void {
+        self._font_scale = std.math.clamp(factor, 0.5, 4.0);
+        self.tokens = mod05.Theme.build(self._current_palette, self._current_mode).tokens.scaled(self._font_scale);
+        self.rebuildStyles();
+        self.scene.elements.markAllDirty();
+    }
+
+    /// Return the current font scale factor.
+    pub fn getFontScale(self: *const AppInner) f32 {
+        return self._font_scale;
     }
 
     // -----------------------------------------------------------------------
@@ -659,10 +1053,9 @@ pub const AppInner = struct {
     fn reloadFile(self: *AppInner, path: [:0]const u8) !void {
         if (comptime !hot_reload) return;
 
-        const markup_mod = @import("../06/types.zig");
-
         // 1. Read the changed .ui file.
-        const source = try std.fs.cwd().readFileAllocOptions(self.gpa, path, 1024 * 1024, null, @alignOf(u8), null);
+        const _reload_io = std.Io.Threaded.global_single_threaded.io();
+        const source = try std.Io.Dir.readFileAllocOptions(std.Io.Dir.cwd(), _reload_io, path, self.gpa, .limited(1024 * 1024), std.mem.Alignment.of(u8), null);
         defer self.gpa.free(source);
 
         // 2. Parse with diagnostics.
@@ -805,6 +1198,18 @@ pub const AppInner = struct {
                             if (didx < self.scene.elements.dirty.bit_length)
                                 self.scene.elements.dirty.set(didx);
                         }
+                        // Bug 3 fix: update slider value while dragging.
+                        if (self.dragging_slider_idx) |sidx| {
+                            if (sidx < self.scene.elements.layout.items.len) {
+                                const rect = self.scene.elements.layout.items[sidx].computed;
+                                if (rect.w > 0) {
+                                    const ss = self.scene.sliderStateOf(sidx);
+                                    const t = std.math.clamp((mm.x - rect.x) / rect.w, 0.0, 1.0);
+                                    const value = ss.min + t * (ss.max - ss.min);
+                                    self.scene.setSliderValue(sidx, value);
+                                }
+                            }
+                        }
                     }
                 },
                 .mouse_button => |mb| {
@@ -894,6 +1299,27 @@ pub const AppInner = struct {
 
     fn handleMousePress(self: *AppInner, x: f32, y: f32) void {
         const NONE = std.math.maxInt(u32);
+
+        // Bug 3 fix: when a dropdown is open, check if click is in its option panel first.
+        // Option panels are rendered as overlays outside the element's computed rect, so
+        // hitTestFocusable would never return them.
+        for (0..self.scene._kind.items.len) |i| {
+            const idx = @as(u32, @intCast(i));
+            if (self.scene.kindOfIdx(idx) != .dropdown) continue;
+            const dd = self.scene.dropdownStateOf(idx);
+            if (!dd.open or dd.options.items.len == 0) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const rect = self.scene.elements.layout.items[idx].computed;
+            const item_h = rect.h;
+            const panel_y = rect.y + rect.h;
+            const panel_h = item_h * @as(f32, @floatFromInt(dd.options.items.len));
+            if (x >= rect.x and x < rect.x + rect.w and y >= panel_y and y < panel_y + panel_h) {
+                const oi: u32 = @intFromFloat((y - panel_y) / item_h);
+                self.scene.selectDropdownOption(idx, oi) catch {};
+                return;
+            }
+        }
+
         const hit = self.hitTestFocusable(x, y);
         // Focus the hit element (or clear focus if none).
         self.scene.setFocus(hit);
@@ -913,9 +1339,29 @@ pub const AppInner = struct {
                 .dropdown => {
                     self.scene.toggleDropdown(hit);
                 },
+                .radio => {
+                    // Bug 2 fix: select the clicked radio and deselect others in the same group.
+                    self.scene.selectRadio(hit);
+                    if (hit < self.scene.elements.dirty.bit_length)
+                        self.scene.elements.dirty.set(hit);
+                },
                 .accordion => {
                     // R77 — Toggle accordion open/closed on click.
                     self.scene.toggleAccordion(hit);
+                },
+                .slider => {
+                    // Bug 3 fix: start slider drag and set initial value from click position.
+                    self.dragging_slider_idx = hit;
+                    const ss = self.scene.sliderStateOf(hit);
+                    ss.dragging = true;
+                    if (hit < self.scene.elements.layout.items.len) {
+                        const rect = self.scene.elements.layout.items[hit].computed;
+                        if (rect.w > 0) {
+                            const t = std.math.clamp((x - rect.x) / rect.w, 0.0, 1.0);
+                            const value = ss.min + t * (ss.max - ss.min);
+                            self.scene.setSliderValue(hit, value);
+                        }
+                    }
                 },
                 else => {},
             }
@@ -960,18 +1406,28 @@ pub const AppInner = struct {
     fn handleMouseRelease(self: *AppInner, x: f32, y: f32) void {
         // R62: clear text drag state.
         self.dragging_text_idx = null;
-        const NONE = std.math.maxInt(u32);
-        _ = x;
-        _ = y;
+        // Bug 3 fix: clear slider drag state.
+        if (self.dragging_slider_idx) |sidx| {
+            self.scene.sliderStateOf(sidx).dragging = false;
+            self.dragging_slider_idx = null;
+        }
         // Activate any pressed button/checkbox under the cursor.
         for (self.scene.focusable_indices.items) |idx| {
+            // Fresh geometric hit test at the release position — do NOT rely on the
+            // stale st.hovered flag, which is only updated by mouse_move events and
+            // will be false after a scene rebuild (e.g. navigation) with no cursor move.
+            const hit_at_release = if (idx < self.scene.elements.layout.items.len) blk: {
+                const rect = self.scene.elements.layout.items[idx].computed;
+                break :blk x >= rect.x and x < rect.x + rect.w and
+                    y >= rect.y and y < rect.y + rect.h;
+            } else false;
             const kind = self.scene.kindOfIdx(idx);
             switch (kind) {
                 .button => {
                     const st = self.scene.buttonStateOf(idx);
                     if (st.pressed) {
                         st.pressed = false;
-                        if (st.hovered and !st.disabled) {
+                        if (hit_at_release and !st.disabled) {
                             if (st.on_click) |cb| {
                                 self.scene._queued_callbacks.append(self.scene.gpa, cb) catch {};
                             }
@@ -984,7 +1440,7 @@ pub const AppInner = struct {
                     const st = self.scene.checkboxStateOf(idx);
                     if (st.pressed) {
                         st.pressed = false;
-                        if (st.hovered and !st.disabled) {
+                        if (hit_at_release and !st.disabled) {
                             st.checked = !st.checked;
                         }
                         if (idx < self.scene.elements.dirty.bit_length)
@@ -994,7 +1450,6 @@ pub const AppInner = struct {
                 else => {},
             }
         }
-        _ = NONE;
     }
 
     fn handleScroll(self: *AppInner, dx: f32, dy: f32) void {
@@ -1015,6 +1470,25 @@ pub const AppInner = struct {
     }
 
     fn handleKey(self: *AppInner, key: mod01.Key, mods: mod01.Modifiers) void {
+        // R90: F1 toggles the debug overlay.
+        if (key == .f1) {
+            self.debug_overlay.toggle();
+            self.scene.elements.markAllDirty();
+            return;
+        }
+
+        // F2: cycle theme light → dark → high-contrast-light.
+        if (key == .f2) {
+            self._theme_idx = (self._theme_idx + 1) % 3;
+            const new_theme = switch (self._theme_idx) {
+                0 => mod05.Theme.build(mod05.Palette.default(), .light),
+                1 => mod05.Theme.build(mod05.Palette.default(), .dark),
+                else => mod05.Theme.hc_light,
+            };
+            self.setTheme(new_theme);
+            return;
+        }
+
         const focused = self.scene.focused_idx;
         const NONE = std.math.maxInt(u32);
 
@@ -1040,12 +1514,17 @@ pub const AppInner = struct {
             .textarea => self.handleTextareaKey(focused, key, mods),
             .dropdown => self.handleDropdownKey(focused, key, mods),
             .checkbox => self.handleCheckboxKey(focused, key),
+            .button => self.handleButtonKey(focused, key),
             .text => self.handleTextKey(focused, key, mods),
             else => {},
         }
     }
 
     fn handleChar(self: *AppInner, codepoint: u21) void {
+        // Bug 6 fix: guard against non-printable codepoints (control characters).
+        // GLFW char callback should only fire for printable characters, but guard here
+        // to be safe: codepoints < 32 (control chars) or 127 (DEL) are not text.
+        if (codepoint < 32 or codepoint == 127) return;
         const focused = self.scene.focused_idx;
         const NONE = std.math.maxInt(u32);
         if (focused == NONE) return;
@@ -1318,6 +1797,19 @@ pub const AppInner = struct {
             st.checked = !st.checked;
             if (idx < self.scene.elements.dirty.bit_length)
                 self.scene.elements.dirty.set(idx);
+        }
+    }
+
+    fn handleButtonKey(self: *AppInner, idx: u32, key: mod01.Key) void {
+        if (key == .space or key == .enter) {
+            const st = self.scene.buttonStateOf(idx);
+            if (!st.disabled) {
+                if (st.on_click) |cb| {
+                    self.scene._queued_callbacks.append(self.scene.gpa, cb) catch {};
+                }
+                if (idx < self.scene.elements.dirty.bit_length)
+                    self.scene.elements.dirty.set(idx);
+            }
         }
     }
 

@@ -34,6 +34,24 @@ node_modules/
 # Test artifacts
 *.dwo
 *.dwp
+testdata/screenshot_*.png
+
+# std.testing.TmpDir artifacts — Zig 0.16 creates these at CWD with random 16+ char names.
+# They contain only test_settings.txt or *.log files from M10 test suites.
+# Pattern: exactly 16 characters of [A-Za-z0-9_-] at the repo root.
+# (Add specific names here as they accumulate; the pattern below covers the known shape.)
+3DtCKUh_Cn-Q8-oR/
+8no-r0x4zm2WAAUf/
+BdmtJ3gNklmCpUSm/
+C0av7QxJskfj3PZS/
+R6DRtVvEvOn7jB7A/
+SEtlMvE3DSFZoRuK/
+VrfAFkT3mzPpBmS3/
+d00Sb2N16JFB07_3/
+dZBxOdGwcBAMdT7C/
+ifom_yCJVm_SgrCf/
+vRPyIEdQcZOu-8aK/
+wXrXe9Zmkj2rxPk3/
 
 # Dependencies (if vendored)
 deps/

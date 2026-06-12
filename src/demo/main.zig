@@ -1,0 +1,162 @@
+//! main.zig — Entry point for the zig-gui Showcase Demo Application.
+
+const std = @import("std");
+const app_types = @import("app");
+
+const App        = app_types.App;
+const AppOptions = app_types.AppOptions;
+const Navigator  = app_types.Navigator;
+const ToastManager = app_types.ToastManager;
+
+const shared      = @import("shared/types.zig");
+const GlobalState = shared.GlobalState;
+const SidebarCb   = shared.SidebarCb;
+const SidebarCbs  = shared.SidebarCbs;
+
+const home_screen   = @import("screens/home.zig");
+const text_screen   = @import("screens/text.zig");
+const forms_screen  = @import("screens/forms.zig");
+const data_screen   = @import("screens/data.zig");
+const theme_screen  = @import("screens/theme.zig");
+const notif_screen  = @import("screens/notifications.zig");
+const layout_screen = @import("screens/layout.zig");
+const state_screen  = @import("screens/state.zig");
+
+/// Combined per-frame tick: runs all screen ticks. Each guards against wrong-screen.
+fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
+    forms_screen.tick(scene);
+    theme_screen.tick(scene);
+}
+
+pub fn main(init: std.process.Init) !void {
+    var gpa_impl = std.heap.DebugAllocator(.{}).init;
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    // Parse optional screenshot flags: --screenshot-frames N --screenshot-out path --initial-screen name
+    const proc_args = try init.minimal.args.toSlice(init.arena.allocator());
+    var screenshot_frames: u32 = 0;
+    var screenshot_out: []const u8 = "testdata/screenshot_actual.png";
+    var initial_screen: []const u8 = "home";
+    {
+        var i: usize = 1;
+        while (i < proc_args.len) : (i += 1) {
+            if (std.mem.eql(u8, proc_args[i], "--screenshot-frames") and i + 1 < proc_args.len) {
+                i += 1;
+                screenshot_frames = std.fmt.parseInt(u32, proc_args[i], 10) catch 3;
+            } else if (std.mem.eql(u8, proc_args[i], "--screenshot-out") and i + 1 < proc_args.len) {
+                i += 1;
+                screenshot_out = proc_args[i];
+            } else if (std.mem.eql(u8, proc_args[i], "--initial-screen") and i + 1 < proc_args.len) {
+                i += 1;
+                initial_screen = proc_args[i];
+            }
+        }
+    }
+
+    var app = try App.init(gpa, AppOptions{
+        .font_path         = "testdata/DejaVuSans.ttf",
+        .font_size_px      = 14,
+        .screenshot_frames = screenshot_frames,
+        .screenshot_out    = screenshot_out,
+        .window = .{
+            .title  = "zig-gui Showcase",
+            .width  = 1024,
+            .height = 768,
+        },
+    });
+    defer app.deinit();
+
+    // ToastManager needs the overlay layer from AppInner.
+    var toasts = ToastManager.init(&app._inner.overlay);
+
+    // Per-frame tick: update slider readouts on forms and theme screens.
+    // Each tick function guards against wrong-screen via kindOfIdx checks.
+    app._inner.per_frame_fn = combinedTick;
+
+    var nav = Navigator.init(gpa);
+    defer nav.deinit();
+
+    // -----------------------------------------------------------------------
+    // Per-screen context structs — stack-allocated (program lifetime).
+    // -----------------------------------------------------------------------
+    var home_ctx    = home_screen.HomeCtx{    .global = undefined };
+    var text_ctx    = text_screen.TextCtx{    .global = undefined };
+    var forms_ctx   = forms_screen.FormsCtx{  .global = undefined };
+    var data_ctx    = data_screen.DataCtx{    .global = undefined };
+    var theme_ctx   = theme_screen.ThemeCtx{  .global = undefined };
+    var notif_ctx   = notif_screen.NotifCtx{  .global = undefined };
+    var layout_ctx  = layout_screen.LayoutCtx{ .global = undefined };
+    var state_ctx   = state_screen.StateCtx{  .global = undefined };
+
+    // -----------------------------------------------------------------------
+    // GlobalState — wire everything together.
+    // -----------------------------------------------------------------------
+    var global = GlobalState{
+        .nav       = &nav,
+        .toasts    = &toasts,
+        .app_inner = &app._inner,
+    };
+    global.home_ctx    = &home_ctx;
+    global.text_ctx    = &text_ctx;
+    global.forms_ctx   = &forms_ctx;
+    global.data_ctx    = &data_ctx;
+    global.theme_ctx   = &theme_ctx;
+    global.notif_ctx   = &notif_ctx;
+    global.layout_ctx  = &layout_ctx;
+    global.state_ctx   = &state_ctx;
+
+    home_ctx.global    = &global;
+    text_ctx.global    = &global;
+    forms_ctx.global   = &global;
+    data_ctx.global    = &global;
+    theme_ctx.global   = &global;
+    notif_ctx.global   = &global;
+    layout_ctx.global  = &global;
+    state_ctx.global   = &global;
+
+    global.sidebar_cbs = SidebarCbs{
+        .home          = SidebarCb{ .global = &global, .screen_name = "home" },
+        .text          = SidebarCb{ .global = &global, .screen_name = "text" },
+        .forms         = SidebarCb{ .global = &global, .screen_name = "forms" },
+        .data          = SidebarCb{ .global = &global, .screen_name = "data" },
+        .theme         = SidebarCb{ .global = &global, .screen_name = "theme" },
+        .notifications = SidebarCb{ .global = &global, .screen_name = "notifications" },
+        .layout        = SidebarCb{ .global = &global, .screen_name = "layout" },
+        .state         = SidebarCb{ .global = &global, .screen_name = "state" },
+    };
+
+    // -----------------------------------------------------------------------
+    // Register screens.
+    // -----------------------------------------------------------------------
+    try nav.register("home",          home_screen.build);
+    try nav.register("text",          text_screen.build);
+    try nav.register("forms",         forms_screen.build);
+    try nav.register("data",          data_screen.build);
+    try nav.register("theme",         theme_screen.build);
+    try nav.register("notifications", notif_screen.build);
+    try nav.register("layout",        layout_screen.build);
+    try nav.register("state",         state_screen.build);
+
+    // Request initial screen — drainPending fires on the first frame.
+    // --initial-screen <name> selects which screen to start on (default: home).
+    if (std.mem.eql(u8, initial_screen, "forms")) {
+        nav.requestPush("forms", &forms_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "text")) {
+        nav.requestPush("text", &text_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "data")) {
+        nav.requestPush("data", &data_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "theme")) {
+        nav.requestPush("theme", &theme_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "notifications")) {
+        nav.requestPush("notifications", &notif_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "layout")) {
+        nav.requestPush("layout", &layout_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "state")) {
+        nav.requestPush("state", &state_ctx);
+    } else {
+        nav.requestPush("home", &home_ctx);
+    }
+
+    app.runWithNav(&nav);
+}

@@ -93,6 +93,7 @@ to the human.
 | Fix bug / resolve failing test / error reported | **Workflow 2** — Issue resolution |
 | Run all tests / check test status / pre-release | **Workflow 3** — Full test run |
 | Build config / dependency / build.zig / toolchain | **Workflow 4** — Infrastructure |
+| Visual regression / "it looks wrong" / screenshot review | **§10** — Visual Validation Loop (standalone) |
 
 ---
 
@@ -137,6 +138,7 @@ constitution invariants.
 | **Validator** | `.github/agents/validator.agent.md` | Checks specs, code, docs vs invariants; read-only |
 | **Tester** | `.github/agents/tester.agent.md` | Runs tests, triages failures, reports results |
 | **Infra** | `.github/agents/infra.agent.md` | Build config, dependencies, toolchain |
+| **Visual Tester** | `.github/agents/visual-tester.agent.md` | Builds & runs the demo, screenshots the result, analyzes it against the spec, reports visual pass/fail |
 
 ---
 
@@ -242,7 +244,21 @@ FAIL → write failure report; hand context back to Implementer with:
 PASS → proceed to step 6.
 
 ────────────────────────────────────────────────────
-STEP 6 — Validate checklist             [Validator]
+STEP 6 — Visual validation loop         [Visual Tester → Implementer]
+────────────────────────────────────────────────────
+  Run the Visual Validation Loop (see §10) targeting the feature area defined in
+  NN.spec.md (usually the demo app or the acceptance-test render harness).
+
+  Pass criteria:
+  ✓ Visual Tester reports VISUAL_PASS (screenshot matches spec visual description)
+  ✓ If the spec has no visual description: skip and report VISUAL_PASS immediately
+
+  FAIL → Implementer receives the annotated diff report and re-enters step 3.
+         Max 3 visual cycles, then escalate.
+  PASS → proceed to step 7.
+
+────────────────────────────────────────────────────
+STEP 7 — Validate checklist             [Validator]
 ────────────────────────────────────────────────────
 DO:
   - Open NN.checklist.md
@@ -255,10 +271,10 @@ VALIDATE — pass criteria:
   ✓ Manual items (if any) documented with who must confirm them
 
 FAIL → list un-ticked items; route gap items back to Implementer or flag manual items for human.
-PASS → proceed to step 7.
+PASS → proceed to step 8.
 
 ────────────────────────────────────────────────────
-STEP 7 — Update documentation           [Implementer]
+STEP 8 — Update documentation           [Implementer]
 ────────────────────────────────────────────────────
 DO:
   - If the module introduced a new pattern not in AGENT_GUIDE.md, add it
@@ -271,6 +287,26 @@ VALIDATE — pass criteria:
   ✓ Any constitution updates listed in the spec's "action" items are applied
   ✓ Completion summary written
 
+PASS → proceed to step 9.
+
+────────────────────────────────────────────────────
+STEP 9 — Commit and push                [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Stage all changed and new files for this module (use specific file names — do NOT
+    use `git add -A` which could accidentally include credentials or large binaries)
+  - Write a concise commit message summarising the milestone item in imperative mood
+    (e.g. "feat: implement module 03 element store")
+  - Commit: `git commit -m "<message>"`
+  - Push to the remote: `git push`
+
+VALIDATE — pass criteria:
+  ✓ `git push` exits 0
+  ✓ Commit message is present and non-empty
+  ✓ No unrelated files were staged
+
+FAIL → diagnose push rejection (auth issue? branch protection?); escalate if not
+       resolvable without human intervention.
 PASS → module complete. Orchestrator marks done.
 ```
 
@@ -401,7 +437,21 @@ FAIL → write failure report with exact test name, assertion message, and
 PASS → proceed to step 6.
 
 ────────────────────────────────────────────────────
-STEP 6 — Validate against R-file criteria  [Validator]
+STEP 6 — Visual validation loop         [Visual Tester → Implementer]
+────────────────────────────────────────────────────
+  Run the Visual Validation Loop (see §10) targeting the demo app or any
+  render harness that exercises the new feature.
+
+  Pass criteria:
+  ✓ Visual Tester reports VISUAL_PASS (screenshot matches R-file visual description)
+  ✓ If the R-file has no visual description: skip and report VISUAL_PASS immediately
+
+  FAIL → Implementer receives the annotated diff report and re-enters step 3.
+         Max 3 visual cycles, then escalate.
+  PASS → proceed to step 7.
+
+────────────────────────────────────────────────────
+STEP 7 — Validate against R-file criteria  [Validator]
 ────────────────────────────────────────────────────
 DO:
   - Read the actual implementation files (not summaries)
@@ -418,10 +468,10 @@ VALIDATE — pass criteria:
   ✓ All required INV-compliance comments present
 
 FAIL → list unsatisfied criteria or violations; route back to Implementer.
-PASS → proceed to step 7.
+PASS → proceed to step 8.
 
 ────────────────────────────────────────────────────
-STEP 7 — Update documentation           [Implementer]
+STEP 8 — Update documentation           [Implementer]
 ────────────────────────────────────────────────────
 DO:
   - Update docs/ROADMAP.md: change each completed R-file's roadmap row from
@@ -439,6 +489,25 @@ VALIDATE — pass criteria:
   ✓ No new internal undocumented pattern
   ✓ Completion summary written
 
+PASS → proceed to step 9.
+
+────────────────────────────────────────────────────
+STEP 9 — Commit and push                [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Stage all changed and new files for this requirement batch (use specific file names —
+    do NOT use `git add -A`)
+  - Write a concise commit message in imperative mood
+    (e.g. "feat: implement R74 toast notification manager")
+  - Commit: `git commit -m "<message>"`
+  - Push to the remote: `git push`
+
+VALIDATE — pass criteria:
+  ✓ `git push` exits 0
+  ✓ Commit message is present and non-empty
+  ✓ No unrelated files were staged
+
+FAIL → diagnose push rejection; escalate if not resolvable without human intervention.
 PASS → requirement(s) complete. Orchestrator marks done.
 ```
 
@@ -448,7 +517,16 @@ PASS → requirement(s) complete. Orchestrator marks done.
 
 **Trigger:** A failing test, a reported bug, a contradiction surfaced during another workflow.
 
-**Owner:** Orchestrator routes → Validator (analysis) → Implementer (fix) → Tester (verify)
+**Owner:** Orchestrator routes → Validator (analysis) → Tester (reproduce) → Implementer (fix) →
+Tester (regression) → Visual Tester (visual check, if the bug is visual) → Validator (confirm)
+
+> **ORCHESTRATOR HARD RULES for this workflow:**
+> - NEVER read source files to diagnose root cause — that is the Validator's job (Step 1).
+> - NEVER suggest a fix or write any code — that is the Implementer's job (Step 3).
+> - NEVER skip Tester reproduction (Step 2) and go straight to Implementer.
+> - NEVER mark an issue closed without Tester running a regression AND Validator confirming.
+> - If the reported bug is visual in nature: a Visual Validation Loop (§10) is MANDATORY
+>   after regression tests pass, before Validator confirms.
 
 ```
 STEP 1 — Analyze issue                  [Validator]
@@ -458,33 +536,39 @@ DO:
   - Identify the affected module(s)
   - Read the module's spec.md and relevant constitution sections
   - Check: is fixing this in scope? Does the fix violate any invariant?
+  - Produce a written analysis: affected file(s), likely root-cause area,
+    specific functions to investigate — do NOT guess the exact fix
 
 VALIDATE — pass criteria:
   ✓ Root module identified
+  ✓ Likely root-cause area identified (file + function range, not a fix)
   ✓ Fix is within spec scope and respects all invariants
   ✓ No invariant violation required to fix
 
 FAIL → escalate (out-of-scope or invariant conflict requires human decision).
-PASS → write analysis context; route to Implementer.
+PASS → write analysis context; route to Tester for reproduction.
 
 ────────────────────────────────────────────────────
 STEP 2 — Reproduce                      [Tester]
 ────────────────────────────────────────────────────
 DO:
   - Run the specific failing test or reproduce the exact failure condition
-  - Capture full error output
+  - Capture full error output or a description of the observable wrong behavior
+  - For visual/interactive bugs: run `zig build run-demo`, observe, describe exactly
+    what is broken (e.g., "clicking sidebar button does nothing")
 
 VALIDATE — pass criteria:
-  ✓ Issue is reproducible with a specific test or command
+  ✓ Issue is reproducible with a specific test or run command
+  ✓ Exact wrong behavior captured in writing
 
 FAIL → if non-reproducible: escalate with reproduction steps needed.
-PASS → route to Implementer with reproduction context.
+PASS → route reproduction context to Implementer.
 
 ────────────────────────────────────────────────────
 STEP 3 — Fix code                       [Implementer]
 ────────────────────────────────────────────────────
 DO:
-  - Diagnose root cause from reproduction output + code
+  - Diagnose root cause from reproduction output + Validator's analysis + code reads
   - Implement the minimal fix (do NOT refactor beyond what is needed — INV-5.4)
   - Run `zig build` to confirm fix compiles
 
@@ -505,14 +589,33 @@ DO:
   - Collect full results
 
 VALIDATE — pass criteria:
-  ✓ Original failing test now passes
+  ✓ Original failing test now passes (if unit-testable)
   ✓ No previously passing test now fails (zero regressions)
 
-FAIL → route regression details back to Implementer.
+FAIL → route regression details back to Implementer (step 3). Max 3 cycles → escalate.
 PASS → proceed to step 5.
 
 ────────────────────────────────────────────────────
-STEP 5 — Confirm resolution             [Validator]
+STEP 5 — Visual validation loop         [Visual Tester → Implementer]
+────────────────────────────────────────────────────
+  ONLY if the bug was visual or interactive (e.g., "button does nothing",
+  "widget looks wrong", "navigation broken").
+
+  Run the Visual Validation Loop (see §10):
+    - Build and run the demo
+    - Screenshot the affected area
+    - Analyze: does the feature now behave as specified?
+
+  Pass criteria:
+  ✓ Visual Tester reports VISUAL_PASS
+  ✓ If bug was non-visual (compile error, wrong value): skip and report VISUAL_PASS
+
+  FAIL → Implementer receives diff report, re-enters step 3.
+         Max 3 visual cycles → escalate.
+  PASS → proceed to step 6.
+
+────────────────────────────────────────────────────
+STEP 6 — Confirm resolution             [Validator]
 ────────────────────────────────────────────────────
 DO:
   - Confirm the original issue description is satisfied
@@ -522,6 +625,23 @@ VALIDATE — pass criteria:
   ✓ Issue is resolved
   ✓ No new invariant violations
 
+PASS → proceed to step 7.
+
+────────────────────────────────────────────────────
+STEP 7 — Commit and push                [Implementer]
+────────────────────────────────────────────────────
+DO:
+  - Stage only the files changed by this fix (specific file names, not `git add -A`)
+  - Write a concise commit message describing the fix
+    (e.g. "fix: hit-test on mouse release instead of relying on stale hovered flag")
+  - Commit: `git commit -m "<message>"`
+  - Push to the remote: `git push`
+
+VALIDATE — pass criteria:
+  ✓ `git push` exits 0
+  ✓ Only fix-related files are in the commit
+
+FAIL → escalate if push cannot be resolved without human intervention.
 PASS → Orchestrator marks issue closed. Write completion note.
 ```
 
@@ -669,7 +789,113 @@ PASS → Orchestrator marks infra change complete.
 
 ---
 
-## 10. Escalation protocol
+## 10. Visual Validation Loop (sub-workflow)
+
+**Invoked by:** Modules workflow step 6, Requirements workflow step 6, or standalone for
+visual-regression reports.
+
+**Owner:** Visual Tester → Implementer (repair loop); Orchestrator caps iterations at 3.
+
+This loop runs **after** automated tests pass. Its purpose is to compare what the renderer
+actually draws against the visual description in the spec or R-file.
+
+```
+┌─ ITERATION ───────────────────────────────────────────────────────────┐
+│                                                                       │
+│  STEP A — Build & screenshot      [Visual Tester]                     │
+│  ─────────────────────────────────────────────────────                │
+│  DO:                                                                  │
+│    zig build run-demo                                                 │
+│    Capture a screenshot of the feature area using the screenshot      │
+│    tool (screenshot_page / mcp_image-recogni tools).                  │
+│    Save to docs/.agent-context/<run-id>/visual/iteration_N.png        │
+│                                                                       │
+│  VALIDATE — pass criteria:                                            │
+│    ✓ Application launched without crash                               │
+│    ✓ Screenshot captured (file exists, non-zero size)                 │
+│                                                                       │
+│  FAIL → report VISUAL_BLOCKED (app crashes or screenshot fails);      │
+│          escalate immediately — do NOT proceed to analysis.           │
+│                                                                       │
+│  STEP B — Analyze screenshot      [Visual Tester]                     │
+│  ─────────────────────────────────────────────────────                │
+│  DO:                                                                  │
+│    Read the relevant spec / R-file visual description ("Expected      │
+│    appearance", "Renders as", screenshot annotations, etc.).          │
+│    Use the image-analysis tool to compare the screenshot against      │
+│    each visual criterion (see tool selection guide below).            │
+│    For each criterion produce one of:                                 │
+│      MATCH    — rendered output satisfies criterion                   │
+│      MISMATCH — rendered output violates criterion (describe delta)   │
+│      UNCLEAR  — cannot determine from screenshot alone                │
+│                                                                       │
+│  VALIDATE — pass criteria:                                            │
+│    ✓ Every criterion scored (no criterion left un-assessed)           │
+│    ✓ Analysis report written to:                                      │
+│        docs/.agent-context/<run-id>/visual/iteration_N_analysis.md   │
+│                                                                       │
+│  ALL MATCH?                                                           │
+│    YES → report VISUAL_PASS. Exit loop.                               │
+│    NO  → proceed to STEP C.                                           │
+│                                                                       │
+│  STEP C — Write diff report       [Visual Tester]                     │
+│  ─────────────────────────────────────────────────────                │
+│  Write docs/.agent-context/<run-id>/visual/iteration_N_diff.md:      │
+│    - Screenshot path                                                  │
+│    - List of MISMATCH items:                                          │
+│        • Criterion text (verbatim from spec)                          │
+│        • What was observed in the screenshot                          │
+│        • Suspected code location (file + function if known)           │
+│        • Suggested fix direction                                      │
+│    - List of UNCLEAR items                                            │
+│                                                                       │
+│  STEP D — Fix rendering           [Implementer]                       │
+│  ─────────────────────────────────────────────────────                │
+│  DO:                                                                  │
+│    Read iteration_N_diff.md.                                          │
+│    Fix only the rendering / layout / style code called out in the     │
+│    diff report — do NOT touch logic, data structures, or tests        │
+│    unless the diff report explicitly calls for it.                    │
+│    Run `zig build` to confirm fix compiles.                           │
+│    Increment N → N+1. Return control to STEP A.                       │
+│                                                                       │
+│  VALIDATE — pass criteria:                                            │
+│    ✓ `zig build` succeeds                                             │
+│    ✓ Change is narrowly scoped to the reported mismatches             │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+
+Orchestrator caps the loop at 3 iterations. On iteration 4:
+  → Write escalation file listing: each remaining MISMATCH criterion,
+    what was tried in each iteration, and the decision needed.
+  → STOP. Do NOT attempt further visual fixes without human guidance.
+```
+
+### Visual criteria source
+
+| Context | Where to find visual criteria |
+|---|---|
+| Module spec | `docs/specs/NN.spec.md` — look for "Visual appearance", "Renders as", screenshot descriptions |
+| Requirement | R-file — look for "Expected appearance", "Visual output", color / layout / text descriptions |
+| Demo app | `docs/requirements/DEMO_APP.md` — overall expected look |
+
+If the spec / R-file has **no visual description**, skip the entire loop and report
+`VISUAL_PASS` immediately.
+
+### Tool selection for screenshot analysis
+
+Use whichever tool is available in the session (in preference order):
+
+1. `mcp_image-recogni_screenshot_qa` — structured QA; pass each criterion verbatim as a question
+2. `mcp_zai-mcp-serve_analyze_image` — general image description with a focused prompt
+3. `mcp_image-recogni_describe_image` — last resort
+
+Always pass the **verbatim criterion text** as the question so the answer maps 1-to-1 to
+a MATCH / MISMATCH verdict.
+
+---
+
+## 11. Escalation protocol
 
 Any agent may escalate at any time. Do NOT work around a blocker by guessing or violating
 an invariant.
@@ -701,7 +927,7 @@ After writing the file: stop all work on this task. Do NOT attempt further steps
 
 ---
 
-## 11. Corrections to the user's original proposal
+## 12. Corrections to the user's original proposal
 
 | Original idea | Correction |
 |---|---|
@@ -710,3 +936,4 @@ After writing the file: stop all work on this task. Do NOT attempt further steps
 | Orchestrator does not do actual work | **Correct.** The orchestrator only creates handoff files, updates registry.json, and routes to subagents. Never writes code or runs commands. |
 | do → validate → redo loop | **Correct.** This is the right operating model. |
 | Minimize manual calls to human | **Correct.** Escalate only when a genuine decision is needed (e.g., new dependency, constitution conflict). |
+| Visual validation loop | **ADDED.** See §10. Runs after automated tests pass. Visual Tester screenshots the running app, analyzes against spec visual criteria, and either reports VISUAL_PASS or produces a diff report for Implementer. Max 3 iterations before escalation. |

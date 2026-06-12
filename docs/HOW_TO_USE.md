@@ -1800,7 +1800,267 @@ Build steps: `zig build test-multi-window`
 
 ---
 
-## 15. Constraints to respect (abridged)
+## 18. Debug overlay, performance HUD, and developer tools (Milestone 9 — R90–R95)
+
+### Debug overlay (R90)
+
+Press **F1** at runtime to toggle the debug overlay. It draws colored bounding-box borders
+over every live scene element and a hover info panel showing the hovered element's computed
+rect and style.
+
+- **Hovered element** — accent-colored border (full opacity)
+- **Focusable widgets** — info-colored border (button, input, dropdown, …)
+- **Containers** — ok-colored border (Row, Column, Card, ScrollView)
+- **Other elements** — warn-colored border
+
+The overlay requires no code changes — `App.run()` handles the F1 key automatically.
+
+```zig
+// Toggle from code (if you do not use App.run())
+app._inner.debug_overlay.toggle();
+
+// Check state
+const enabled = app._inner.debug_overlay.isEnabled();
+
+// Produce overlay draw commands (low-level, only when not using App.run())
+const overlay_cmds = try app._inner.debug_overlay.buildDebugDrawList(
+    alloc, &scene, tokens, font, atlas,
+);
+defer if (overlay_cmds.len > 0) alloc.free(overlay_cmds);
+```
+
+Build steps: no separate step — the overlay is baked into `App.run()`.
+
+---
+
+### Scene dump to stderr (R91)
+
+`Scene.debugPrint()` and `Scene.debugPrintStats()` write diagnostic output to stderr.
+No allocation; uses a 256-byte stack buffer per line.
+
+```zig
+// Print the full element tree (indented, with rect + style summary per element)
+scene.debugPrint();
+
+// Print a one-line summary: live/total/dirty/focused
+scene.debugPrintStats();
+```
+
+Example output:
+```
+[0] column x=0.0 y=0.0 w=1280.0 h=720.0  bg=#f9fafb text=#111827  radius=0 font=14px (dirty)
+  [1] text "Hello" x=8.0 y=8.0 w=40.0 h=18.0  text=#111827  font=14px
+  [2] button "Save" x=8.0 y=32.0 w=80.0 h=36.0  bg=#3b82f6 text=#ffffff  radius=4 font=14px (focused)
+Scene: 3 live / 3 total elements, 2 dirty, focused=2
+```
+
+---
+
+### Performance counters HUD (R92)
+
+When the debug overlay (F1) is active, a perf HUD panel appears in the top-right corner
+showing:
+- **frame time** — smoothed over the last 16 frames (milliseconds and FPS)
+- **cmds** — draw command count submitted last frame
+- **dirty / elements** — dirty bit count vs. live element count
+
+The HUD is updated automatically by `App.run()`. No code required.
+
+```zig
+// Access raw counters from code
+const c = app._inner.perf_hud.counters;
+std.debug.print("frame_ms={d:.2} cmds={d}\n", .{ c.frame_ms, c.cmd_count });
+
+// Smoothed frame time
+const smooth = app._inner.perf_hud.smoothFrameMs();
+```
+
+---
+
+### Theme live-swap (R93)
+
+Change the active theme at runtime without reinitializing the application or scene.
+
+```zig
+// Switch to a custom theme
+const mod05 = @import("05/types.zig");
+const hc = mod05.Theme.hc_light; // built-in high-contrast light theme
+app._inner.setTheme(hc);
+
+// Toggle between light and dark using the current palette
+app._inner.toggleTheme();
+
+// Apply a completely new palette (updates _current_palette internally)
+const my_palette = mod05.Palette{
+    .gray_50 = mod05.Color.hex(0xFFF8F0),
+    // ... other fields
+};
+const warm_theme = mod05.Theme.build(my_palette, .light);
+app._inner.setTheme(warm_theme);
+```
+
+Built-in themes available as constants on `Theme`:
+- `Theme.hc_light` — high-contrast light (R95)
+- `Theme.hc_dark` — high-contrast dark (R95)
+
+Build steps: compile only — tested via `zig build`.
+
+---
+
+### Font scaling (R94)
+
+Scale all type sizes up or down uniformly without restarting.
+
+```zig
+// Scale to 150% (e.g. for accessibility)
+app._inner.setFontScale(1.5);
+
+// Scale back to normal
+app._inner.setFontScale(1.0);
+
+// Read current scale
+const factor = app._inner.getFontScale(); // f32 in [0.5, 4.0]
+```
+
+`setFontScale` clamps the factor to `[0.5, 4.0]`, multiplies all five type-scale token sizes
+(`text_xs` through `text_xl`), rebuilds element styles, and marks all elements dirty. The
+change takes effect on the next rendered frame.
+
+`Tokens.scaled(factor)` is also available as a standalone helper for computing a scaled token
+set without modifying `App` state:
+
+```zig
+const scaled_tokens = tokens.scaled(1.25); // 25% larger text everywhere
+```
+
+---
+
+### High-contrast themes (R95)
+
+High-contrast themes meet WCAG 2.1 AA requirements. Use them via the `Theme` constants or
+build from the high-contrast palettes directly:
+
+```zig
+const mod05 = @import("05/types.zig");
+
+// Light high-contrast
+app._inner.setTheme(mod05.Theme.hc_light);
+
+// Dark high-contrast
+app._inner.setTheme(mod05.Theme.hc_dark);
+
+// Build from palette for custom adjustments
+const hcp = mod05.Palette.highContrast(); // or .highContrastDark()
+const my_hc = mod05.Theme.build(hcp, .light);
+app._inner.setTheme(my_hc);
+```
+
+To programmatically check contrast (informational — not enforced by the framework):
+
+```zig
+fn contrastRatio(a: mod05.Color, b: mod05.Color) f32 {
+    const la = relLuminance(a);
+    const lb = relLuminance(b);
+    const lighter = @max(la, lb);
+    const darker  = @min(la, lb);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+// WCAG AA requires >= 4.5 for normal text, >= 3.0 for large text.
+```
+
+
+---
+
+## 15. Production hardening (Milestone 10)
+
+### Release logging (RA2)
+
+Write all `std.log` output to a rolling file. The file truncates (rolls) when it exceeds
+`log_max_bytes`.
+
+```zig
+const opts = AppOptions{
+    .font_path = "assets/font.ttf",
+    .log_path = "logs/app.log",    // create and append; parent dirs auto-created
+    .log_max_bytes = 1024 * 1024,  // roll after 1 MiB (default)
+};
+```
+
+When `log_path` is null (the default), no file is opened and stderr is the only sink.
+
+Log format: `YYYY-MM-DDTHH:MM:SS [level] message`
+
+### Memory budget enforcement (RA1)
+
+Cap the per-screen arena allocator to catch runaway scene builds early.
+
+```zig
+const opts = AppOptions{
+    .font_path = "assets/font.ttf",
+    .arena_budget_bytes = 4 * 1024 * 1024, // 4 MiB limit per screen
+};
+```
+
+When the budget is exceeded, `error.OutOfMemory` is returned from the scene builder,
+a warning is logged, and the error boundary (if enabled) renders the fallback screen.
+Default: `0` (unlimited).
+
+### Error boundary (RA0)
+
+Catch errors returned by `ScreenFn` callbacks and display a built-in fallback screen
+instead of crashing.
+
+```zig
+const opts = AppOptions{
+    .font_path = "assets/font.ttf",
+    .enable_error_boundary = true,
+};
+// ...
+// Use runWithNav to get boundary-protected navigation:
+app.runWithNav(&nav);
+```
+
+The fallback screen shows "Something went wrong" and the error name. Panics are NOT
+caught (Zig provides no safe user-level panic interception).
+
+### Graceful startup failure (RA3)
+
+Show a native OS dialog when Vulkan is unavailable, instead of crashing to stderr.
+
+```zig
+// In your main():
+const app = startup_error.initOrDialog(AppInner, AppOptions, gpa, opts) catch |err| {
+    // dialog was already shown; err is re-returned for clean exit
+    return err;
+};
+```
+
+On Windows, displays a `MessageBoxW`. On Linux, prints `ERROR: <title>: <message>` to stderr.
+Import `startup_error` from `src/app/startup_error.zig`.
+
+### Window state persistence (RA4)
+
+Automatically save and restore window position, size, and maximised state across restarts.
+
+```zig
+// Load settings from disk first.
+var settings = try PersistentSettings.load(gpa, "myapp");
+defer settings.deinit();
+
+const opts = AppOptions{
+    .font_path = "assets/font.ttf",
+    .persist_window_state = true,
+    .persistent_settings = &settings,     // borrowed; must outlive App
+    .window_state_key_prefix = "win_",    // default; produces keys: win_x, win_y, win_w, win_h, win_max
+};
+```
+
+On `init`, saved state is applied (position + size or maximise). On `deinit`, current state
+is written and flushed. Has zero overhead when `persist_window_state = false` (the default).
+
+---
+
+## 16. Constraints to respect (abridged)
 
 - **No per-widget heap objects.** An element IS an index. Data lives in parallel arrays.
 - **Never store `*LayoutNode` across frames.** Resolve it locally, use it, discard it.

@@ -606,6 +606,77 @@ pub fn build(b: *std.Build) void {
     mod_navigator.addImport("../07/types.zig", mod07);
     mod_navigator.addImport("../05/types.zig", mod05);
 
+    // -----------------------------------------------------------------------
+    // M10 — Production hardening modules (RA0–RA4).
+    // Each file is registered as exactly one named module (build-system rule).
+    // -----------------------------------------------------------------------
+
+    // persistent_settings.zig — R82, also used by RA4 window_state.zig.
+    // Previously imported via relative path from types.zig; now a named module
+    // so both app.zig and window_state.zig can share it safely.
+    const mod_persistent_settings = b.addModule("persistent_settings.zig", .{
+        .root_source_file = b.path("src/app/persistent_settings.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // RA2: file_logger.zig — no extra deps beyond std.
+    const mod_file_logger = b.addModule("file_logger.zig", .{
+        .root_source_file = b.path("src/app/file_logger.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // RA2: logger.zig — depends on file_logger.zig.
+    const mod_logger = b.addModule("logger.zig", .{
+        .root_source_file = b.path("src/app/logger.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_logger.addImport("file_logger.zig", mod_file_logger);
+
+    // RA1: budgeted_arena.zig — no extra deps beyond std.
+    const mod_budgeted_arena = b.addModule("budgeted_arena.zig", .{
+        .root_source_file = b.path("src/app/budgeted_arena.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // RA4: window_state.zig — depends on persistent_settings.zig and mod01.
+    // Needs GLFW includes for glfwGetWindowPos/Size/Attrib (same pattern as mod01).
+    const mod_window_state = b.addModule("window_state.zig", .{
+        .root_source_file = b.path("src/app/window_state.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_window_state.addImport("persistent_settings.zig", mod_persistent_settings);
+    mod_window_state.addImport("../01/types.zig", mod01);
+    mod_window_state.addIncludePath(glfw_dep.path("include"));
+    mod_window_state.addIncludePath(.{ .cwd_relative = vulkan_include });
+
+    // RA0: error_boundary.zig — imports mod07 (Scene), mod05 (Tokens), mod06 (NodeDesc).
+    // Does NOT import navigator.zig to break the circular dep
+    // (navigator.zig imports error_boundary.zig; error_boundary.zig redefines ScreenFn
+    //  locally using the same signature as navigator.ScreenFn).
+    const mod_error_boundary = b.addModule("error_boundary.zig", .{
+        .root_source_file = b.path("src/app/error_boundary.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_error_boundary.addImport("../07/types.zig", mod07);
+    mod_error_boundary.addImport("../05/types.zig", mod05);
+    mod_error_boundary.addImport("../06/types.zig", mod06);
+
+    // RA0: navigator.zig imports error_boundary.zig — add the dep now that mod_error_boundary exists.
+    mod_navigator.addImport("error_boundary.zig", mod_error_boundary);
+
+    // RA3: startup_error.zig — no extra deps beyond std and builtin (app.zig is passed generically).
+    const mod_startup_error = b.addModule("startup_error.zig", .{
+        .root_source_file = b.path("src/app/startup_error.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // binding.zig — one module, shared everywhere that imports it.
     // R83: multi_window.zig also imports binding.zig; registering it as a named
     // module ensures the build system sees only one canonical identity for the file.
@@ -640,6 +711,14 @@ pub fn build(b: *std.Build) void {
     // NOTE: app.zig does NOT import types.zig (types.zig imports app.zig — no cycle).
     mod_app_impl.addImport("events.zig", mod_events);
     mod_app_impl.addImport("navigator.zig", mod_navigator);
+    // M10: wire all new modules into app.zig so each file has exactly one module identity.
+    mod_app_impl.addImport("persistent_settings.zig", mod_persistent_settings);
+    mod_app_impl.addImport("file_logger.zig", mod_file_logger);
+    mod_app_impl.addImport("logger.zig", mod_logger);
+    mod_app_impl.addImport("budgeted_arena.zig", mod_budgeted_arena);
+    mod_app_impl.addImport("window_state.zig", mod_window_state);
+    mod_app_impl.addImport("error_boundary.zig", mod_error_boundary);
+    mod_app_impl.addImport("startup_error.zig", mod_startup_error);
 
     // types.zig — the public root module.
     const mod_app = b.addModule("app", .{
@@ -1062,6 +1141,291 @@ pub fn build(b: *std.Build) void {
     const run_multi_window_test = b.addRunArtifact(multi_window_test);
     const multi_window_test_step = b.step("test-multi-window", "Run MultiWindowApp unit tests (R83, headless)");
     multi_window_test_step.dependOn(&run_multi_window_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-debug-overlay — DebugOverlay unit tests (R90, no GPU).
+    //   zig build                    → compile only
+    //   zig build test-debug-overlay → compile + run
+    // -----------------------------------------------------------------------
+    const debug_overlay_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/debug_overlay_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    debug_overlay_test_mod.addImport("../01/types.zig", mod01);
+    debug_overlay_test_mod.addImport("../02/types.zig", mod02);
+    debug_overlay_test_mod.addImport("../05/types.zig", mod05);
+    debug_overlay_test_mod.addImport("../07/types.zig", mod07);
+    debug_overlay_test_mod.addIncludePath(b.path("deps"));
+    debug_overlay_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    debug_overlay_test_mod.link_libc = true;
+    const debug_overlay_test = b.addTest(.{ .name = "debug-overlay-test", .root_module = debug_overlay_test_mod });
+    b.default_step.dependOn(&debug_overlay_test.step);
+    const run_debug_overlay_test = b.addRunArtifact(debug_overlay_test);
+    const debug_overlay_test_step = b.step("test-debug-overlay", "Run DebugOverlay unit tests (R90, no GPU)");
+    debug_overlay_test_step.dependOn(&run_debug_overlay_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-scene-dump — Scene dump unit tests (R91, no GPU).
+    //   zig build              → compile only
+    //   zig build test-scene-dump → compile + run
+    // -----------------------------------------------------------------------
+    const scene_dump_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/07/debug_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scene_dump_test_mod.addImport("types.zig", mod07);
+    const scene_dump_test = b.addTest(.{ .name = "scene-dump-test", .root_module = scene_dump_test_mod });
+    b.default_step.dependOn(&scene_dump_test.step);
+    const run_scene_dump_test = b.addRunArtifact(scene_dump_test);
+    const scene_dump_test_step = b.step("test-scene-dump", "Run Scene dump unit tests (R91, no GPU)");
+    scene_dump_test_step.dependOn(&run_scene_dump_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-perf-hud — PerfHud unit tests (R92, no GPU).
+    //   zig build            → compile only
+    //   zig build test-perf-hud → compile + run
+    // -----------------------------------------------------------------------
+    const perf_hud_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/perf_hud_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    perf_hud_test_mod.addImport("../01/types.zig", mod01);
+    perf_hud_test_mod.addImport("../02/types.zig", mod02);
+    perf_hud_test_mod.addImport("../05/types.zig", mod05);
+    perf_hud_test_mod.addIncludePath(b.path("deps"));
+    perf_hud_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    perf_hud_test_mod.link_libc = true;
+    const perf_hud_test = b.addTest(.{ .name = "perf-hud-test", .root_module = perf_hud_test_mod });
+    b.default_step.dependOn(&perf_hud_test.step);
+    const run_perf_hud_test = b.addRunArtifact(perf_hud_test);
+    const perf_hud_test_step = b.step("test-perf-hud", "Run PerfHud unit tests (R92, no GPU)");
+    perf_hud_test_step.dependOn(&run_perf_hud_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-theme-swap — Theme live-swap unit tests (R93, pure Zig).
+    //   zig build              → compile only
+    //   zig build test-theme-swap → compile + run
+    // -----------------------------------------------------------------------
+    const theme_swap_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/theme_swap_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    theme_swap_test_mod.addImport("../05/types.zig", mod05);
+    const theme_swap_test = b.addTest(.{ .name = "theme-swap-test", .root_module = theme_swap_test_mod });
+    b.default_step.dependOn(&theme_swap_test.step);
+    const run_theme_swap_test = b.addRunArtifact(theme_swap_test);
+    const theme_swap_test_step = b.step("test-theme-swap", "Run Theme live-swap unit tests (R93, pure)");
+    theme_swap_test_step.dependOn(&run_theme_swap_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-font-scale — Font-scale unit tests (R94, pure Zig).
+    //   zig build              → compile only
+    //   zig build test-font-scale → compile + run
+    // -----------------------------------------------------------------------
+    const font_scale_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/font_scale_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    font_scale_test_mod.addImport("../05/types.zig", mod05);
+    const font_scale_test = b.addTest(.{ .name = "font-scale-test", .root_module = font_scale_test_mod });
+    b.default_step.dependOn(&font_scale_test.step);
+    const run_font_scale_test = b.addRunArtifact(font_scale_test);
+    const font_scale_test_step = b.step("test-font-scale", "Run font-scale unit tests (R94, pure)");
+    font_scale_test_step.dependOn(&run_font_scale_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-high-contrast — High-contrast palette unit tests (R95, pure Zig).
+    //   zig build                  → compile only
+    //   zig build test-high-contrast → compile + run
+    // -----------------------------------------------------------------------
+    const high_contrast_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/05/high_contrast_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    high_contrast_test_mod.addImport("../../docs/specs/05.types.zig", mod05);
+    high_contrast_test_mod.addImport("../03_element_store/types.zig", mod03);
+    const high_contrast_test = b.addTest(.{ .name = "high-contrast-test", .root_module = high_contrast_test_mod });
+    b.default_step.dependOn(&high_contrast_test.step);
+    const run_high_contrast_test = b.addRunArtifact(high_contrast_test);
+    const high_contrast_test_step = b.step("test-high-contrast", "Run high-contrast palette unit tests (R95, pure)");
+    high_contrast_test_step.dependOn(&run_high_contrast_test.step);
+
+    // -----------------------------------------------------------------------
+    // M10 unit tests
+    // -----------------------------------------------------------------------
+
+    // test-file-logger — FileLogger unit tests (RA2, file I/O).
+    //   zig build                → compile only
+    //   zig build test-file-logger → compile + run
+    const file_logger_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/file_logger_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    file_logger_test_mod.addImport("file_logger.zig", mod_file_logger);
+    file_logger_test_mod.addImport("app.zig", mod_app_impl);
+    const file_logger_test = b.addTest(.{ .name = "file-logger-test", .root_module = file_logger_test_mod });
+    b.default_step.dependOn(&file_logger_test.step);
+    const run_file_logger_test = b.addRunArtifact(file_logger_test);
+    const file_logger_test_step = b.step("test-file-logger", "Run FileLogger unit tests (RA2, file I/O)");
+    file_logger_test_step.dependOn(&run_file_logger_test.step);
+
+    // test-budget-arena — BudgetedArena unit tests (RA1, pure).
+    //   zig build                 → compile only
+    //   zig build test-budget-arena → compile + run
+    const budget_arena_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/budgeted_arena_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    budget_arena_test_mod.addImport("budgeted_arena.zig", mod_budgeted_arena);
+    budget_arena_test_mod.addImport("app.zig", mod_app_impl);
+    const budget_arena_test = b.addTest(.{ .name = "budget-arena-test", .root_module = budget_arena_test_mod });
+    b.default_step.dependOn(&budget_arena_test.step);
+    const run_budget_arena_test = b.addRunArtifact(budget_arena_test);
+    const budget_arena_test_step = b.step("test-budget-arena", "Run BudgetedArena unit tests (RA1, pure)");
+    budget_arena_test_step.dependOn(&run_budget_arena_test.step);
+
+    // test-startup-error — startup_error unit tests (RA3, platform detection).
+    //   zig build                  → compile only
+    //   zig build test-startup-error → compile + run
+    const startup_error_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/startup_error_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    startup_error_test_mod.addImport("startup_error.zig", mod_startup_error);
+    // Windows: user32 needed for MessageBoxW (already linked transitively via GLFW in
+    // the main app, but the test binary is standalone).
+    if (target.result.os.tag == .windows) {
+        startup_error_test_mod.linkSystemLibrary("user32", .{});
+    }
+    const startup_error_test = b.addTest(.{ .name = "startup-error-test", .root_module = startup_error_test_mod });
+    b.default_step.dependOn(&startup_error_test.step);
+    const run_startup_error_test = b.addRunArtifact(startup_error_test);
+    const startup_error_test_step = b.step("test-startup-error", "Run startup_error unit tests (RA3)");
+    startup_error_test_step.dependOn(&run_startup_error_test.step);
+
+    // test-window-state — WindowStateManager unit tests (RA4, headless).
+    //   zig build                → compile only
+    //   zig build test-window-state → compile + run
+    const window_state_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/window_state_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    window_state_test_mod.addImport("window_state.zig", mod_window_state);
+    window_state_test_mod.addImport("persistent_settings.zig", mod_persistent_settings);
+    window_state_test_mod.addImport("app.zig", mod_app_impl);
+    const window_state_test = b.addTest(.{ .name = "window-state-test", .root_module = window_state_test_mod });
+    b.default_step.dependOn(&window_state_test.step);
+    const run_window_state_test = b.addRunArtifact(window_state_test);
+    const window_state_test_step = b.step("test-window-state", "Run WindowStateManager unit tests (RA4, headless)");
+    window_state_test_step.dependOn(&run_window_state_test.step);
+
+    // test-error-boundary — ErrorBoundary unit tests (RA0, headless).
+    //   zig build                  → compile only
+    //   zig build test-error-boundary → compile + run
+    const error_boundary_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/error_boundary_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    error_boundary_test_mod.addImport("error_boundary.zig", mod_error_boundary);
+    error_boundary_test_mod.addImport("../05/types.zig", mod05);
+    error_boundary_test_mod.addImport("../07/types.zig", mod07);
+    error_boundary_test_mod.addImport("app.zig", mod_app_impl);
+    error_boundary_test_mod.addIncludePath(b.path("deps"));
+    error_boundary_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    error_boundary_test_mod.link_libc = true;
+    const error_boundary_test = b.addTest(.{ .name = "error-boundary-test", .root_module = error_boundary_test_mod });
+    b.default_step.dependOn(&error_boundary_test.step);
+    const run_error_boundary_test = b.addRunArtifact(error_boundary_test);
+    const error_boundary_test_step = b.step("test-error-boundary", "Run ErrorBoundary unit tests (RA0, headless)");
+    error_boundary_test_step.dependOn(&run_error_boundary_test.step);
+
+    // -----------------------------------------------------------------------
+    // run-demo — Showcase Demo Application (DEMO_APP.md).
+    //   zig build run-demo → build + run the showcase app
+    // -----------------------------------------------------------------------
+    const demo_mod = b.createModule(.{
+        .root_source_file = b.path("src/demo/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    demo_mod.addImport("app", mod_app);
+    demo_mod.addImport("navigator.zig", mod_navigator);
+    demo_mod.addImport("../01/types.zig", mod01);
+    demo_mod.addImport("../02/types.zig", mod02);
+    demo_mod.addImport("../03/types.zig", mod03);
+    demo_mod.addImport("../05/types.zig", mod05);
+    demo_mod.addImport("../06/types.zig", mod06);
+    demo_mod.addImport("../07/types.zig", mod07);
+    demo_mod.addImport("../08/types.zig", mod08);
+    demo_mod.addImport("events.zig", mod_events);
+    demo_mod.addImport("build_options", build_options.createModule());
+    // C/GPU dependencies are inherited transitively via mod_app → mod02/mod09.
+    // Do NOT re-add stb_impl.c here — mod02 already owns it; adding it twice
+    // causes duplicate-symbol linker errors.
+    demo_mod.addIncludePath(glfw_dep.path("include"));
+    demo_mod.addIncludePath(.{ .cwd_relative = vulkan_include });
+    demo_mod.linkLibrary(glfw_lib);
+    demo_mod.addLibraryPath(.{ .cwd_relative = vulkan_lib });
+    demo_mod.linkSystemLibrary("vulkan-1", .{});
+    if (target.result.os.tag == .windows) {
+        demo_mod.linkSystemLibrary("gdi32", .{});
+        demo_mod.linkSystemLibrary("user32", .{});
+        demo_mod.linkSystemLibrary("shell32", .{});
+    }
+
+    const demo_exe = b.addExecutable(.{
+        .name = "showcase",
+        .root_module = demo_mod,
+    });
+    b.installArtifact(demo_exe);
+    const run_demo_cmd = b.addRunArtifact(demo_exe);
+    const run_demo_step = b.step("run-demo", "Run the zig-gui Showcase Demo Application");
+    run_demo_step.dependOn(&run_demo_cmd.step);
+
+    // -----------------------------------------------------------------------
+    // visual-check — render 3 frames, write PNG, verify it is not blank.
+    //   zig build visual-check
+    //
+    // Requires a display (GLFW opens a real window). The window is visible
+    // briefly, then the process exits after 3 frames.
+    // -----------------------------------------------------------------------
+    const screenshot_path = "testdata/screenshot_actual.png";
+
+    // Step 1: run the demo in screenshot mode.
+    const screenshot_cmd = b.addRunArtifact(demo_exe);
+    screenshot_cmd.addArg("--screenshot-frames");
+    screenshot_cmd.addArg("3");
+    screenshot_cmd.addArg("--screenshot-out");
+    screenshot_cmd.addArg(screenshot_path);
+
+    // Step 2: build and run the visual checker.
+    const checker_mod = b.createModule(.{
+        .root_source_file = b.path("src/tools/visual_check.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const checker_exe = b.addExecutable(.{
+        .name = "visual_check",
+        .root_module = checker_mod,
+    });
+    const run_checker = b.addRunArtifact(checker_exe);
+    run_checker.addArg(screenshot_path);
+    run_checker.step.dependOn(&screenshot_cmd.step);
+
+    const visual_check_step = b.step("visual-check",
+        "Render 3 demo frames, write a PNG, and verify it is not blank");
+    visual_check_step.dependOn(&run_checker.step);
 }
 
 // ---------------------------------------------------------------------------

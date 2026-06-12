@@ -964,3 +964,118 @@ A `u16` opaque handle identifying one `WindowEntry` within a `MultiWindowApp`. V
 is reserved/invalid. Allocated monotonically; not reused after `closeWindow`.
 
 See: R83 (M8-04), `src/app/multi_window.zig`.
+
+---
+
+## DebugOverlay
+
+A developer tool struct (`src/app/debug_overlay.zig`) that draws colored bounding-box
+borders over every live scene element when enabled. Toggled by the F1 key via
+`AppInner.handleKey`. When enabled the matching performance HUD also appears (see PerfHud).
+`updateHover(scene, x, y)` finds the topmost element under the cursor by iterating elements
+in reverse painter order; `buildDebugDrawList(…)` emits `border_rect` commands for all
+elements and, when an element is hovered, a four-line info panel showing computed rect and
+style. Border colors encode element role: hovered = accent (a=255), focusable = info (a=180),
+container = ok (a=140), other = warn (a=120).
+
+See: R90, `src/app/debug_overlay.zig`, `src/app/app.zig`.
+
+---
+
+## FrameCounters
+
+A plain struct (`src/app/perf_hud.zig`) holding four per-frame metrics collected by
+`AppInner` after each rendered frame: `frame_ms: f32`, `cmd_count: u32`, `dirty_count: u32`,
+`element_count: u32`. Passed to `PerfHud.record()` at the end of the frame pipeline.
+
+See: R92, `src/app/perf_hud.zig`.
+
+---
+
+## PerfHud
+
+A struct (`src/app/perf_hud.zig`) that tracks the last 16 frame times in a ring buffer,
+computes a smoothed frame time via `smoothFrameMs()`, and emits a small three-line HUD panel
+in the top-right corner of the viewport when the debug overlay is enabled.
+`buildHudDrawList(alloc, enabled, viewport_w, tokens, font, atlas)` returns the draw
+commands for the panel; the caller frees the slice.
+
+See: R92, `src/app/perf_hud.zig`.
+
+---
+
+## Theme live-swap
+
+The ability to change the active theme at runtime without restarting the application or
+re-instantiating the scene. Implemented by `AppInner.setTheme(theme)` and
+`AppInner.toggleTheme()`. `setTheme` scales the new theme's token set by the current font
+scale factor, marks all elements dirty, and calls `rebuildStyles()` which re-resolves each
+live element's CSS class string against the new tokens. All layout and style changes take
+effect on the next frame.
+
+See: R93, `src/app/app.zig`.
+
+---
+
+## FileLogger
+
+A `std.log`-compatible sink that writes timestamped log lines to a file on disk. The file
+rolls (truncates to zero) when it exceeds `max_bytes`. Installed globally by `AppInner.init`
+when `AppOptions.log_path` is set. Defined in `src/app/file_logger.zig`. See: RA2 (M10-03).
+
+---
+
+## BudgetedArena
+
+An `ArenaAllocator` wrapper that enforces a configurable byte ceiling. When an allocation
+would exceed `budget_bytes`, it returns `error.OutOfMemory` and logs the overage. A budget
+of 0 means unlimited. Reset behavior is identical to the underlying `ArenaAllocator`.
+Defined in `src/app/budgeted_arena.zig`. See: RA1 (M10-02).
+
+---
+
+## showErrorDialog
+
+A platform-specific function that displays a native error message to the user.
+On Windows, uses `MessageBoxW`. On Linux, writes to stderr. Used by `initOrDialog`
+to surface Vulkan or other startup failures gracefully. Defined in
+`src/app/startup_error.zig`. See: RA3 (M10-04).
+
+---
+
+## WindowStateManager
+
+A helper struct that reads and writes window position, size, and maximised state to
+`PersistentSettings`. Used by `AppInner` when `AppOptions.persist_window_state = true`.
+Reads state from GLFW on `deinit`; applies saved state to GLFW on `init`. Defined in
+`src/app/window_state.zig`. See: RA4 (M10-05).
+
+---
+
+## SavedWindowState
+
+A plain struct (`x: i32`, `y: i32`, `width: u32`, `height: u32`, `maximised: bool`)
+holding a snapshot of window geometry. Produced by `WindowStateManager.load` and
+`readFromPlatform`. See: RA4 (M10-05).
+
+---
+
+## ErrorBoundary
+
+A struct that wraps a `ScreenFn` call in a Zig error-catch block. When the screen function
+returns an error, `ErrorBoundary.call` stores the error and returns `false`; the Navigator
+then displays a built-in fallback screen. Does NOT catch panics. Defined in
+`src/app/error_boundary.zig`. See: RA0 (M10-01).
+
+---
+
+## font scale
+
+A `f32` multiplier (clamped to `[0.5, 4.0]`, default `1.0`) applied to all five type-scale
+token sizes (`text_xs` through `text_xl`). Stored as `AppInner._font_scale`. Changed via
+`AppInner.setFontScale(factor)`, which rebuilds tokens from the current palette and mode,
+scales them, rebuilds element styles, and marks all elements dirty. `Tokens.scaled(factor)`
+is the pure function that multiplies each text size and clamps to `[6, 96]`.
+
+See: R94, `src/app/app.zig`, `src/05/types.zig` `Tokens.scaled`.
+

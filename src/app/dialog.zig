@@ -83,11 +83,11 @@ pub const DialogManager = struct {
             return;
         }
 
-        var cmds = std.ArrayList(DrawCommand).init(alloc);
-        errdefer cmds.deinit();
+        var cmds: std.ArrayList(DrawCommand) = .empty;
+        errdefer cmds.deinit(alloc);
 
         // Semi-transparent backdrop covering the entire window.
-        try cmds.append(.{ .filled_rect = .{
+        try cmds.append(alloc, .{ .filled_rect = .{
             .rect = .{ .x = 0, .y = 0, .w = window_w, .h = window_h },
             .color = .{ .r = 0, .g = 0, .b = 0, .a = 160 },
             .radius = 0,
@@ -99,19 +99,19 @@ pub const DialogManager = struct {
         const panel_x = (window_w - panel_w) / 2.0;
         const panel_y = (window_h - panel_h) / 2.0;
 
-        try cmds.append(.{ .filled_rect = .{
+        try cmds.append(alloc, .{ .filled_rect = .{
             .rect = .{ .x = panel_x, .y = panel_y, .w = panel_w, .h = panel_h },
             .color = .{ .r = tokens.bg_raised.r, .g = tokens.bg_raised.g, .b = tokens.bg_raised.b, .a = 255 },
             .radius = tokens.radius_md,
         } });
-        try cmds.append(.{ .border_rect = .{
+        try cmds.append(alloc, .{ .border_rect = .{
             .rect = .{ .x = panel_x, .y = panel_y, .w = panel_w, .h = panel_h },
             .color = .{ .r = tokens.border_default.r, .g = tokens.border_default.g, .b = tokens.border_default.b, .a = 255 },
             .width = 1,
             .radius = tokens.radius_md,
         } });
 
-        const slice = try cmds.toOwnedSlice();
+        const slice = try cmds.toOwnedSlice(alloc);
         self.current_cmds = slice;
         overlay.setSlot(self.overlay_id, slice);
     }
