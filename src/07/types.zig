@@ -107,8 +107,9 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
         .accordion => .{ .display = .block },
         .date_picker => .{ .display = .flex, .direction = .row, .align_items = .center },
         .avatar => .{ .display = .block, .width = .{ .px = 40 }, .height = .{ .px = 40 } },
-        .badge => .{ .display = .block },
+        .badge => .{ .display = .block, .width = .{ .px = 32 }, .height = .{ .px = 20 }, .flex_shrink = 0 },
         .data_table => .{ .display = .block, .overflow = .hidden },
+        .button => .{ .display = .block, .flex_shrink = 0 }, // no shrink
         else => .{ .display = .block },
     };
 }
@@ -1879,6 +1880,26 @@ pub const Scene = struct {
                 } else if (std.mem.eql(u8, attr.name, "initials") and attr_val.len >= 1) {
                     av.initials[0] = attr_val[0];
                     av.initials[1] = if (attr_val.len >= 2) attr_val[1] else 0;
+                }
+            }
+        }
+
+        // R7B: parse badge attributes (text, color)
+        if (kind == .badge) {
+            var bs = &self._badge_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "text")) {
+                    const copy_len = @min(attr_val.len, bs.text.len - 1);
+                    @memcpy(bs.text[0..copy_len], attr_val[0..copy_len]);
+                    bs.text[copy_len] = 0;
+                } else if (std.mem.eql(u8, attr.name, "color")) {
+                    if (std.mem.eql(u8, attr_val, "success")) bs.color = .success
+                    else if (std.mem.eql(u8, attr_val, "warning")) bs.color = .warning
+                    else if (std.mem.eql(u8, attr_val, "error")) bs.color = .error_c;
                 }
             }
         }

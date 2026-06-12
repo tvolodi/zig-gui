@@ -653,8 +653,8 @@ pub fn buildDrawList(
             }
         }
 
-        // 3. Text glyphs (checkbox and radio emit their labels in step 4 with offset)
-        if (kind != .checkbox and kind != .radio) {
+        // 3. Text glyphs (checkbox/radio/badge emit their text in step 4 with custom style)
+        if (kind != .checkbox and kind != .radio and kind != .badge) {
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
@@ -1055,7 +1055,7 @@ pub fn buildDrawList(
                     } });
                     const cnt_style = theme_mod.ComputedStyle{
                         .text_color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
-                        .font_size = @max(9.0, computed.h * 0.6),
+                        .font_size = style.font_size,
                     };
                     const text_len = std.mem.indexOfScalar(u8, &bs.text, 0) orelse bs.text.len;
                     try emitGlyphs(&list, alloc, id, bs.text[0..text_len], computed, &cnt_style, atlas, font, effective_alpha);

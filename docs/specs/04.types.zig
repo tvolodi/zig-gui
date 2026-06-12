@@ -279,7 +279,10 @@ fn solveFlex(
                         .px => |v| v,
                         .percent => |v| main_size * (v / 100.0),
                         .auto => if (child.measured) |m|
-                            if (direction == .row) m.w else m.h
+                            if (direction == .row)
+                                m.w + child.padding.left + child.padding.right
+                            else
+                                m.h + child.padding.top + child.padding.bottom
                         else
                             0.0,
                     };
