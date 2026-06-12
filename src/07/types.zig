@@ -175,6 +175,7 @@ pub const CheckboxState = struct {
     disabled: bool = false,
     hovered: bool = false,
     pressed: bool = false,
+    on_change: ?CallbackFn = null,
 };
 
 // ---------------------------------------------------------------------------
@@ -783,6 +784,11 @@ pub const Scene = struct {
     pub fn setButtonCallback(self: *Scene, idx: u32, callback: CallbackFn) !void {
         if (idx >= self._button_state.items.len) return error.OutOfMemory;
         self._button_state.items[idx].on_click = callback;
+    }
+
+    pub fn setCheckboxCallback(self: *Scene, idx: u32, callback: CallbackFn) !void {
+        if (idx >= self._checkbox_state.items.len) return error.OutOfMemory;
+        self._checkbox_state.items[idx].on_change = callback;
     }
 
     pub fn buttonStateOf(self: *Scene, idx: u32) *ButtonState {

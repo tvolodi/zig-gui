@@ -1448,6 +1448,9 @@ pub const AppInner = struct {
                         st.pressed = false;
                         if (hit_at_release and !st.disabled) {
                             st.checked = !st.checked;
+                            if (st.on_change) |cb| {
+                                self.scene._queued_callbacks.append(self.scene.gpa, cb) catch {};
+                            }
                         }
                         if (idx < self.scene.elements.dirty.bit_length)
                             self.scene.elements.dirty.set(idx);
