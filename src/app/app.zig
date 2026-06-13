@@ -511,8 +511,8 @@ pub const AppInner = struct {
         var backend = try VulkanBackend.init(gpa, &platform);
         errdefer backend.deinit();
 
-        // Step 3: initQuadPipeline.
-        try backend.initQuadPipeline();
+        // Step 3: initPipelines.
+        try backend.initPipelines();
         errdefer backend.deinitQuadPipeline();
 
         // Step 4: Load font bytes.
@@ -994,7 +994,12 @@ pub const AppInner = struct {
                 .b = @as(f32, @floatFromInt(c1.b)) / 255.0,
                 .a = 1.0,
             });
-            self.backend.drawFrame(all_cmds2, &self.atlas_gpu);
+            const handles = @import("../10/types.zig").AtlasHandles{
+                .glyph = .{ .backend_obj = @ptrCast(self.atlas_gpu.image.?) },
+                .sdf = .{ .backend_obj = @ptrCast(self.sdf_atlas_gpu.image.?) },
+                .image = .{ .backend_obj = @ptrCast(self.subpixel_atlas_gpu.image.?) },
+            };
+            self.backend.drawFrame(all_cmds2, handles);
             self.backend.endFrame();
 
             // R92: Record frame counters.
@@ -1265,7 +1270,12 @@ pub const AppInner = struct {
                 .b = @as(f32, @floatFromInt(c2.b)) / 255.0,
                 .a = 1.0,
             });
-            self.backend.drawFrame(all_cmds2, &self.atlas_gpu);
+            const handles2 = @import("../10/types.zig").AtlasHandles{
+                .glyph = .{ .backend_obj = @ptrCast(self.atlas_gpu.image.?) },
+                .sdf = .{ .backend_obj = @ptrCast(self.sdf_atlas_gpu.image.?) },
+                .image = .{ .backend_obj = @ptrCast(self.subpixel_atlas_gpu.image.?) },
+            };
+            self.backend.drawFrame(all_cmds2, handles2);
             self.backend.endFrame();
 
             // R92: Record frame counters.

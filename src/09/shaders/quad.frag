@@ -19,6 +19,65 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec4 outColor;
 
 void main() {
+    vec4 outColor = vec4(0.0);
+
+    switch(int(fragMode)) {
+        case 0: // solid rect
+            outColor = fragColor;
+            break;
+        case 1: // glyph
+            // Glyph: red channel is alpha mask (stb_truetype single-channel atlas).
+            float alpha = texture(atlasTexture, fragUV).r;
+            outColor = vec4(fragColor.rgb, fragColor.a * alpha);
+            break;
+        case 2: // bordered rect
+            // Bordered rect: use color from main texture (not implemented in original, fallback to fragColor)
+            outColor = fragColor;
+            break;
+        case 3: // image rect
+            // Image rect (RGBA): sample the main texture as RGBA image.
+            outColor = texture(atlasTexture, fragUV) * fragColor;
+            break;
+        case 4: // SDF icon
+            // M13-04 RD3 — SDF icon: signed distance field in red channel.
+            // 0.0 = inside, 0.5 = edge, 1.0 = outside.
+            float dist = texture(sdfTexture, fragUV).r;
+            float smoothing = fwidth(dist) * 0.5;
+            float alpha_val = 1.0 - smoothstep(0.5 - smoothing, 0.5 + smoothing, dist);
+            outColor = vec4(fragColor.rgb, fragColor.a * alpha_val);
+            break;
+        case 5: // gradient
+            // M13-01 RD0 — Gradient: linear interpolation between fragColor and fragColorB.
+            // Direction is encoded in the UV: one axis varies 0..1, the unused axis is ~0.
+            //   right:        t = fragUV.x (fragUV.y ≈ 0)
+            //   bottom:       t = fragUV.y (fragUV.x ≈ 0)
+            //   bottom_right: t = fragUV.x + fragUV.y (both vary 0..1)
+            float t = clamp(fragUV.x + fragUV.y, 0.0, 1.0);
+            outColor = mix(fragColor, fragColorB, t);
+            break;
+        case 6: // AA filled circle
+            // M13-05 RD4 — AA filled circle: 1-pixel smooth feather at edge.
+            // The quad bounds exactly enclose the circle. fragUV=(0.5,0.5) is center.
+            // dist_uv: 0 at center, 1.0 at the circle edge.
+            float dist_uv = length(fragUV - 0.5) * 2.0;
+            // Convert UV-space distance to pixel distance using screen-space derivatives.
+            vec2 dx = dFdx(fragUV);
+            vec2 dy = dFdy(fragUV);
+            float pixel_scale = length(vec2(dx.x + dy.x, dx.y + dy.y)) * 0.5;
+            float d_pixel = (1.0 - dist_uv) / pixel_scale;
+            float alpha_val_circle = smoothstep(0.0, 1.0, d_pixel);
+            outColor = vec4(fragColor.rgb, fragColor.a * alpha_val_circle);
+            break;
+        case 7: // subpixel glyph
+            // M13-03 RD2 — Subpixel glyph: RGB channels encode subpixel coverage.
+            vec3 coverage = texture(subpixelTexture, fragUV).rgb;
+            outColor = vec4(fragColor.rgb * coverage, fragColor.a);
+            break;
+        default:
+            outColor = vec4(1.0, 0.0, 1.0, 1.0); // magenta error
+            break;
+    }
+
     // RD1: Rounded-corner clipping — discard fragments outside the rounded rect boundary.
     if (pc.clipEnabled != 0u) {
         vec2 cp = gl_FragCoord.xy - pc.clipRect.xy;
@@ -42,55 +101,5 @@ void main() {
         if (r < 0.0) discard;
     }
 
-    if (fragMode == 1u) {
-        // Glyph: red channel is alpha mask (stb_truetype single-channel atlas).
-        float alpha = texture(atlasTexture, fragUV).r;
-        outColor = vec4(fragColor.rgb, fragColor.a * alpha);
-    } else if (fragMode == 2u) {
-        // M13-01 RD0 — Gradient: linear interpolation between fragColor and fragColorB.
-        // Direction is encoded in the UV: one axis varies 0..1, the unused axis is ~0.
-        //   right:        t = fragUV.x (fragUV.y ≈ 0)
-        //   bottom:       t = fragUV.y (fragUV.x ≈ 0)
-        //   bottom_right: t = fragUV.x + fragUV.y (both vary 0..1)
-        float t = clamp(fragUV.x + fragUV.y, 0.0, 1.0);
-        outColor = mix(fragColor, fragColorB, t);
-    } else if (fragMode == 5u) {
-        // M13-05 RD4 — AA filled rect: 1-pixel smooth feather at edges.
-        // fragUV.x = 0..1 across rect width, fragUV.y = 0..1 across height.
-        // Screen-space derivatives convert UV-space distance to pixel distance.
-        vec2 dx = dFdx(fragUV);
-        vec2 dy = dFdy(fragUV);
-        float d_left   = fragUV.x / length(vec2(dx.x, dy.x));
-        float d_right  = (1.0 - fragUV.x) / length(vec2(dx.x, dy.x));
-        float d_top    = fragUV.y / length(vec2(dx.y, dy.y));
-        float d_bottom = (1.0 - fragUV.y) / length(vec2(dx.y, dy.y));
-        float d = min(min(d_left, d_right), min(d_top, d_bottom));
-        float alpha_val = smoothstep(0.0, 1.0, d);
-        outColor = vec4(fragColor.rgb, fragColor.a * alpha_val);
-    } else if (fragMode == 6u) {
-        // M13-05 RD4 — AA filled circle: 1-pixel smooth feather at edge.
-        // The quad bounds exactly enclose the circle. fragUV=(0.5,0.5) is center.
-        // dist_uv: 0 at center, 1.0 at the circle edge.
-        float dist_uv = length(fragUV - 0.5) * 2.0;
-        // Convert UV-space distance to pixel distance using screen-space derivatives.
-        vec2 dx = dFdx(fragUV);
-        vec2 dy = dFdy(fragUV);
-        float pixel_scale = length(vec2(dx.x + dy.x, dx.y + dy.y)) * 0.5;
-        float d_pixel = (1.0 - dist_uv) / pixel_scale;
-        float alpha_val = smoothstep(0.0, 1.0, d_pixel);
-        outColor = vec4(fragColor.rgb, fragColor.a * alpha_val);
-    } else if (fragMode == 3u) {
-        // M13-03 RD2 — Subpixel glyph: RGB channels encode subpixel coverage.
-        vec3 coverage = texture(subpixelTexture, fragUV).rgb;
-        outColor = vec4(fragColor.rgb * coverage, fragColor.a);
-    } else if (fragMode == 4u) {
-        // M13-04 RD3 — SDF icon: signed distance field in red channel.
-        // 0.0 = inside, 0.5 = edge, 1.0 = outside.
-        float dist = texture(sdfTexture, fragUV).r;
-        float smoothing = fwidth(dist) * 0.5;
-        float alpha_val = 1.0 - smoothstep(0.5 - smoothing, 0.5 + smoothing, dist);
-        outColor = vec4(fragColor.rgb, fragColor.a * alpha_val);
-    } else {
-        outColor = fragColor;
-    }
+    gl_FragColor = outColor;
 }

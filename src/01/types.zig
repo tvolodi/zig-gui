@@ -39,6 +39,15 @@ pub const WindowOptions = struct {
     height: u32 = 600,
 };
 
+pub const BackendKind = @import("../10/types.zig").BackendKind;
+
+pub const Surface = union(BackendKind) {
+    vulkan: *anyopaque,   // VkSurfaceKHR
+    metal: *anyopaque,    // CAMetalLayer (deferred to RJ2)
+    dx12: *anyopaque,     // HWND + IDXGISwapChain (deferred to RJ3)
+    webgpu: *anyopaque,   // WGPUSurface or canvas (deferred to RJ4)
+};
+
 pub const PlatformError = error{
     GlfwInitFailed,
     VulkanUnavailable,
@@ -198,6 +207,7 @@ const VulkanImpl = struct {
     pipeline: c.VkPipeline,
     current_image_index: u32,
     validation_issue_count: u32,
+    device_properties: c.VkPhysicalDeviceProperties = .{},
 
     /// Present mode selected at init (R13). Reused on swapchain recreation — never re-queried.
     present_mode: c.VkPresentModeKHR = c.VK_PRESENT_MODE_FIFO_KHR,
@@ -717,16 +727,24 @@ pub const Platform = struct {
     }
 
     /// Create the window surface for an existing Vulkan instance.
-    /// `instance` is VkInstance cast to *anyopaque; returned surface is VkSurfaceKHR cast
-    /// to *anyopaque (both are pointer-sized handles on 64-bit — spec note 2).
-    pub fn createSurface(self: *Platform, instance: *anyopaque) PlatformError!*anyopaque {
-        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
-        const vk_instance: c.VkInstance = @ptrCast(instance);
-        var surface: c.VkSurfaceKHR = undefined;
-        if (c.glfwCreateWindowSurface(vk_instance, impl.window, null, &surface) != c.VK_SUCCESS) {
-            return PlatformError.SurfaceCreationFailed;
-        }
-        return @ptrCast(surface.?);
+    /// Create a platform surface for the specified backend (RJ5).
+    /// `instance` is backend-specific (VkInstance for Vulkan, null for deferred backends).
+    /// Returns a union(BackendKind) tagged with the surface handle.
+    pub fn createSurface(self: *Platform, backend: BackendKind, instance: ?*anyopaque) PlatformError!Surface {
+        return switch (backend) {
+            .vulkan => {
+                const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+                const vk_instance: c.VkInstance = @ptrCast(instance orelse return error.SurfaceCreationFailed);
+                var surface: c.VkSurfaceKHR = undefined;
+                if (c.glfwCreateWindowSurface(vk_instance, impl.window, null, &surface) != c.VK_SUCCESS) {
+                    return PlatformError.SurfaceCreationFailed;
+                }
+                return Surface{ .vulkan = @ptrCast(surface.?) };
+            },
+            .metal => return error.SurfaceCreationFailed, // Deferred to RJ2
+            .dx12 => return error.SurfaceCreationFailed,  // Deferred to RJ3
+            .webgpu => return error.SurfaceCreationFailed, // Deferred to RJ4
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -1449,9 +1467,9 @@ pub const VulkanBackend = struct {
         }
         errdefer if (enable_validation) vkDestroyDebugMessenger(impl.instance, impl.debug_messenger);
 
-        const surface_opaque = platform.createSurface(@ptrCast(impl.instance.?)) catch
+        const surface_result = platform.createSurface(.vulkan, @ptrCast(impl.instance.?)) catch
             return BackendError.InstanceCreationFailed;
-        impl.surface = @ptrCast(surface_opaque);
+        impl.surface = surface_result.vulkan;
         errdefer c.vkDestroySurfaceKHR(impl.instance, impl.surface, null);
 
         const pd = vkSelectPhysicalDevice(gpa, impl.instance, impl.surface) catch
@@ -1459,6 +1477,9 @@ pub const VulkanBackend = struct {
         impl.physical_device = pd.physical_device;
         impl.graphics_family = pd.graphics_family;
         impl.present_family = pd.present_family;
+
+        // Populate device properties for capabilities() method (RJ1).
+        c.vkGetPhysicalDeviceProperties(impl.physical_device, &impl.device_properties);
 
         vkCreateLogicalDevice(impl) catch return BackendError.DeviceCreationFailed;
         errdefer c.vkDestroyDevice(impl.device, null);
@@ -1796,7 +1817,7 @@ pub const VulkanBackend = struct {
     // Module 09 extensions — quad pipeline (added alongside the triangle pipeline)
     // -----------------------------------------------------------------------
 
-    pub fn initQuadPipeline(self: *VulkanBackend) !void {
+    pub fn initPipelines(self: *VulkanBackend) !void {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
         try vkInitQuadPipeline(impl);
     }
@@ -1806,12 +1827,77 @@ pub const VulkanBackend = struct {
         vkDeinitQuadPipeline(impl);
     }
 
-    /// `atlas` is *const GpuAtlas or any struct with the same leading fields
-    /// (image, image_view, sampler, memory as ?*anyopaque). Any *T coerces to *const anyopaque.
-    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, atlas: *const anyopaque) void {
+    /// RJ1 — Resize the swapchain to the given dimensions (RD5: dpi_scale deferred).
+    pub fn resize(self: *VulkanBackend, w: u32, h: u32, dpi_scale: f32) void {
+        _ = dpi_scale; // RD5 deferred
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
-        const h: *const GpuAtlas = @ptrCast(@alignCast(atlas));
-        vkDrawFrame(impl, commands, h);
+        impl.swapchain_extent.width = w;
+        impl.swapchain_extent.height = h;
+        vkRecreateSwapchain(impl) catch {};
+    }
+
+    /// RJ1 — Upload a glyph atlas to the GPU.
+    pub fn uploadAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!@import("../10/types.zig").AtlasHandle {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const cpu_atlas: *const @import("../02/types.zig").GlyphAtlas = @ptrCast(@alignCast(atlas));
+        const gpu_atlas = vkUploadAtlasRgba8(
+            impl.device,
+            impl.physical_device,
+            impl.command_pool,
+            impl.graphics_queue,
+            cpu_atlas.pixels,
+            cpu_atlas.width,
+            cpu_atlas.height,
+        ) catch return BackendError.ShaderLoadFailed;
+        return .{ .backend_obj = @ptrCast(gpu_atlas.image.?) };
+    }
+
+    /// RJ1 — Upload an SDF atlas to the GPU.
+    pub fn uploadSdfAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!@import("../10/types.zig").AtlasHandle {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const cpu_atlas: *const @import("../09/types.zig").SdfAtlas = @ptrCast(@alignCast(atlas));
+        const gpu_atlas = vkUploadAtlas(
+            impl.device,
+            impl.physical_device,
+            impl.command_pool,
+            impl.graphics_queue,
+            cpu_atlas.pixels,
+            cpu_atlas.width,
+            cpu_atlas.height,
+        ) catch return BackendError.ShaderLoadFailed;
+        return .{ .backend_obj = @ptrCast(gpu_atlas.image.?) };
+    }
+
+    /// RJ1 — Upload arbitrary image pixels to the GPU.
+    pub fn uploadImage(self: *VulkanBackend, pixels: []const u8, w: u32, h: u32) BackendError!@import("../10/types.zig").AtlasHandle {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const gpu_atlas = vkUploadAtlasRgba8(
+            impl.device,
+            impl.physical_device,
+            impl.command_pool,
+            impl.graphics_queue,
+            pixels,
+            w,
+            h,
+        ) catch return BackendError.ShaderLoadFailed;
+        return .{ .backend_obj = @ptrCast(gpu_atlas.image.?) };
+    }
+
+    /// RJ1 — Query GPU capabilities.
+    pub fn capabilities(self: *const VulkanBackend) @import("../10/types.zig").Caps {
+        const impl: *const VulkanImpl = @ptrCast(@alignCast(self._impl));
+        return .{
+            .max_texture_dim = impl.device_properties.limits.maxImageDimension2D,
+            .subpixel_text = true, // Vulkan supports RD2
+            .present_modes = 0, // TBD: bitmask of supported present modes
+        };
+    }
+
+    /// `handles` is AtlasHandles struct with glyph/sdf/image atlas handles (RJ1).
+    pub fn drawFrame(self: *VulkanBackend, commands: []const DrawCommand, handles: @import("../10/types.zig").AtlasHandles) void {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const glyph_atlas: *const GpuAtlas = @ptrCast(@alignCast(handles.glyph.backend_obj));
+        vkDrawFrame(impl, commands, glyph_atlas);
     }
 
     /// M13-03 RD2 — Upload/replace the subpixel atlas GPU texture at binding=1.
