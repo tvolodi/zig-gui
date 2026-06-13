@@ -84,11 +84,11 @@ pub fn build(
     const gcb1_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
     const gcb2_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
     const gcb3_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
-    const gi1  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi1_attrs  };
+    const gi1  = NodeDesc{ .tag = "Card",     .classes = "h-8 p-2 bg-raised",   .attrs = &gi1_attrs  };
     const gcb1 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb1_attrs };
     const gi2  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi2_attrs  };
     const gcb2 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb2_attrs };
-    const gi3  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi3_attrs  };
+    const gi3  = NodeDesc{ .tag = "Card",     .classes = "h-8 p-2 bg-raised",   .attrs = &gi3_attrs  };
     const gcb3 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb3_attrs };
     const grow_row1_children = [2]NodeDesc{ gi1,  gcb1 };
     const grow_row2_children = [2]NodeDesc{ gi2,  gcb2 };
