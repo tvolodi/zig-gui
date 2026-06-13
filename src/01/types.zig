@@ -1837,9 +1837,9 @@ pub const VulkanBackend = struct {
     }
 
     /// RJ1 — Upload a glyph atlas to the GPU.
-    pub fn uploadAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!@import("../10/types.zig").AtlasHandle {
+    pub fn uploadAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!struct { backend_obj: *anyopaque } {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
-        const cpu_atlas: *const @import("../02/types.zig").GlyphAtlas = @ptrCast(@alignCast(atlas));
+        const cpu_atlas: *const anyopaque = @ptrCast(@alignCast(atlas));
         const gpu_atlas = vkUploadAtlasRgba8(
             impl.device,
             impl.physical_device,
@@ -1853,9 +1853,9 @@ pub const VulkanBackend = struct {
     }
 
     /// RJ1 — Upload an SDF atlas to the GPU.
-    pub fn uploadSdfAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!@import("../10/types.zig").AtlasHandle {
+    pub fn uploadSdfAtlas(self: *VulkanBackend, atlas: *const anyopaque) BackendError!struct { backend_obj: *anyopaque } {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
-        const cpu_atlas: *const @import("../09/types.zig").SdfAtlas = @ptrCast(@alignCast(atlas));
+        const cpu_atlas: *const anyopaque = @ptrCast(@alignCast(atlas));
         const gpu_atlas = vkUploadAtlas(
             impl.device,
             impl.physical_device,

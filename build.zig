@@ -249,7 +249,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    mod04.addImport("../03_element_store/types.zig", mod03);
+    mod04.addImport("../03/types.zig", mod03);
 
     // Acceptance tests — docs/specs/04.acceptance_test.zig
     //   zig build test-04  → compile + run
@@ -259,7 +259,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept04_mod.addImport("types.zig", mod04);
-    accept04_mod.addImport("../03_element_store/types.zig", mod03);
+    accept04_mod.addImport("../03/types.zig", mod03);
     const accept04 = b.addTest(.{
         .name = "04-acceptance-test",
         .root_module = accept04_mod,
@@ -276,7 +276,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    mod05.addImport("../03_element_store/types.zig", mod03);
+    mod05.addImport("../03/types.zig", mod03);
 
     // Acceptance tests — docs/specs/05.acceptance_test.zig
     //   zig build test-05  → compile + run
@@ -303,8 +303,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    unit05_mod.addImport("../../docs/specs/05.types.zig", mod05);
-    unit05_mod.addImport("../03_element_store/types.zig", mod03);
+    unit05_mod.addImport("../05/types.zig", mod05);
+    unit05_mod.addImport("../03/types.zig", mod03);
     const unit05_test = b.addTest(.{
         .name = "05-unit-test",
         .root_module = unit05_mod,
@@ -339,7 +339,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     unit04_mod.addImport("types.zig", mod04);
-    unit04_mod.addImport("../03_element_store/types.zig", mod03);
+    unit04_mod.addImport("../03/types.zig", mod03);
     const unit04_test = b.addTest(.{
         .name = "04-unit-test",
         .root_module = unit04_mod,
@@ -356,8 +356,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    mod06.addImport("../03_element_store/types.zig", mod03);
-    mod06.addImport("../05_theme/types.zig", mod05);
+    mod06.addImport("../03/types.zig", mod03);
+    mod06.addImport("../05/types.zig", mod05);
 
     // Acceptance tests — docs/specs/06.acceptance_test.zig
     //   zig build test-06  → compile + run
@@ -367,8 +367,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept06_mod.addImport("types.zig", mod06);
-    accept06_mod.addImport("../03_element_store/types.zig", mod03);
-    accept06_mod.addImport("../05_theme/types.zig", mod05);
+    accept06_mod.addImport("../03/types.zig", mod03);
+    accept06_mod.addImport("../05/types.zig", mod05);
     const accept06 = b.addTest(.{
         .name = "06-acceptance-test",
         .root_module = accept06_mod,
@@ -387,8 +387,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     unit06_mod.addImport("../../docs/specs/06.types.zig", mod06);
-    unit06_mod.addImport("../03_element_store/types.zig", mod03);
-    unit06_mod.addImport("../../docs/specs/05.types.zig", mod05);
+    unit06_mod.addImport("../03/types.zig", mod03);
+    unit06_mod.addImport("../05/types.zig", mod05);
     const unit06_test = b.addTest(.{
         .name = "06-unit-test",
         .root_module = unit06_mod,
@@ -434,9 +434,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept07_mod.addImport("types.zig", mod07);
-    accept07_mod.addImport("../03_element_store/types.zig", mod03);
-    accept07_mod.addImport("../05_theme/types.zig", mod05);
-    accept07_mod.addImport("../06_markup_style/types.zig", mod06);
+    accept07_mod.addImport("../03/types.zig", mod03);
+    accept07_mod.addImport("../05/types.zig", mod05);
+    accept07_mod.addImport("../06/types.zig", mod06);
     accept07_mod.addImport("../02_text/types.zig", mod02);
     accept07_mod.addImport("../app/font_family.zig", mod_font_family);
     const accept07 = b.addTest(.{
@@ -488,8 +488,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept08_mod.addImport("types.zig", mod08);
-    accept08_mod.addImport("../07_components/types.zig", mod07);
-    accept08_mod.addImport("../05_theme/types.zig", mod05);
+    accept08_mod.addImport("../07/types.zig", mod07);
+    accept08_mod.addImport("../05/types.zig", mod05);
     const accept08 = b.addTest(.{
         .name = "08-acceptance-test",
         .root_module = accept08_mod,
@@ -926,7 +926,7 @@ pub fn build(b: *std.Build) void {
     // mod07 transitively brings in mod02 (stb_truetype C code) — add them explicitly
     // to ensure the test binary links correctly.
     binding_test_mod.addImport("../07/types.zig", mod07);
-    binding_test_mod.addImport("../../docs/specs/05.types.zig", mod05);
+    binding_test_mod.addImport("../05/types.zig", mod05);
     binding_test_mod.addImport("../06/types.zig", mod06);
     binding_test_mod.addImport("../03/types.zig", mod03);
     binding_test_mod.addIncludePath(b.path("deps"));
@@ -1386,8 +1386,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    high_contrast_test_mod.addImport("../../docs/specs/05.types.zig", mod05);
-    high_contrast_test_mod.addImport("../03_element_store/types.zig", mod03);
+    high_contrast_test_mod.addImport("../05/types.zig", mod05);
+    high_contrast_test_mod.addImport("../03/types.zig", mod03);
     const high_contrast_test = b.addTest(.{ .name = "high-contrast-test", .root_module = high_contrast_test_mod });
     b.default_step.dependOn(&high_contrast_test.step);
     const run_high_contrast_test = b.addRunArtifact(high_contrast_test);

@@ -9,7 +9,7 @@
 //! spec.md "Build-order correction"), so this import is legal.
 
 const std = @import("std");
-const store = @import("../03_element_store/types.zig");
+const store = @import("./03.types.zig");
 
 pub const Insets = store.Insets;
 
