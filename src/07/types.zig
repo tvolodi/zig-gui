@@ -1242,7 +1242,13 @@ pub const Scene = struct {
                 const cmp_row_ptr: *anyopaque = @ptrCast(row_base + @as(usize, cmp_row) * rows_data.row_size);
                 const cmp_len = rows_data.cell_fn(cmp_row_ptr, col, &buf_b);
                 const cmp_text = buf_b[0..cmp_len];
-                const less = std.mem.lessThan(u8, key_text, cmp_text);
+                // Numeric sort when both values parse as integers; else lexicographic.
+                const key_num = std.fmt.parseInt(i64, key_text, 10) catch null;
+                const cmp_num = std.fmt.parseInt(i64, cmp_text, 10) catch null;
+                const less = if (key_num != null and cmp_num != null)
+                    key_num.? < cmp_num.?
+                else
+                    std.mem.lessThan(u8, key_text, cmp_text);
                 const should_swap = if (ascending) less else !less;
                 if (!should_swap) break;
                 ts.sorted_indices.items[j] = ts.sorted_indices.items[j - 1];

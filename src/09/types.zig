@@ -160,11 +160,13 @@ fn toColor09(col: theme_mod.Color) platform.Color09 {
 // ---------------------------------------------------------------------------
 
 /// Convert a floating-point layout Rect to an integer ScissorRect, clamping to [0, max].
+/// Floors top-left and ceils bottom-right so that sub-pixel content at the edges is
+/// included rather than clipped by integer rounding.
 pub fn rectToScissor(r: store_mod.Rect) ScissorRect {
-    const x = @max(0, @as(i32, @intFromFloat(r.x)));
-    const y = @max(0, @as(i32, @intFromFloat(r.y)));
-    const x2 = @max(x, @as(i32, @intFromFloat(r.x + r.w)));
-    const y2 = @max(y, @as(i32, @intFromFloat(r.y + r.h)));
+    const x = @max(0, @as(i32, @intFromFloat(@floor(r.x))));
+    const y = @max(0, @as(i32, @intFromFloat(@floor(r.y))));
+    const x2 = @max(x, @as(i32, @intFromFloat(@ceil(r.x + r.w))));
+    const y2 = @max(y, @as(i32, @intFromFloat(@ceil(r.y + r.h))));
     return .{
         .x = x,
         .y = y,
@@ -410,7 +412,7 @@ pub fn buildDrawList(
             const content_h = ss.content_height;
             const container_h = if (ss.container_height > 0) ss.container_height else computed.h;
             if (content_h > container_h and container_h > 0) {
-                const bar_w: f32 = 10.0;
+                const bar_w: f32 = 14.0;
                 const track_x = computed.x + computed.w - bar_w;
                 const track_y = computed.y;
                 const track_h = computed.h;
@@ -581,8 +583,8 @@ pub fn buildDrawList(
                 const cl_eff_start = if (cl_start <= @as(u32, @intCast(text_content.len))) cl_start else @as(u32, @intCast(text_content.len));
                 const line_text_for_cursor = if (cl_eff_start <= cl_eff_end) text_content[cl_eff_start..cl_eff_end] else "";
                 const cursor_in_line = if (inp.cursor >= cl_eff_start) inp.cursor - cl_eff_start else 0;
-                const px_u16: u16 = @intFromFloat(style.font_size);
-                const cursor_x = computeTextX(computed.x, line_text_for_cursor, cursor_in_line, px_u16, atlas);
+                const px_u16: u16 = text_mod.fontSizePx(style.font_size);
+                const cursor_x = computeTextX(computed.x, line_text_for_cursor, cursor_in_line, px_u16, atlas, ta_font);
                 const cursor_y = computed.y + @as(f32, @floatFromInt(cursor_line)) * line_h - ts.scroll_y;
                 try list.append(alloc, .{ .filled_rect = .{
                     .rect = .{ .x = cursor_x, .y = cursor_y + 2.0, .w = 1.5, .h = line_h - 4.0 },
@@ -674,11 +676,10 @@ pub fn buildDrawList(
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
-                    // Buttons: center text horizontally. Measure using atlas bitmap widths as a
-                    // proxy for advance; use full computed rect as clip zone to avoid padding clipping.
+                    // Buttons: center text horizontally. Use font advance metrics for accuracy.
                     const text_rect = if (kind == .button) blk: {
-                        const px_u16: u16 = @intFromFloat(style.font_size);
-                        const text_w = computeTextX(0, str, @intCast(str.len), px_u16, atlas);
+                        const px_u16: u16 = text_mod.fontSizePx(style.font_size);
+                        const text_w = computeTextX(0, str, @intCast(str.len), px_u16, atlas, elem_font);
                         const offset_x: f32 = if (text_w > 0 and text_w < computed.w)
                             @round((computed.w - text_w) * 0.5)
                         else
@@ -736,8 +737,8 @@ pub fn buildDrawList(
                     }
                 }
                 if (inp.active) {
-                    const px_u16: u16 = @intFromFloat(style.font_size);
-                    const cursor_x = computeTextX(inp_x, inp.text.items, inp.cursor, px_u16, atlas);
+                    const px_u16: u16 = text_mod.fontSizePx(style.font_size);
+                    const cursor_x = computeTextX(inp_x, inp.text.items, inp.cursor, px_u16, atlas, inp_font);
                     try list.append(alloc, .{ .filled_rect = .{
                         .rect = .{ .x = cursor_x, .y = computed.y + 2.0, .w = 1.5, .h = computed.h - 4.0 },
                         .color = .{ .r = 30, .g = 30, .b = 30, .a = 220 },
@@ -1212,6 +1213,32 @@ pub fn buildDrawList(
                     }
                 }
 
+                // Scrollbar — only when content exceeds view.
+                if (ts.rows) |rows_data| {
+                    const view_h = computed.h - header_h;
+                    const content_h = ts.row_height * @as(f32, @floatFromInt(rows_data.row_count));
+                    if (content_h > view_h and view_h > 0) {
+                        const sb_w: f32 = 6.0;
+                        const sb_x = computed.x + computed.w - sb_w;
+                        const thumb_ratio = view_h / content_h;
+                        const thumb_h = @max(20.0, view_h * thumb_ratio);
+                        const max_scroll = content_h - view_h;
+                        const thumb_y = computed.y + header_h + (ts.scroll_y / max_scroll) * (view_h - thumb_h);
+                        // Track
+                        try list.append(alloc, .{ .filled_rect = .{
+                            .rect = .{ .x = sb_x, .y = computed.y + header_h, .w = sb_w, .h = view_h },
+                            .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha)),
+                            .radius = 3,
+                        } });
+                        // Thumb
+                        try list.append(alloc, .{ .filled_rect = .{
+                            .rect = .{ .x = sb_x + 1.0, .y = thumb_y, .w = sb_w - 2.0, .h = thumb_h },
+                            .color = toColor09(applyOpacity(tokens.border_strong, effective_alpha)),
+                            .radius = 3,
+                        } });
+                    }
+                }
+
                 // Restore scissor.
                 try list.append(alloc, .restore_scissor);
             },
@@ -1291,14 +1318,23 @@ fn textareaLineOfByte(line_starts: []const u32, offset: u32) u32 {
 }
 
 /// Compute the X pixel position of a cursor at `cursor_pos` bytes into `text_bytes`.
-fn computeTextX(base_x: f32, text_bytes: []const u8, cursor_pos: u32, px: u16, atlas: *GlyphAtlas) f32 {
+/// When `font` is non-null uses font advance metrics for accuracy; falls back to atlas
+/// bitmap widths when the font is unavailable (e.g. in unit tests with stub fonts).
+fn computeTextX(base_x: f32, text_bytes: []const u8, cursor_pos: u32, px: u16, atlas: *GlyphAtlas, font: ?*text_mod.Font) f32 {
     var x = base_x;
+    const px_f = @as(f32, @floatFromInt(px));
     var iter = std.unicode.Utf8Iterator{ .bytes = text_bytes, .i = 0 };
     var byte_pos: u32 = 0;
     while (byte_pos < cursor_pos) {
         const cp = iter.nextCodepoint() orelse break;
         const cp_len = std.unicode.utf8CodepointSequenceLength(cp) catch 1;
         byte_pos += @as(u32, @intCast(cp_len));
+        if (font) |f| {
+            if (f._valid) {
+                x += f.advance(cp, px_f);
+                continue;
+            }
+        }
         const key = text_mod.GlyphKey{ .codepoint = cp, .px = px, .variant = .regular };
         if (atlas.lookup(key)) |uv_rect| {
             x += @as(f32, @floatFromInt(uv_rect.w));
@@ -1394,7 +1430,7 @@ fn emitGlyphs(
     const atlas_h = @as(f32, @floatFromInt(atlas.height));
     if (atlas_w == 0 or atlas_h == 0) return;
 
-    const px_u16: u16 = @intFromFloat(style.font_size);
+    const px_u16: u16 = text_mod.fontSizePx(style.font_size);
     var pen_x: f32 = computed.x;
     var fm: ?text_mod.FontMetrics = null;
     var baseline_y: f32 = computed.y;
