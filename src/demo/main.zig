@@ -31,8 +31,29 @@ fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
 // Module-level toast manager pointer — set in main() so the per-frame tick can reach it.
 var _g_toasts: ?*ToastManager = null;
 
+// --click-idx / --click-count support: fire N synthetic button clicks on a given element
+// index on the second rendered frame (after nav drains). Used for automated screenshot testing.
+var _click_idx:   u32  = 0;
+var _click_count: u32  = 0;
+var _click_fired: bool = false;
+
 /// Per-frame app-level tick: update toast expiry, tooltip visibility, and rebuild overlay slots.
 fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
+    // Synthetic click injection: fire _click_count clicks on _click_idx once, on frame 2+
+    // (frame 1 = nav drain; frame 2 = scene stable).
+    if (!_click_fired and _click_count > 0 and ai.frame_count >= 2) {
+        _click_fired = true;
+        const scene = &ai.scene;
+        if (_click_idx < scene._button_state.items.len) {
+            var n: u32 = 0;
+            while (n < _click_count) : (n += 1) {
+                if (scene._button_state.items[_click_idx].on_click) |cb| {
+                    cb.call(cb.ptr);
+                }
+            }
+            scene.elements.markAllDirty();
+        }
+    }
     const fb = ai.platform.framebufferSize();
     const w = @as(f32, @floatFromInt(fb.width));
     const h = @as(f32, @floatFromInt(fb.height));
@@ -73,6 +94,9 @@ pub fn main(init: std.process.Init) !void {
     var screenshot_frames: u32 = 0;
     var screenshot_out: []const u8 = "testdata/screenshot_actual.png";
     var initial_screen: []const u8 = "home";
+    _click_idx   = 0;
+    _click_count = 0;
+    _click_fired = false;
     {
         var i: usize = 1;
         while (i < proc_args.len) : (i += 1) {
@@ -85,6 +109,12 @@ pub fn main(init: std.process.Init) !void {
             } else if (std.mem.eql(u8, proc_args[i], "--initial-screen") and i + 1 < proc_args.len) {
                 i += 1;
                 initial_screen = proc_args[i];
+            } else if (std.mem.eql(u8, proc_args[i], "--click-idx") and i + 1 < proc_args.len) {
+                i += 1;
+                _click_idx = std.fmt.parseInt(u32, proc_args[i], 10) catch 0;
+            } else if (std.mem.eql(u8, proc_args[i], "--click-count") and i + 1 < proc_args.len) {
+                i += 1;
+                _click_count = std.fmt.parseInt(u32, proc_args[i], 10) catch 0;
             }
         }
     }
