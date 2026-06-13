@@ -52,6 +52,9 @@ pub const TrackSize = union(enum) {
 
 pub const Display = enum { block, flex, grid, none }; // none added (R51)
 pub const FlexDirection = enum { row, column };
+
+// M12 RC0/RC1 — positioning mode
+pub const Position = enum { static, absolute, sticky };
 pub const JustifyContent = enum { start, center, end, space_between, space_around };
 pub const AlignItems = enum { start, center, end, stretch };
 pub const AlignSelf = enum { auto, start, center, end, stretch }; // new (R51)
@@ -108,6 +111,24 @@ pub const LayoutNode = struct {
 
     /// OUTPUT of the layout engine. Absolute px relative to the root origin.
     computed: Rect = .{},
+
+    // M12 RC0 — absolute positioning
+    position: Position = .static,
+    /// Offset from nearest positioned ancestor when position == .absolute.
+    /// .auto means "not set" — the element is placed at its natural position.
+    inset_top:    Dimension = .auto,
+    inset_right:  Dimension = .auto,
+    inset_bottom: Dimension = .auto,
+    inset_left:   Dimension = .auto,
+
+    // M12 RC2 — flex wrapping
+    flex_wrap: bool = false,
+
+    // M12 RC3 — aspect ratio. 0 = no constraint; otherwise h = w / aspect_ratio.
+    aspect_ratio: f32 = 0,
+
+    // M12 RC4 — z-index within siblings. 0 = default (document order).
+    z_index: i16 = 0,
 };
 
 // ===========================================================================

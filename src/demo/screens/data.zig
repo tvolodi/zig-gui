@@ -89,10 +89,10 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 5); // 5 = Data button
 
-    // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=scroll,
-    //      14=inner-col,15=body,16=table_sect,17=sub,18=table,19=sep2
-    scene.setTableData(18, &_table_rows);
-    scene.setTableColumns(18, &_columns);
+    // DFS: 0=root,1=sidebar,2-10=btns,11=content,12=heading,13=sep,14=scroll,
+    //      15=inner-col,16=body,17=table_sect,18=sub,19=table,20=sep2
+    scene.setTableData(19, &_table_rows);
+    scene.setTableColumns(19, &_columns);
 
 
 }

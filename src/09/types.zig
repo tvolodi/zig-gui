@@ -353,10 +353,46 @@ pub fn buildDrawList(
         const translate_x = entry.element.translate_x;
         const translate_y = entry.element.translate_y;
         const raw_computed = s.get(id).computed;
+
+        // M12 RC1 — sticky positioning draw-time offset.
+        // For sticky elements: find the nearest scroll-container ancestor, compute the
+        // clamped y, store the delta in _sticky_offset_y, and adjust the drawn position.
+        var sticky_dy: f32 = 0;
+        if (s.get(id).position == .sticky) {
+            // Walk parent chain to find a scrollview.
+            var scroll_y_of_container: f32 = 0;
+            var container_computed_y: f32 = 0;
+            var anc = s.parentOf(id);
+            while (anc) |anc_id| {
+                if (anc_id.index < scene._kind.items.len and
+                    scene._kind.items[anc_id.index] == .scrollview)
+                {
+                    if (anc_id.index < scene._scroll_state.items.len) {
+                        scroll_y_of_container = scene._scroll_state.items[anc_id.index].scroll_y;
+                        container_computed_y = s.get(anc_id).computed.y;
+                    }
+                    break;
+                }
+                anc = s.parentOf(anc_id);
+            }
+            const inset_top_px: f32 = switch (s.get(id).inset_top) {
+                .px => |v| v,
+                else => 0,
+            };
+            // natural_y is the element's y position relative to the container's viewport top.
+            const natural_y = raw_computed.y - container_computed_y - scroll_y_of_container;
+            const sticky_clamped_y = @max(natural_y, inset_top_px);
+            sticky_dy = sticky_clamped_y - natural_y;
+            // Write to _sticky_offset_y for hit-test path.
+            if (id.index < scene._sticky_offset_y.items.len) {
+                scene._sticky_offset_y.items[id.index] = sticky_dy;
+            }
+        }
+
         // R42: Apply scroll translation — offset children's rects when inside a scrollview.
         const computed = store_mod.Rect{
             .x = raw_computed.x - translate_x,
-            .y = raw_computed.y - translate_y,
+            .y = raw_computed.y - translate_y + sticky_dy,
             .w = raw_computed.w,
             .h = raw_computed.h,
         };
@@ -1372,13 +1408,51 @@ fn pushChildrenReversed(
     while (it.next()) |child| {
         if (n < buf.len) {
             buf[n] = child;
-            n += 1;
         }
+        n += 1;
     }
-    var i = n;
-    while (i > 0) {
-        i -= 1;
-        try stack.append(alloc, .{ .element = .{ .id = buf[i], .alpha = alpha, .translate_x = translate_x, .translate_y = translate_y } });
+
+    // M12 RC4 — z-index sort: stable insertion sort by z_index ascending.
+    // Only sort when all children fit in buf (i.e. n <= 256).
+    // Higher z_index items end up at the end of buf, so they are pushed to the
+    // LIFO stack first (in the reversed pass below), making them processed last
+    // and drawn on top.
+    if (n > 0 and n <= 256) {
+        var si: usize = 1;
+        while (si < n) : (si += 1) {
+            const key = buf[si];
+            const key_z = s.get(key).z_index;
+            var sj: usize = si;
+            while (sj > 0 and s.get(buf[sj - 1]).z_index > key_z) : (sj -= 1) {
+                buf[sj] = buf[sj - 1];
+            }
+            buf[sj] = key;
+        }
+
+        // Push in reverse so that the first child (lowest z_index) is on top of the stack
+        // (processed first = drawn first = behind). Highest z_index ends up at bottom of
+        // the reversed range (processed last = drawn last = on top).
+        var i = n;
+        while (i > 0) {
+            i -= 1;
+            try stack.append(alloc, .{ .element = .{ .id = buf[i], .alpha = alpha, .translate_x = translate_x, .translate_y = translate_y } });
+        }
+    } else if (n > 256) {
+        // Too many children for the stack buffer — emit in document order (no sort).
+        // Re-walk the child list so we visit all children, not just the first 256.
+        var it2 = s.childrenOf(id);
+        // Collect into a heap-allocated slice so we can push in reverse for correct
+        // painter's-algorithm ordering (first child drawn first = behind later siblings).
+        var dyn = try std.ArrayListUnmanaged(store_mod.ElementId).initCapacity(alloc, n);
+        defer dyn.deinit(alloc);
+        while (it2.next()) |child| {
+            try dyn.append(alloc, child);
+        }
+        var i = dyn.items.len;
+        while (i > 0) {
+            i -= 1;
+            try stack.append(alloc, .{ .element = .{ .id = dyn.items[i], .alpha = alpha, .translate_x = translate_x, .translate_y = translate_y } });
+        }
     }
 }
 

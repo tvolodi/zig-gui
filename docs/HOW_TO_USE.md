@@ -143,6 +143,20 @@ Use `scene.toggleAccordion(idx)` to open/close programmatically. `scene.isAccord
 | `col-span-N` | grid column span = N |
 | `row-span-N` | grid row span = N |
 | `opacity-0` through `opacity-100` | alpha = N / 100 |
+| `absolute` | `position: absolute` (remove from flow) |
+| `static` | `position: static` (default, in flow) |
+| `sticky` | `position: sticky` (sticks to top on scroll) |
+| `inset-N` | all four insets = N × 4 px |
+| `top-N` | inset top = N × 4 px |
+| `right-N` | inset right = N × 4 px |
+| `bottom-N` | inset bottom = N × 4 px |
+| `left-N` | inset left = N × 4 px |
+| `flex-wrap` | `flex_wrap = true` (wrap children to new lines) |
+| `flex-nowrap` | `flex_wrap = false` (default, single line) |
+| `aspect-square` | `aspect_ratio = 1.0` (square) |
+| `aspect-video` | `aspect_ratio = 16/9` (widescreen) |
+| `aspect-auto` | `aspect_ratio = 0` (no constraint) |
+| `z-0` / `z-10` / `z-20` / `z-30` / `z-40` / `z-50` | `z_index = N` (draw order within siblings) |
 
 **Attribute bindings:** `text="{bind some.path}"` records the path as a `bind` variant of
 `AttrValue`; it is NOT evaluated by the parser or scene — evaluation is the caller's job.

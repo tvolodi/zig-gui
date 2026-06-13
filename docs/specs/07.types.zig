@@ -318,6 +318,9 @@ pub const Scene = struct {
     // M11 RB5 — Per-element pinch callback.
     _pinch: std.ArrayListUnmanaged(?PinchCallbackFn) = .{},
 
+    // M12 RC1 — per-element sticky draw-time y-offset (0 = not sticky or not active).
+    _sticky_offset_y: std.ArrayListUnmanaged(f32) = .{},
+
     gpa: std.mem.Allocator,
 
     pub fn init(gpa: std.mem.Allocator) Scene {

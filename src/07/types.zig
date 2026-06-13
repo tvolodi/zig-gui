@@ -554,6 +554,9 @@ pub const Scene = struct {
     // RB5 — Per-element pinch callbacks (null = element ignores pinch).
     _pinch: std.ArrayListUnmanaged(?PinchCallbackFn) = .empty,
 
+    // M12 RC1 — per-element sticky draw-time y-offset (0 = not sticky or not active).
+    _sticky_offset_y: std.ArrayListUnmanaged(f32) = .empty,
+
     // R93 — Class string parallel array for theme live-swap (one entry per element).
     // Stores the `NodeDesc.classes` slice (owned by the markup arena — no copy needed).
     // Used by rebuildStyles to re-run class resolution after a theme change.
@@ -619,6 +622,8 @@ pub const Scene = struct {
         self._right_click.deinit(self.gpa);
         self._double_click.deinit(self.gpa);
         self._pinch.deinit(self.gpa);
+        // M12 RC1
+        self._sticky_offset_y.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -661,6 +666,8 @@ pub const Scene = struct {
         self._right_click.clearRetainingCapacity();
         self._double_click.clearRetainingCapacity();
         self._pinch.clearRetainingCapacity();
+        // M12 RC1
+        self._sticky_offset_y.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -1739,6 +1746,30 @@ pub const Scene = struct {
         if (resolved.layout.align_self != empty.layout.align_self)
             final_layout.align_self = resolved.layout.align_self;
 
+        // M12: positioning fields
+        if (resolved.layout.position != empty.layout.position)
+            final_layout.position = resolved.layout.position;
+        if (!dimensionEq(resolved.layout.inset_top, empty.layout.inset_top))
+            final_layout.inset_top = resolved.layout.inset_top;
+        if (!dimensionEq(resolved.layout.inset_right, empty.layout.inset_right))
+            final_layout.inset_right = resolved.layout.inset_right;
+        if (!dimensionEq(resolved.layout.inset_bottom, empty.layout.inset_bottom))
+            final_layout.inset_bottom = resolved.layout.inset_bottom;
+        if (!dimensionEq(resolved.layout.inset_left, empty.layout.inset_left))
+            final_layout.inset_left = resolved.layout.inset_left;
+
+        // M12: flex-wrap
+        if (resolved.layout.flex_wrap != empty.layout.flex_wrap)
+            final_layout.flex_wrap = resolved.layout.flex_wrap;
+
+        // M12: aspect-ratio
+        if (resolved.layout.aspect_ratio != empty.layout.aspect_ratio)
+            final_layout.aspect_ratio = resolved.layout.aspect_ratio;
+
+        // M12: z-index
+        if (resolved.layout.z_index != empty.layout.z_index)
+            final_layout.z_index = resolved.layout.z_index;
+
         // R51: margin (compare each field)
         const emm = empty.layout.margin;
         const rm = resolved.layout.margin;
@@ -2032,6 +2063,13 @@ pub const Scene = struct {
             self._pinch.items.len = needed;
         }
         self._pinch.items[id.index] = null;
+
+        // M12 RC1: sticky offset (0 = not sticky or not yet active)
+        try self._sticky_offset_y.ensureTotalCapacity(self.gpa, needed);
+        if (self._sticky_offset_y.items.len <= id.index) {
+            self._sticky_offset_y.items.len = needed;
+        }
+        self._sticky_offset_y.items[id.index] = 0;
 
         // RB0: parse cursor= attribute
         for (desc.attrs) |attr| {

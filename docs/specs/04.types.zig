@@ -29,6 +29,7 @@ pub const AlignSelf = store.AlignSelf;
 pub const MarginValue = store.MarginValue;
 pub const Margin = store.Margin;
 pub const LayoutNode = store.LayoutNode;
+pub const Position = store.Position;
 
 // ---------------------------------------------------------------------------
 // Public API — the single entry point (INV-5.1)
@@ -103,7 +104,7 @@ fn solveNode(
     const node_h_raw = resolveHeight(s.get(id), avail, avail.max_h);
     // For block elements with height=auto (resolves to 0), use measured height as
     // the intrinsic size so Text/Button nodes get their natural content height.
-    const node_h = blk: {
+    const node_h_pre_ar = blk: {
         const disp_check = s.get(id).display;
         if (disp_check == .block and node_h_raw == 0) {
             if (s.get(id).measured) |m| break :blk m.h;
@@ -114,7 +115,14 @@ fn solveNode(
     // Clamp to non-negative and enforce parent's minimum constraints.
     // avail.min_w/min_h come from the parent (e.g. stretch in block/flex) and must be honoured.
     const w = @max(avail.min_w, node_w);
-    const h = @max(avail.min_h, node_h);
+
+    // M12 RC3 — aspect ratio: if aspect_ratio > 0 and height is .auto, derive height from width.
+    // Only applies when the explicit height field is .auto (resolves to 0).
+    const h_pre_clamp: f32 = if (s.get(id).aspect_ratio > 0 and s.get(id).height == .auto)
+        w / s.get(id).aspect_ratio
+    else
+        node_h_pre_ar;
+    const h = @max(avail.min_h, h_pre_clamp);
 
     // Determine display type and lay out children
     const disp = s.get(id).display;
@@ -165,8 +173,12 @@ fn solveBlock(
     var cursor_y: f32 = origin_y + padding.top;
     var total_content_h: f32 = 0.0;
 
+    // First pass: normal-flow children only (skip absolute).
     var it = s.childrenOf(id);
     while (it.next()) |child_id| {
+        // M12 RC0: skip absolutely-positioned children in normal flow.
+        if (s.get(child_id).position == .absolute) continue;
+
         const content_h = @max(0.0, container_h - padding.top - padding.bottom);
         const child = s.get(child_id);
         const child_margin = child.margin;
@@ -212,7 +224,87 @@ fn solveBlock(
 
     // Height: if declared, use it; otherwise content-driven
     const actual_h = if (container_h > 0) container_h else total_content_h + padding.top + padding.bottom;
+
+    // Write container rect before second pass so absolute children can read it.
+    s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = container_w, .h = actual_h };
+
+    // M12 RC0: Second pass — place absolutely-positioned children.
+    placeAbsoluteChildren(s, id, origin_x, origin_y, container_w, actual_h);
+
     return Size{ .w = container_w, .h = actual_h };
+}
+
+/// M12 RC0 — Place all direct children with position == .absolute within their containing block.
+/// The containing block is `(cb_x, cb_y, cb_w, cb_h)` (the parent's computed rect).
+fn placeAbsoluteChildren(
+    s: *ElementStore,
+    id: ElementId,
+    cb_x: f32,
+    cb_y: f32,
+    cb_w: f32,
+    cb_h: f32,
+) void {
+    var it = s.childrenOf(id);
+    while (it.next()) |child_id| {
+        if (s.get(child_id).position != .absolute) continue;
+
+        const child = s.get(child_id);
+
+        // Resolve insets (.auto → 0 as unset).
+        const inset_left:   f32 = switch (child.inset_left)   { .px => |v| v, else => 0 };
+        const inset_right:  f32 = switch (child.inset_right)  { .px => |v| v, else => 0 };
+        const inset_top:    f32 = switch (child.inset_top)    { .px => |v| v, else => 0 };
+        const inset_bottom: f32 = switch (child.inset_bottom) { .px => |v| v, else => 0 };
+
+        const left_set  = child.inset_left  != .auto;
+        const right_set = child.inset_right != .auto;
+        const top_set   = child.inset_top   != .auto;
+        const bottom_set = child.inset_bottom != .auto;
+
+        // Resolve width
+        const child_w: f32 = switch (child.width) {
+            .px => |v| v,
+            .percent => |v| cb_w * (v / 100.0),
+            .auto => if (left_set and right_set)
+                @max(0.0, cb_w - inset_left - inset_right)
+            else if (child.measured) |m| m.w
+            else 0.0,
+        };
+
+        // Resolve height
+        const child_h: f32 = switch (child.height) {
+            .px => |v| v,
+            .percent => |v| cb_h * (v / 100.0),
+            .auto => if (top_set and bottom_set)
+                @max(0.0, cb_h - inset_top - inset_bottom)
+            else if (child.measured) |m| m.h
+            else 0.0,
+        };
+
+        // Position: inset_right places right edge N px from containing block right.
+        const child_x: f32 = if (left_set)
+            cb_x + inset_left
+        else if (right_set)
+            cb_x + cb_w - inset_right - child_w
+        else
+            cb_x;
+
+        const child_y: f32 = if (top_set)
+            cb_y + inset_top
+        else if (bottom_set)
+            cb_y + cb_h - inset_bottom - child_h
+        else
+            cb_y;
+
+        const child_avail = Constraints{
+            .min_w = child_w,
+            .max_w = child_w,
+            .min_h = child_h,
+            .max_h = child_h,
+        };
+
+        _ = solveNode(s, child_id, child_avail, child_x, child_y);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +338,7 @@ fn solveFlex(
     const gap = node.gap;
     const justify = node.justify_content;
     const align_items_val = node.align_items;
+    const do_wrap = node.flex_wrap and direction == .row; // RC2: wrap only for row direction
 
     // Content box dimensions
     const content_w = @max(0.0, container_w - padding.left - padding.right);
@@ -264,6 +357,8 @@ fn solveFlex(
         var it = s.childrenOf(id);
         while (it.next()) |child_id| {
             if (n >= MAX_FLEX_CHILDREN) break;
+            // M12 RC0: skip absolutely-positioned children in normal flex flow.
+            if (s.get(child_id).position == .absolute) continue;
             const child = s.get(child_id);
             const flex_basis = child.flex_basis;
 
@@ -320,8 +415,11 @@ fn solveFlex(
                 .stretch => .stretch,
             };
 
-            // stretch alignment overrides cross size to fill container
-            if (effective_align == .stretch) {
+            // stretch alignment overrides cross size to fill container.
+            // Only applies when the container has a definite (non-zero) cross size;
+            // when cross_size == 0 the container is auto-sized and we must preserve
+            // the child's intrinsic size so max_child_cross can drive auto-height.
+            if (effective_align == .stretch and cross_size > 0) {
                 cross = cross_size;
             }
 
@@ -391,6 +489,16 @@ fn solveFlex(
     }
 
     // --- Phase 3: place children ---
+
+    // M12 RC2: flex-wrap path (row direction only).
+    if (do_wrap) {
+        const actual_size = solveFlexWrap(s, id, children, n, container_w, container_h, origin_x, origin_y, padding, gap, align_items_val, justify, main_size, cross_size);
+        // Write container rect before absolute second pass.
+        s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = actual_size.w, .h = actual_size.h };
+        placeAbsoluteChildren(s, id, origin_x, origin_y, actual_size.w, actual_size.h);
+        return actual_size;
+    }
+
     // Compute remaining free space after final sizes
     var total_final: f32 = 0.0;
     for (children) |c| total_final += c.final_size;
@@ -472,20 +580,24 @@ fn solveFlex(
         const child_x = if (direction == .row) child_main_pos else cross_pos;
         const child_y = if (direction == .row) cross_pos else child_main_pos;
 
-        // For the child's own size resolution, build constraints
+        // For the child's own size resolution, build constraints.
+        // Stretch constrains to cross_size only when the container has a definite
+        // (non-zero) cross size; with cross_size == 0 (auto container) the child
+        // must be free to report its intrinsic size.
+        const stretch_definite = effective_child_align == .stretch and cross_size > 0;
         const child_avail: Constraints = if (direction == .row)
             Constraints{
                 .min_w = c.final_size,
                 .max_w = c.final_size,
-                .min_h = if (effective_child_align == .stretch) cross_size else 0.0,
-                .max_h = if (effective_child_align == .stretch) cross_size else std.math.inf(f32),
+                .min_h = if (stretch_definite) cross_size else 0.0,
+                .max_h = if (stretch_definite) cross_size else std.math.inf(f32),
             }
         else
             Constraints{
                 .min_h = c.final_size,
                 .max_h = c.final_size,
-                .min_w = if (effective_child_align == .stretch) cross_size else 0.0,
-                .max_w = if (effective_child_align == .stretch) cross_size else std.math.inf(f32),
+                .min_w = if (stretch_definite) cross_size else 0.0,
+                .max_w = if (stretch_definite) cross_size else std.math.inf(f32),
             };
 
         // Recurse into child (lay out its subtree)
@@ -522,6 +634,146 @@ fn solveFlex(
         children_main_size + padding.left + padding.right
     else
         max_child_cross + padding.left + padding.right;
+
+    // Write container rect before absolute second pass.
+    s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = actual_w, .h = actual_h };
+    placeAbsoluteChildren(s, id, origin_x, origin_y, actual_w, actual_h);
+
+    return Size{ .w = actual_w, .h = actual_h };
+}
+
+// ---------------------------------------------------------------------------
+// M12 RC2 — Flex-wrap layout (row direction only)
+// ---------------------------------------------------------------------------
+
+/// Maximum lines we support in a wrapping flex container.
+const MAX_FLEX_LINES = 32;
+
+/// Solve a wrapping row flex container. Breaks children into lines, sizes each line
+/// independently, and stacks lines vertically.
+fn solveFlexWrap(
+    s: *ElementStore,
+    id: ElementId,
+    children: []FlexChildData,
+    n: usize,
+    container_w: f32,
+    container_h: f32,
+    origin_x: f32,
+    origin_y: f32,
+    padding: store.Insets,
+    gap: f32,
+    align_items_val: AlignItems,
+    justify: JustifyContent,
+    main_size: f32,
+    cross_size: f32,
+) Size {
+    _ = id;         // container id not needed; children addressed by their own ids
+    _ = cross_size; // row wrap: cross is height; handled via lines
+    _ = justify;    // per-line justify uses default start for now
+
+    // --- Line-breaking pass ---
+    // Each "line" is a slice [line_start, line_end) of children[].
+    const MAX_LINE_STARTS = MAX_FLEX_LINES + 1;
+    var line_starts: [MAX_LINE_STARTS]usize = undefined;
+    var line_count: usize = 0;
+    line_starts[0] = 0;
+
+    var line_width: f32 = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const child_base = children[i].base_size;
+        const needed = if (line_width == 0) child_base else line_width + gap + child_base;
+        if (needed > main_size and line_width > 0 and line_count + 1 < MAX_FLEX_LINES) {
+            // Break: start a new line.
+            line_count += 1;
+            line_starts[line_count] = i;
+            line_width = child_base;
+        } else {
+            line_width = needed;
+        }
+    }
+    // Close last line.
+    line_count += 1;
+    line_starts[line_count] = n;
+
+    // --- Place each line ---
+    var cursor_y: f32 = origin_y + padding.top;
+    var max_line_w: f32 = 0;
+    var total_cross: f32 = 0;
+
+    var li: usize = 0;
+    while (li < line_count) : (li += 1) {
+        const ls = line_starts[li];
+        const le = line_starts[li + 1];
+        const line_n = le - ls;
+        if (line_n == 0) continue;
+
+        // Compute per-line free space and apply flex-grow within this line.
+        var line_base_total: f32 = 0;
+        for (children[ls..le]) |c| line_base_total += c.base_size;
+        const line_gap_total: f32 = if (line_n > 1) gap * @as(f32, @floatFromInt(line_n - 1)) else 0.0;
+        const line_free = main_size - line_base_total - line_gap_total;
+
+        // Apply flex_grow within line.
+        var total_grow: f32 = 0;
+        for (children[ls..le]) |c| total_grow += s.get(c.id).flex_grow;
+        if (line_free > 0 and total_grow > 0) {
+            for (children[ls..le]) |*c| {
+                const fg = s.get(c.id).flex_grow;
+                if (fg > 0) {
+                    const child = s.get(c.id);
+                    const child_max = child.max_size.w;
+                    c.final_size = @min(c.base_size + (fg / total_grow) * line_free, child_max);
+                }
+            }
+        } else {
+            for (children[ls..le]) |*c| c.final_size = c.base_size;
+        }
+
+        // Find line cross height (max of all children on this line).
+        var line_cross: f32 = 0;
+        for (children[ls..le]) |c| {
+            if (c.cross_size > line_cross) line_cross = c.cross_size;
+        }
+
+        // Place children on this line.
+        var cursor_x: f32 = origin_x + padding.left;
+        for (children[ls..le]) |*c| {
+            const child_node = s.get(c.id);
+            const effective_align: AlignItems = switch (child_node.align_self) {
+                .auto => align_items_val,
+                .start => .start,
+                .center => .center,
+                .end => .end,
+                .stretch => .stretch,
+            };
+            const child_cross_sz = if (effective_align == .stretch) line_cross else c.cross_size;
+            const child_y_offset: f32 = switch (effective_align) {
+                .start, .stretch => 0,
+                .center => (line_cross - c.cross_size) / 2.0,
+                .end => line_cross - c.cross_size,
+            };
+            const child_avail = Constraints{
+                .min_w = c.final_size,
+                .max_w = c.final_size,
+                .min_h = if (effective_align == .stretch) child_cross_sz else 0.0,
+                .max_h = if (effective_align == .stretch) child_cross_sz else std.math.inf(f32),
+            };
+            _ = solveNode(s, c.id, child_avail, cursor_x, cursor_y + child_y_offset);
+            cursor_x += c.final_size + gap;
+        }
+
+        const line_actual_w = cursor_x - gap - origin_x - padding.left;
+        if (line_actual_w > max_line_w) max_line_w = line_actual_w;
+        cursor_y += line_cross + gap;
+        total_cross += line_cross + gap;
+    }
+    // Remove trailing gap.
+    if (line_count > 0 and total_cross >= gap) total_cross -= gap;
+    if (line_count > 0) cursor_y -= gap;
+
+    const actual_w = if (container_w > 0) container_w else max_line_w + padding.left + padding.right;
+    const actual_h = if (container_h > 0) container_h else total_cross + padding.top + padding.bottom;
 
     return Size{ .w = actual_w, .h = actual_h };
 }

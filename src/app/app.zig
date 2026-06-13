@@ -41,10 +41,12 @@ const ParseDiagnostic = if (hot_reload) @import("../06/types.zig").ParseDiagnost
 
 const mod01 = @import("../01/types.zig");
 const mod02 = @import("../02/types.zig");
+const mod03 = @import("../03/types.zig");
 const mod04 = @import("../04/types.zig");
 const mod05 = @import("../05/types.zig");
 const mod07 = @import("../07/types.zig");
 const mod09 = @import("../09/types.zig");
+const store_mod = mod03;
 
 pub const Event = mod01.InputEvent;
 pub const EventQueue = events_mod.EventQueue;
@@ -158,13 +160,50 @@ fn defaultCursorFor(kind: mod07.WidgetKind, disabled: bool) mod01.CursorShape {
 fn hitTest(scene: *const mod07.Scene, x: f32, y: f32) u32 {
     const count = scene.elements.layout.items.len;
     if (count == 0) return mod07.NONE;
+    // M12 RC4 — z-index hit-test: when we find a hit, check if any same-parent sibling
+    // has a higher z_index. If so, that sibling wins (if it also contains the point).
     var i: u32 = @intCast(count);
     while (i > 0) {
         i -= 1;
         if (i < scene._hidden.items.len and scene._hidden.items[i]) continue;
-        const rect = scene.elements.layout.items[i].computed;
-        if (rect.w == 0 or rect.h == 0) continue;
+        const node = &scene.elements.layout.items[i];
+        const raw_rect = node.computed;
+        if (raw_rect.w == 0 or raw_rect.h == 0) continue;
+        // M12 RC1 — adjust hit rect y for sticky elements.
+        const sticky_dy: f32 = if (i < scene._sticky_offset_y.items.len) scene._sticky_offset_y.items[i] else 0;
+        const rect = store_mod.Rect{
+            .x = raw_rect.x,
+            .y = raw_rect.y + sticky_dy,
+            .w = raw_rect.w,
+            .h = raw_rect.h,
+        };
         if (x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h) {
+            // M12 RC4 — check siblings with higher z_index.
+            const parent_idx = scene.elements.parent.items[i];
+            if (parent_idx != store_mod.NONE) {
+                const my_z = node.z_index;
+                var sib_cursor = scene.elements.first_child.items[parent_idx];
+                while (sib_cursor != store_mod.NONE) {
+                    if (sib_cursor != i) {
+                        const sib_node = &scene.elements.layout.items[sib_cursor];
+                        if (sib_node.z_index > my_z) {
+                            const sib_sticky_dy: f32 = if (sib_cursor < scene._sticky_offset_y.items.len) scene._sticky_offset_y.items[sib_cursor] else 0;
+                            const sib_rect = store_mod.Rect{
+                                .x = sib_node.computed.x,
+                                .y = sib_node.computed.y + sib_sticky_dy,
+                                .w = sib_node.computed.w,
+                                .h = sib_node.computed.h,
+                            };
+                            if (x >= sib_rect.x and x < sib_rect.x + sib_rect.w and
+                                y >= sib_rect.y and y < sib_rect.y + sib_rect.h)
+                            {
+                                return sib_cursor;
+                            }
+                        }
+                    }
+                    sib_cursor = scene.elements.next_sibling.items[sib_cursor];
+                }
+            }
             return i;
         }
     }
@@ -1648,8 +1687,13 @@ pub const AppInner = struct {
             if (idx >= self.scene.elements.layout.items.len) continue;
             const scroll = self.scrollOffsetFor(idx);
             const rect = self.scene.elements.layout.items[idx].computed;
+            // M12 RC1 — adjust hit y for sticky elements.
+            const sticky_dy: f32 = if (idx < self.scene._sticky_offset_y.items.len)
+                self.scene._sticky_offset_y.items[idx]
+            else
+                0;
             const vx = rect.x - scroll.x;
-            const vy = rect.y - scroll.y;
+            const vy = rect.y - scroll.y + sticky_dy;
             if (x >= vx and x < vx + rect.w and
                 y >= vy and y < vy + rect.h)
             {

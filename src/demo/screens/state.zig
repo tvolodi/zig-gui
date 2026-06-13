@@ -189,16 +189,16 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 9); // 9 = State button
 
-    // DFS: 0=root, 1=sidebar, 2-9=sidebar btns, 10=content, 11=heading, 12=sep, 13=scroll,
-    //   14=inner-col, 15=body, 16=ctr_sect, 17=ctr_h, 18=ctr_row,
-    //   19=btn_dec, 20=ctr_val, 21=btn_inc, 22=parity_lbl,
-    //   23=Separator, 24=cond_sect, 25=cond_h, 26=cond_cb, 27=detail_card, 28=detail_text
-    const value_idx: u32 = 20;
-    const parity_idx: u32 = 22;
-    const dec_idx: u32 = 19;
-    const inc_idx: u32 = 21;
-    const cond_cb_idx: u32 = 26;
-    const detail_card_idx: u32 = 27;
+    // DFS: 0=root, 1=sidebar, 2-10=sidebar btns, 11=content, 12=heading, 13=sep, 14=scroll,
+    //   15=inner-col, 16=body, 17=ctr_sect, 18=ctr_h, 19=ctr_row,
+    //   20=btn_dec, 21=ctr_val, 22=btn_inc, 23=parity_lbl,
+    //   24=Separator, 25=cond_sect, 26=cond_h, 27=cond_cb, 28=detail_card, 29=detail_text
+    const value_idx: u32 = 21;
+    const parity_idx: u32 = 23;
+    const dec_idx: u32 = 20;
+    const inc_idx: u32 = 22;
+    const cond_cb_idx: u32 = 27;
+    const detail_card_idx: u32 = 28;
 
     _cb_inc = CounterCb{ .scene = scene, .delta = 1,  .value_idx = value_idx, .label_idx = parity_idx };
     _cb_dec = CounterCb{ .scene = scene, .delta = -1, .value_idx = value_idx, .label_idx = parity_idx };

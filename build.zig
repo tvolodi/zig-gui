@@ -1374,6 +1374,31 @@ pub fn build(b: *std.Build) void {
     m11_test_step.dependOn(&run_m11_test.step);
 
     // -----------------------------------------------------------------------
+    // test-m12 — M12 layout extensions acceptance tests (RC0–RC4).
+    //   zig build test-m12 → run M12 tests headless
+    // -----------------------------------------------------------------------
+    const m12_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/m12_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    m12_test_mod.addImport("../01/types.zig", mod01);
+    m12_test_mod.addImport("../03/types.zig", mod03);
+    m12_test_mod.addImport("../04/types.zig", mod04);
+    m12_test_mod.addImport("../05/types.zig", mod05);
+    m12_test_mod.addImport("../06/types.zig", mod06);
+    m12_test_mod.addImport("../07/types.zig", mod07);
+    m12_test_mod.addImport("../09/types.zig", mod09);
+    m12_test_mod.addImport("app.zig", mod_app_impl);
+    m12_test_mod.addIncludePath(b.path("deps"));
+    m12_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    m12_test_mod.link_libc = true;
+    const m12_test = b.addTest(.{ .name = "m12-test", .root_module = m12_test_mod });
+    const run_m12_test = b.addRunArtifact(m12_test);
+    const m12_test_step = b.step("test-m12", "Run M12 layout extension tests (RC0–RC4, headless)");
+    m12_test_step.dependOn(&run_m12_test.step);
+
+    // -----------------------------------------------------------------------
     // run-demo — Showcase Demo Application (DEMO_APP.md).
     //   zig build run-demo → build + run the showcase app
     // -----------------------------------------------------------------------

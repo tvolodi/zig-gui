@@ -25,14 +25,15 @@ pub const DialogManager = app_types.DialogManager;
 pub const GlobalState = struct {
     nav: *Navigator,
     /// Per-screen ctx opaque pointers (set in main.zig after all ctxs are initialized).
-    home_ctx:  ?*anyopaque = null,
-    text_ctx:  ?*anyopaque = null,
-    forms_ctx: ?*anyopaque = null,
-    data_ctx:  ?*anyopaque = null,
-    theme_ctx: ?*anyopaque = null,
-    notif_ctx: ?*anyopaque = null,
+    home_ctx:   ?*anyopaque = null,
+    text_ctx:   ?*anyopaque = null,
+    forms_ctx:  ?*anyopaque = null,
+    data_ctx:   ?*anyopaque = null,
+    theme_ctx:  ?*anyopaque = null,
+    notif_ctx:  ?*anyopaque = null,
     layout_ctx: ?*anyopaque = null,
-    state_ctx: ?*anyopaque = null,
+    state_ctx:  ?*anyopaque = null,
+    m12_ctx:    ?*anyopaque = null,
     /// Toast manager — set by main.zig after ToastManager.init; nil-safe (no-op when null).
     toasts: ?*ToastManager = null,
     /// AppInner pointer — set by main.zig; used by callbacks to read frame_time_ms etc.
@@ -65,6 +66,7 @@ pub const SidebarCbs = struct {
     notifications: SidebarCb,
     layout:        SidebarCb,
     state:         SidebarCb,
+    m12:           SidebarCb,
 };
 
 fn ctxForScreen(global: *GlobalState, name: []const u8) ?*anyopaque {
@@ -76,25 +78,27 @@ fn ctxForScreen(global: *GlobalState, name: []const u8) ?*anyopaque {
     if (std.mem.eql(u8, name, "notifications")) return global.notif_ctx;
     if (std.mem.eql(u8, name, "layout"))        return global.layout_ctx;
     if (std.mem.eql(u8, name, "state"))         return global.state_ctx;
+    if (std.mem.eql(u8, name, "m12"))           return global.m12_ctx;
     return null;
 }
 
-/// Wire the 8 sidebar button callbacks for a freshly instantiated scene and highlight
+/// Wire the 9 sidebar button callbacks for a freshly instantiated scene and highlight
 /// the active screen button.
-/// Sidebar buttons are always at fixed element indices 2–9 (DFS pre-order:
-///   0 = root Row, 1 = Sidebar Column, 2–9 = sidebar buttons, 10 = content Column).
-/// `active_btn_idx` is the element index of the currently displayed screen's button (2–9).
+/// Sidebar buttons are always at fixed element indices 2–10 (DFS pre-order:
+///   0 = root Row, 1 = Sidebar Column, 2–10 = sidebar buttons, 11 = content Column).
+/// `active_btn_idx` is the element index of the currently displayed screen's button (2–10).
 /// Bug 4 fix: set accent background + accent_text color on the active button.
 pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens, active_btn_idx: u32) !void {
-    const pairs = [8]struct { idx: u32, cb: *SidebarCb }{
-        .{ .idx = 2, .cb = &global.sidebar_cbs.home },
-        .{ .idx = 3, .cb = &global.sidebar_cbs.text },
-        .{ .idx = 4, .cb = &global.sidebar_cbs.forms },
-        .{ .idx = 5, .cb = &global.sidebar_cbs.data },
-        .{ .idx = 6, .cb = &global.sidebar_cbs.theme },
-        .{ .idx = 7, .cb = &global.sidebar_cbs.notifications },
-        .{ .idx = 8, .cb = &global.sidebar_cbs.layout },
-        .{ .idx = 9, .cb = &global.sidebar_cbs.state },
+    const pairs = [9]struct { idx: u32, cb: *SidebarCb }{
+        .{ .idx = 2,  .cb = &global.sidebar_cbs.home },
+        .{ .idx = 3,  .cb = &global.sidebar_cbs.text },
+        .{ .idx = 4,  .cb = &global.sidebar_cbs.forms },
+        .{ .idx = 5,  .cb = &global.sidebar_cbs.data },
+        .{ .idx = 6,  .cb = &global.sidebar_cbs.theme },
+        .{ .idx = 7,  .cb = &global.sidebar_cbs.notifications },
+        .{ .idx = 8,  .cb = &global.sidebar_cbs.layout },
+        .{ .idx = 9,  .cb = &global.sidebar_cbs.state },
+        .{ .idx = 10, .cb = &global.sidebar_cbs.m12 },
     };
     for (pairs) |p| {
         try scene.setButtonCallback(p.idx, CallbackFn{
@@ -108,7 +112,7 @@ pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens,
         }
     }
     // Active button: accent background + accent text.
-    if (active_btn_idx >= 2 and active_btn_idx <= 9 and active_btn_idx < scene._style.items.len) {
+    if (active_btn_idx >= 2 and active_btn_idx <= 10 and active_btn_idx < scene._style.items.len) {
         scene._style.items[active_btn_idx].background = tokens.accent;
         scene._style.items[active_btn_idx].text_color = tokens.accent_text;
     }

@@ -255,26 +255,26 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 7); // 7 = Notifications button
 
-    // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=scroll,
-    //   14=inner-col,15=body,16=toast_sect,17=toast_h,18=toast_btns,
-    //   19=btn_info,20=btn_success,21=btn_warning,22=btn_error,23=btn_flood,
-    //   24=Separator,25=tooltip_sect,26=tooltip_h,27=tip_row,28-32=tips,
-    //   33=Separator,34=misc_sect,35=misc_h,
-    //   36=pb_group,37=pb_lbl,38=pb_row,39=pb,40=btn_simulate,
-    //   41=sp_group,42=sp_lbl,43=spinner,
-    //   44=badge_group,45=badge_lbl,46=badge,47=btn_badge_inc
-    try scene.setButtonCallback(19, CallbackFn{ .ptr = &_cb_info,    .call = ToastCb.onClick });
-    try scene.setButtonCallback(20, CallbackFn{ .ptr = &_cb_success, .call = ToastCb.onClick });
-    try scene.setButtonCallback(21, CallbackFn{ .ptr = &_cb_warning, .call = ToastCb.onClick });
-    try scene.setButtonCallback(22, CallbackFn{ .ptr = &_cb_error,   .call = ToastCb.onClick });
-    try scene.setButtonCallback(23, CallbackFn{ .ptr = &_cb_flood_all, .call = FloodCb.onClick });
+    // DFS: 0=root,1=sidebar,2-10=btns,11=content,12=heading,13=sep,14=scroll,
+    //   15=inner-col,16=body,17=toast_sect,18=toast_h,19=toast_btns,
+    //   20=btn_info,21=btn_success,22=btn_warning,23=btn_error,24=btn_flood,
+    //   25=Separator,26=tooltip_sect,27=tooltip_h,28=tip_row,29-33=tips,
+    //   34=Separator,35=misc_sect,36=misc_h,
+    //   37=pb_group,38=pb_lbl,39=pb_row,40=pb,41=btn_simulate,
+    //   42=sp_group,43=sp_lbl,44=spinner,
+    //   45=badge_group,46=badge_lbl,47=badge,48=btn_badge_inc
+    try scene.setButtonCallback(20, CallbackFn{ .ptr = &_cb_info,    .call = ToastCb.onClick });
+    try scene.setButtonCallback(21, CallbackFn{ .ptr = &_cb_success, .call = ToastCb.onClick });
+    try scene.setButtonCallback(22, CallbackFn{ .ptr = &_cb_warning, .call = ToastCb.onClick });
+    try scene.setButtonCallback(23, CallbackFn{ .ptr = &_cb_error,   .call = ToastCb.onClick });
+    try scene.setButtonCallback(24, CallbackFn{ .ptr = &_cb_flood_all, .call = FloodCb.onClick });
 
     _pb_step = 0;
-    scene.setProgress(39, 0.0);
-    _cb_progress = ProgressCb{ .scene = scene, .pb_idx = 39, .lbl_idx = 37 };
-    try scene.setButtonCallback(40, CallbackFn{ .ptr = &_cb_progress, .call = ProgressCb.onClick });
+    scene.setProgress(40, 0.0);
+    _cb_progress = ProgressCb{ .scene = scene, .pb_idx = 40, .lbl_idx = 38 };
+    try scene.setButtonCallback(41, CallbackFn{ .ptr = &_cb_progress, .call = ProgressCb.onClick });
 
     _badge_count = 42;
-    _cb_badge = BadgeCb{ .scene = scene, .badge_idx = 46 };
-    try scene.setButtonCallback(47, CallbackFn{ .ptr = &_cb_badge, .call = BadgeCb.onClick });
+    _cb_badge = BadgeCb{ .scene = scene, .badge_idx = 47 };
+    try scene.setButtonCallback(48, CallbackFn{ .ptr = &_cb_badge, .call = BadgeCb.onClick });
 }

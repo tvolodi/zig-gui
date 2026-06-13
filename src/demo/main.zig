@@ -21,6 +21,7 @@ const theme_screen  = @import("screens/theme.zig");
 const notif_screen  = @import("screens/notifications.zig");
 const layout_screen = @import("screens/layout.zig");
 const state_screen  = @import("screens/state.zig");
+const m12_screen    = @import("screens/m12.zig");
 
 /// Combined per-frame tick: runs all screen ticks. Each guards against wrong-screen.
 fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
@@ -159,6 +160,7 @@ pub fn main(init: std.process.Init) !void {
     var notif_ctx   = notif_screen.NotifCtx{  .global = undefined };
     var layout_ctx  = layout_screen.LayoutCtx{ .global = undefined };
     var state_ctx   = state_screen.StateCtx{  .global = undefined };
+    var m12_ctx     = m12_screen.M12Ctx{      .global = undefined };
 
     // -----------------------------------------------------------------------
     // GlobalState — wire everything together.
@@ -176,6 +178,7 @@ pub fn main(init: std.process.Init) !void {
     global.notif_ctx   = &notif_ctx;
     global.layout_ctx  = &layout_ctx;
     global.state_ctx   = &state_ctx;
+    global.m12_ctx     = &m12_ctx;
 
     home_ctx.global    = &global;
     text_ctx.global    = &global;
@@ -185,6 +188,7 @@ pub fn main(init: std.process.Init) !void {
     notif_ctx.global   = &global;
     layout_ctx.global  = &global;
     state_ctx.global   = &global;
+    m12_ctx.global     = &global;
 
     global.sidebar_cbs = SidebarCbs{
         .home          = SidebarCb{ .global = &global, .screen_name = "home" },
@@ -195,6 +199,7 @@ pub fn main(init: std.process.Init) !void {
         .notifications = SidebarCb{ .global = &global, .screen_name = "notifications" },
         .layout        = SidebarCb{ .global = &global, .screen_name = "layout" },
         .state         = SidebarCb{ .global = &global, .screen_name = "state" },
+        .m12           = SidebarCb{ .global = &global, .screen_name = "m12" },
     };
 
     // -----------------------------------------------------------------------
@@ -208,6 +213,7 @@ pub fn main(init: std.process.Init) !void {
     try nav.register("notifications", notif_screen.build);
     try nav.register("layout",        layout_screen.build);
     try nav.register("state",         state_screen.build);
+    try nav.register("m12",           m12_screen.build);
 
     // Request initial screen — drainPending fires on the first frame.
     // --initial-screen <name> selects which screen to start on (default: home).
@@ -225,6 +231,8 @@ pub fn main(init: std.process.Init) !void {
         nav.requestPush("layout", &layout_ctx);
     } else if (std.mem.eql(u8, initial_screen, "state")) {
         nav.requestPush("state", &state_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "m12")) {
+        nav.requestPush("m12", &m12_ctx);
     } else {
         nav.requestPush("home", &home_ctx);
     }

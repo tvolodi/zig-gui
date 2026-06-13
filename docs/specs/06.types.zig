@@ -634,6 +634,78 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.shadow_offset_x = 0;
         r.style.shadow_offset_y = 0;
         r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+
+        // --- M12 RC0 — absolute positioning classes ---
+    } else if (std.mem.eql(u8, cls, "absolute")) {
+        r.layout.position = .absolute;
+    } else if (std.mem.eql(u8, cls, "static")) {
+        r.layout.position = .static;
+
+        // RC1 — sticky positioning
+    } else if (std.mem.eql(u8, cls, "sticky")) {
+        r.layout.position = .sticky;
+
+        // RC0 — inset-{n} sets all four insets
+    } else if (std.mem.startsWith(u8, cls, "inset-")) {
+        if (parseUint(cls[6..])) |n| {
+            const v: store.Dimension = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.inset_top    = v;
+            r.layout.inset_right  = v;
+            r.layout.inset_bottom = v;
+            r.layout.inset_left   = v;
+        }
+
+        // RC0 — top-{n}
+    } else if (std.mem.startsWith(u8, cls, "top-")) {
+        if (parseUint(cls[4..])) |n| {
+            r.layout.inset_top = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — right-{n}
+    } else if (std.mem.startsWith(u8, cls, "right-")) {
+        if (parseUint(cls[6..])) |n| {
+            r.layout.inset_right = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — bottom-{n}
+    } else if (std.mem.startsWith(u8, cls, "bottom-")) {
+        if (parseUint(cls[7..])) |n| {
+            r.layout.inset_bottom = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — left-{n} (guard: must not overlap existing "ml-" prefix)
+    } else if (std.mem.startsWith(u8, cls, "left-")) {
+        if (parseUint(cls[5..])) |n| {
+            r.layout.inset_left = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC2 — flex-wrap / flex-nowrap
+    } else if (std.mem.eql(u8, cls, "flex-wrap")) {
+        r.layout.flex_wrap = true;
+    } else if (std.mem.eql(u8, cls, "flex-nowrap")) {
+        r.layout.flex_wrap = false;
+
+        // RC3 — aspect ratio
+    } else if (std.mem.eql(u8, cls, "aspect-square")) {
+        r.layout.aspect_ratio = 1.0;
+    } else if (std.mem.eql(u8, cls, "aspect-video")) {
+        r.layout.aspect_ratio = 16.0 / 9.0;
+    } else if (std.mem.eql(u8, cls, "aspect-auto")) {
+        r.layout.aspect_ratio = 0;
+
+        // RC4 — z-index
+    } else if (std.mem.eql(u8, cls, "z-0")) {
+        r.layout.z_index = 0;
+    } else if (std.mem.eql(u8, cls, "z-10")) {
+        r.layout.z_index = 10;
+    } else if (std.mem.eql(u8, cls, "z-20")) {
+        r.layout.z_index = 20;
+    } else if (std.mem.eql(u8, cls, "z-30")) {
+        r.layout.z_index = 30;
+    } else if (std.mem.eql(u8, cls, "z-40")) {
+        r.layout.z_index = 40;
+    } else if (std.mem.eql(u8, cls, "z-50")) {
+        r.layout.z_index = 50;
     }
     // Unknown classes: silently ignore (last-wins via sequential application)
 }

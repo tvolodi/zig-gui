@@ -352,47 +352,47 @@ pub fn build(
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 4); // 4 = Forms button
 
     // Wire dropdown options.
-    // DFS indices (pre-order): 0=root, 1=sidebar, 2-9=sidebar btns, 10=content,
-    //   11=heading, 12=sep, 13=scroll, 14=inner-col(p-2), 15=body-col,
-    //   16=form_card,
-    //   17=name_group, 18=name_lbl, 19=name_input,
-    //   20=email_group, 21=email_lbl, 22=email_input,
-    //   23=notes_group, 24=notes_lbl, 25=notes_ta,
-    //   26=country_group, 27=country_lbl, 28=country_dd,
-    //   29=checkbox,
-    //   30=radios_group, 31=radio_lbl, 32=r_email, 33=r_phone, 34=r_post,
-    //   35=slider_group, 36=slider_lbl, 37=slider_row, 38=slider, 39=vol_val,
-    //   40=btn_row, 41=submit_btn,
-    //   42=reset_btn  ← ghost style applied via classes (bg-surface text-body border border-default)
-    //   43=summary_card, 44=sum_name, 45=sum_email, 46=sum_country,
-    //   47=sum_newsletter, 48=sum_contact, 49=sum_volume
-    //   (schema section follows at 50+)
-    try scene.setDropdownOptions(28, &_country_opts);
+    // DFS indices (pre-order): 0=root, 1=sidebar, 2-10=sidebar btns, 11=content,
+    //   12=heading, 13=sep, 14=scroll, 15=inner-col(p-2), 16=body-col,
+    //   17=form_card,
+    //   18=name_group, 19=name_lbl, 20=name_input,
+    //   21=email_group, 22=email_lbl, 23=email_input,
+    //   24=notes_group, 25=notes_lbl, 26=notes_ta,
+    //   27=country_group, 28=country_lbl, 29=country_dd,
+    //   30=checkbox,
+    //   31=radios_group, 32=radio_lbl, 33=r_email, 34=r_phone, 35=r_post,
+    //   36=slider_group, 37=slider_lbl, 38=slider_row, 39=slider, 40=vol_val,
+    //   41=btn_row, 42=submit_btn,
+    //   43=reset_btn  <- ghost style applied via classes (bg-surface text-body border border-default)
+    //   44=summary_card, 45=sum_name, 46=sum_email, 47=sum_country,
+    //   48=sum_newsletter, 49=sum_contact, 50=sum_volume
+    //   (schema section follows at 51+)
+    try scene.setDropdownOptions(29, &_country_opts);
 
     // Wire submit button callback.
-    try scene.setButtonCallback(41, CallbackFn{
+    try scene.setButtonCallback(42, CallbackFn{
         .ptr = &_submit_cb,
         .call = SubmitCb.onClick,
     });
 
     // Record slider and readout indices for per-frame tick.
-    _slider_idx = 38;
-    _vol_val_idx = 39;
+    _slider_idx = 39;
+    _vol_val_idx = 40;
 
     // Record source widget indices for the summary panel.
-    _name_input_idx    = 19;
-    _email_input_idx   = 22;
-    _country_dd_idx    = 28;
-    _checkbox_idx      = 29;
-    _radio_email_idx   = 32;
-    _radio_phone_idx   = 33;
-    _radio_post_idx    = 34;
+    _name_input_idx    = 20;
+    _email_input_idx   = 23;
+    _country_dd_idx    = 29;
+    _checkbox_idx      = 30;
+    _radio_email_idx   = 33;
+    _radio_phone_idx   = 34;
+    _radio_post_idx    = 35;
 
     // Record summary Text element indices.
-    _sum_name_idx       = 44;
-    _sum_email_idx      = 45;
-    _sum_country_idx    = 46;
-    _sum_newsletter_idx = 47;
-    _sum_contact_idx    = 48;
-    _sum_volume_idx     = 49;
+    _sum_name_idx       = 45;
+    _sum_email_idx      = 46;
+    _sum_country_idx    = 47;
+    _sum_newsletter_idx = 48;
+    _sum_contact_idx    = 49;
+    _sum_volume_idx     = 50;
 }

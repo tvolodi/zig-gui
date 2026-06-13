@@ -196,17 +196,17 @@ Fills the gaps in the current event model.
 
 ---
 
-## Milestone 12 — Layout engine extensions `planned`
+## Milestone 12 — Layout engine extensions `done`
 
 Unlocks common layout patterns that are awkward or impossible today.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M12-01 | **Absolute positioning** — `position: absolute` removes an element from flow and places it at `(x, y)` relative to its nearest positioned ancestor | 04 |
-| M12-02 | **Sticky positioning** — `position: sticky` keeps an element at a fixed offset from its scroll container when scrolled past | M3-06, M12-01 |
-| M12-03 | **Wrapping flex rows** — `flex-wrap` support in the layout engine; currently flex containers are non-wrapping only | 04 |
-| M12-04 | **Aspect-ratio constraint** — `aspect-square` / `aspect-w-N aspect-h-N` locks width-to-height ratio during layout | 04 |
-| M12-05 | **Z-index on normal elements** — `z-N` class reorders overlapping siblings within the same layer, without the overlay system | 04, 09 |
+| ID | Feature | Depends on | Requirements |
+|---|---|---|---|
+| M12-01 | **Absolute positioning** — `position: absolute` removes an element from flow and places it at `(x, y)` relative to its nearest positioned ancestor | 04 | [RC0](requirements/RC0_absolute_positioning.md) |
+| M12-02 | **Sticky positioning** — `position: sticky` keeps an element at a fixed offset from its scroll container when scrolled past | M3-06, M12-01 | [RC1](requirements/RC1_sticky_positioning.md) |
+| M12-03 | **Wrapping flex rows** — `flex-wrap` support in the layout engine; currently flex containers are non-wrapping only | 04 | [RC2](requirements/RC2_flex_wrap.md) |
+| M12-04 | **Aspect-ratio constraint** — `aspect-square` / `aspect-video` locks width-to-height ratio during layout | 04 | [RC3](requirements/RC3_aspect_ratio.md) |
+| M12-05 | **Z-index on normal elements** — `z-N` class reorders overlapping siblings within the same layer, without the overlay system | 04, 09 | [RC4](requirements/RC4_z_index.md) |
 
 ---
 

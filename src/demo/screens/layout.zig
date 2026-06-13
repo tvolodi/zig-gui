@@ -215,18 +215,18 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 8); // 8 = Layout button
 
-    // DFS: 0=root, 1=sidebar, 2-9=sidebar btns, 10=content, 11=heading, 12=sep, 13=scroll,
-    //   14=inner-col, 15=body, 16=flex_sect, 17=flex_h, 18=flex_row, 19-23=A-E,
-    //   24=Separator, 25=grow_sect, 26=grow_h, 27=grow_col,
-    //   28=grow_row1, 29=gi1, 30=gcb1,
-    //   31=grow_row2, 32=gi2, 33=gcb2,
-    //   34=grow_row3, 35=gi3, 36=gcb3
-    const gi1_idx:  u32 = 29;
-    const gcb1_idx: u32 = 30;
-    const gi2_idx:  u32 = 32;
-    const gcb2_idx: u32 = 33;
-    const gi3_idx:  u32 = 35;
-    const gcb3_idx: u32 = 36;
+    // DFS: 0=root, 1=sidebar, 2-10=sidebar btns, 11=content, 12=heading, 13=sep, 14=scroll,
+    //   15=inner-col, 16=body, 17=flex_sect, 18=flex_h, 19=flex_row, 20-24=A-E,
+    //   25=Separator, 26=grow_sect, 27=grow_h, 28=grow_col,
+    //   29=grow_row1, 30=gi1, 31=gcb1,
+    //   32=grow_row2, 33=gi2, 34=gcb2,
+    //   35=grow_row3, 36=gi3, 37=gcb3
+    const gi1_idx:  u32 = 30;
+    const gcb1_idx: u32 = 31;
+    const gi2_idx:  u32 = 33;
+    const gcb2_idx: u32 = 34;
+    const gi3_idx:  u32 = 36;
+    const gcb3_idx: u32 = 37;
 
     // Start: only middle row has flex-1; clear grow on rows 1 and 3.
     scene.elements.layout.items[gi1_idx].flex_grow = 0;

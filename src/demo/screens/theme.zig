@@ -197,18 +197,18 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 6); // 6 = Theme button
 
-    // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=cols,
-    //   14=left_panel,
-    //   15=scheme_col, 16=ctrl_h, 17=btn_light, 18=btn_dark, 19=btn_hc,
-    //   20=fs_group, 21=fs_h, 22=fs_row, 23=fs_slider, 24=fs_val,
-    //   25=sep2, 26=hint,
-    //   27=right_panel,...
-    try scene.setButtonCallback(17, CallbackFn{ .ptr = &_cb_light, .call = ThemeCb.onClick });
-    try scene.setButtonCallback(18, CallbackFn{ .ptr = &_cb_dark,  .call = ThemeCb.onClick });
-    try scene.setButtonCallback(19, CallbackFn{ .ptr = &_cb_hc,    .call = ThemeCb.onClick });
+    // DFS: 0=root,1=sidebar,2-10=btns,11=content,12=heading,13=sep,14=cols,
+    //   15=left_panel,
+    //   16=scheme_col, 17=ctrl_h, 18=btn_light, 19=btn_dark, 20=btn_hc,
+    //   21=fs_group, 22=fs_h, 23=fs_row, 24=fs_slider, 25=fs_val,
+    //   26=sep2, 27=hint,
+    //   28=right_panel,...
+    try scene.setButtonCallback(18, CallbackFn{ .ptr = &_cb_light, .call = ThemeCb.onClick });
+    try scene.setButtonCallback(19, CallbackFn{ .ptr = &_cb_dark,  .call = ThemeCb.onClick });
+    try scene.setButtonCallback(20, CallbackFn{ .ptr = &_cb_hc,    .call = ThemeCb.onClick });
 
     // Bug 8 fix: record slider/readout indices and app_inner for per-frame tick.
-    _fs_slider_idx = 23;
-    _fs_val_idx    = 24;
+    _fs_slider_idx = 24;
+    _fs_val_idx    = 25;
     _fs_app_inner  = app_inner;
 }
