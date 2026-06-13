@@ -197,6 +197,9 @@ pub const AppInner = struct {
     // Bug 3 fix — Slider drag state.
     dragging_slider_idx: ?u32 = null,
 
+    // Scrollbar thumb drag state.
+    dragging_scrollbar_idx: ?u32 = null,
+
     // R41 — Overlay layer (second draw pass).
     overlay: OverlayLayer,
 
@@ -215,6 +218,10 @@ pub const AppInner = struct {
     // Per-frame tick hook: called each dirty frame in refreshBindings, after BindingSet.refresh.
     // Used by screens that need to derive display text from live widget state (e.g. slider readout).
     per_frame_fn: ?*const fn (*Scene) void = null,
+
+    // Per-frame app-level tick hook: called every rendered frame just before the overlay is
+    // flattened. Has access to all AppInner fields. Used for overlay producers (e.g. ToastManager).
+    per_frame_app_fn: ?*const fn (*AppInner) void = null,
 
     // R73 — Frame counter and timestamp for animation.
     frame_count: u64 = 0,
@@ -464,12 +471,13 @@ pub const AppInner = struct {
             // M2-02: Skip GPU work when nothing has changed.
             if (!self.scene.elements.hasDirty()) {
                 if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
-                    // Animated widgets (spinner, indeterminate progress) need continuous frames.
-                    self.platform.pollEvents();
+                    // Tooltip pending or animated widget: keep rendering so tick() fires.
+                    // Force a dirty bit so the render path runs this iteration.
+                    self.scene.elements.markAllDirty();
                 } else {
                     self.platform.waitEvents(); // yield until the OS wakes us
+                    continue;
                 }
-                continue;
             }
 
             // R56: Poll watched .ui files for changes (hot-reload only).
@@ -553,6 +561,9 @@ pub const AppInner = struct {
                 }
             }
 
+            // Update scroll container dimensions from post-layout computed sizes.
+            self.updateScrollDimensions();
+
             // Build draw list (module 09).
             // Fire queued callbacks after layout, before render (INV-3.3).
             self.scene.fireQueuedCallbacks();
@@ -574,6 +585,9 @@ pub const AppInner = struct {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
             defer if (main_cmds.len > 0) self.gpa.free(main_cmds);
+
+            // Fire per-frame app-level tick (e.g. toast expiry + overlay rebuild).
+            if (self.per_frame_app_fn) |f| f(self);
 
             // R41: Flatten overlay slots and concatenate with main commands.
             const overlay_cmds = self.overlay.flatten(self.gpa) catch &[_]DrawCommand{};
@@ -701,11 +715,12 @@ pub const AppInner = struct {
             // M2-02: Skip GPU work when nothing has changed (bypass in screenshot mode).
             if (self._screenshot_frames == 0 and !self.scene.elements.hasDirty()) {
                 if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
-                    self.platform.pollEvents();
+                    // Tooltip pending or animated widget: keep rendering so tick() fires.
+                    self.scene.elements.markAllDirty();
                 } else {
                     self.platform.waitEvents();
+                    continue;
                 }
-                continue;
             }
             // Screenshot mode: force dirty so every frame renders.
             if (self._screenshot_frames > 0) self.scene.elements.markAllDirty();
@@ -784,6 +799,9 @@ pub const AppInner = struct {
                 }
             }
 
+            // Update scroll container dimensions from post-layout computed sizes.
+            self.updateScrollDimensions();
+
             // Fire queued callbacks after layout, before render (INV-3.3).
             self.scene.fireQueuedCallbacks();
             self.scene.font_family = &self.font_family;
@@ -802,6 +820,9 @@ pub const AppInner = struct {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
             defer if (main_cmds.len > 0) self.gpa.free(main_cmds);
+
+            // Fire per-frame app-level tick (e.g. toast expiry + overlay rebuild).
+            if (self.per_frame_app_fn) |f| f(self);
 
             const overlay_cmds = self.overlay.flatten(self.gpa) catch &[_]DrawCommand{};
             defer if (overlay_cmds.len > 0) self.gpa.free(overlay_cmds);
@@ -1109,6 +1130,42 @@ pub const AppInner = struct {
     }
 
     // -----------------------------------------------------------------------
+    // Scroll dimension update — run after layout solve each frame.
+    // Sets content_height/width and container_height/width on every ScrollView
+    // by measuring the bounding box of its first child after layout.
+    // -----------------------------------------------------------------------
+
+    fn updateScrollDimensions(self: *AppInner) void {
+        const NONE32 = std.math.maxInt(u32);
+        for (0..self.scene._kind.items.len) |i| {
+            const idx = @as(u32, @intCast(i));
+            if (self.scene.kindOfIdx(idx) != .scrollview) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const sv_computed = self.scene.elements.layout.items[idx].computed;
+            const ss = self.scene.scrollStateOf(idx);
+            ss.container_height = sv_computed.h;
+            ss.container_width  = sv_computed.w;
+            // Measure children's total extent.
+            var child_max_y: f32 = 0;
+            var child_max_x: f32 = 0;
+            var child_i = self.scene.elements.first_child.items[idx];
+            while (child_i != NONE32) {
+                if (child_i >= self.scene.elements.layout.items.len) break;
+                const cr = self.scene.elements.layout.items[child_i].computed;
+                // cr.y is relative to the document (not the scroll container), so
+                // the child extent within the container = (cr.y - sv_computed.y) + cr.h.
+                const local_y = (cr.y - sv_computed.y) + cr.h;
+                const local_x = (cr.x - sv_computed.x) + cr.w;
+                if (local_y > child_max_y) child_max_y = local_y;
+                if (local_x > child_max_x) child_max_x = local_x;
+                child_i = self.scene.elements.next_sibling.items[child_i];
+            }
+            ss.content_height = child_max_y;
+            ss.content_width  = child_max_x;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // R40 — Pseudo-state sync (after event dispatch, before buildDrawList)
     // -----------------------------------------------------------------------
 
@@ -1216,6 +1273,26 @@ pub const AppInner = struct {
                                 }
                             }
                         }
+                        // Scrollbar thumb drag: translate thumb movement into scroll offset.
+                        if (self.dragging_scrollbar_idx) |svidx| {
+                            if (svidx < self.scene.elements.layout.items.len) {
+                                const rect = self.scene.elements.layout.items[svidx].computed;
+                                const ss = self.scene.scrollStateOf(svidx);
+                                const container_h = if (ss.container_height > 0) ss.container_height else rect.h;
+                                const content_h = ss.content_height;
+                                if (content_h > container_h and container_h > 0) {
+                                    const track_h = rect.h;
+                                    const thumb_h = @max(20.0, track_h * (container_h / content_h));
+                                    const scrollable_track = track_h - thumb_h;
+                                    if (scrollable_track > 0) {
+                                        const delta_y = mm.y - ss.drag_start_y;
+                                        const max_scroll = content_h - container_h;
+                                        const new_scroll = ss.drag_start_scroll_y + delta_y * max_scroll / scrollable_track;
+                                        self.scene.setScrollOffset(svidx, std.math.clamp(new_scroll, 0, max_scroll), ss.scroll_x);
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
                 .mouse_button => |mb| {
@@ -1262,14 +1339,38 @@ pub const AppInner = struct {
         }
     }
 
+    /// Walk up the ancestor chain for `idx` and accumulate the total scroll offset.
+    /// Elements inside a ScrollView have computed positions set at layout time (scroll=0);
+    /// the visual position is computed - scroll_offset. We invert to get visual → layout.
+    fn scrollOffsetFor(self: *AppInner, idx: u32) struct { x: f32, y: f32 } {
+        var acc_x: f32 = 0;
+        var acc_y: f32 = 0;
+        const NONE32 = std.math.maxInt(u32);
+        var cur = idx;
+        while (cur < self.scene.elements.parent.items.len) {
+            const p = self.scene.elements.parent.items[cur];
+            if (p == NONE32 or p >= self.scene.elements.layout.items.len) break;
+            if (self.scene.kindOfIdx(p) == .scrollview) {
+                const ss = self.scene.scrollStateOf(p);
+                acc_x += ss.scroll_x;
+                acc_y += ss.scroll_y;
+            }
+            cur = p;
+        }
+        return .{ .x = acc_x, .y = acc_y };
+    }
+
     /// Hit-test: find the topmost focusable element at (x, y). Returns idx or maxInt(u32).
     fn hitTestFocusable(self: *AppInner, x: f32, y: f32) u32 {
         const NONE = std.math.maxInt(u32);
         for (self.scene.focusable_indices.items) |idx| {
             if (idx >= self.scene.elements.layout.items.len) continue;
+            const scroll = self.scrollOffsetFor(idx);
             const rect = self.scene.elements.layout.items[idx].computed;
-            if (x >= rect.x and x < rect.x + rect.w and
-                y >= rect.y and y < rect.y + rect.h)
+            const vx = rect.x - scroll.x;
+            const vy = rect.y - scroll.y;
+            if (x >= vx and x < vx + rect.w and
+                y >= vy and y < vy + rect.h)
             {
                 return idx;
             }
@@ -1280,9 +1381,12 @@ pub const AppInner = struct {
     fn updateHoverStates(self: *AppInner, x: f32, y: f32) void {
         for (self.scene.focusable_indices.items) |idx| {
             if (idx >= self.scene.elements.layout.items.len) continue;
+            const scroll = self.scrollOffsetFor(idx);
             const rect = self.scene.elements.layout.items[idx].computed;
-            const hit = x >= rect.x and x < rect.x + rect.w and
-                y >= rect.y and y < rect.y + rect.h;
+            const vx = rect.x - scroll.x;
+            const vy = rect.y - scroll.y;
+            const hit = x >= vx and x < vx + rect.w and
+                y >= vy and y < vy + rect.h;
             const kind = self.scene.kindOfIdx(idx);
             var dirty = false;
             switch (kind) {
@@ -1305,6 +1409,36 @@ pub const AppInner = struct {
 
     fn handleMousePress(self: *AppInner, x: f32, y: f32) void {
         const NONE = std.math.maxInt(u32);
+
+        // Scrollbar thumb drag: check all scrollviews for a hit on the vertical thumb.
+        const bar_w: f32 = 14.0;
+        for (0..self.scene._kind.items.len) |i| {
+            const idx = @as(u32, @intCast(i));
+            if (self.scene.kindOfIdx(idx) != .scrollview) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const rect = self.scene.elements.layout.items[idx].computed;
+            const ss = self.scene.scrollStateOf(idx);
+            const content_h = ss.content_height;
+            const container_h = if (ss.container_height > 0) ss.container_height else rect.h;
+            if (content_h <= container_h or container_h <= 0) continue;
+            const track_x = rect.x + rect.w - bar_w;
+            const track_y = rect.y;
+            const track_h = rect.h;
+            const ratio = container_h / content_h;
+            const thumb_h = @max(20.0, track_h * ratio);
+            const max_scroll = content_h - container_h;
+            const scroll_frac = if (max_scroll > 0) ss.scroll_y / max_scroll else 0;
+            const thumb_y = track_y + scroll_frac * (track_h - thumb_h);
+            if (x >= track_x and x < track_x + bar_w and
+                y >= thumb_y and y < thumb_y + thumb_h)
+            {
+                ss.dragging_v_scrollbar = true;
+                ss.drag_start_y = y;
+                ss.drag_start_scroll_y = ss.scroll_y;
+                self.dragging_scrollbar_idx = idx;
+                return;
+            }
+        }
 
         // Bug 3 fix: when a dropdown is open, check if click is in its option panel first.
         // Option panels are rendered as overlays outside the element's computed rect, so
@@ -1394,6 +1528,30 @@ pub const AppInner = struct {
                 }
             }
         }
+        // Data table header click → sort column.
+        for (0..self.scene._kind.items.len) |i| {
+            const idx = @as(u32, @intCast(i));
+            if (self.scene.kindOfIdx(idx) != .data_table) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const rect = self.scene.elements.layout.items[idx].computed;
+            const header_h: f32 = 36.0;
+            if (x < rect.x or x >= rect.x + rect.w) continue;
+            if (y < rect.y or y >= rect.y + header_h) continue;
+            const ts = self.scene.tableStateOf(idx);
+            var col_x = rect.x;
+            var col_found: ?u8 = null;
+            for (ts.columns[0..ts.col_count], 0..) |*col, ci| {
+                if (x >= col_x and x < col_x + col.width_px) {
+                    col_found = @intCast(ci);
+                    break;
+                }
+                col_x += col.width_px;
+            }
+            if (col_found) |col_idx| {
+                self.scene.sortTable(idx, col_idx);
+            }
+        }
+
         // R62: hit-test read-only .text elements for selection.
         for (0..self.scene._kind.items.len) |i| {
             const idx = @as(u32, @intCast(i));
@@ -1416,6 +1574,11 @@ pub const AppInner = struct {
         if (self.dragging_slider_idx) |sidx| {
             self.scene.sliderStateOf(sidx).dragging = false;
             self.dragging_slider_idx = null;
+        }
+        // Clear scrollbar drag state.
+        if (self.dragging_scrollbar_idx) |svidx| {
+            self.scene.scrollStateOf(svidx).dragging_v_scrollbar = false;
+            self.dragging_scrollbar_idx = null;
         }
         // Activate any pressed button/checkbox under the cursor.
         for (self.scene.focusable_indices.items) |idx| {
@@ -1462,8 +1625,12 @@ pub const AppInner = struct {
     }
 
     fn handleScroll(self: *AppInner, dx: f32, dy: f32) void {
-        // Scroll whichever scrollview is under the cursor.
-        for (0..self.scene._kind.items.len) |i| {
+        // Scroll the innermost (highest-index) scrollview under the cursor.
+        // Iterating in reverse DFS order ensures descendants match before ancestors.
+        const n = self.scene._kind.items.len;
+        var i = n;
+        while (i > 0) {
+            i -= 1;
             const idx = @as(u32, @intCast(i));
             if (self.scene.kindOfIdx(idx) != .scrollview) continue;
             if (idx >= self.scene.elements.layout.items.len) continue;
@@ -1472,7 +1639,31 @@ pub const AppInner = struct {
                 self.last_cursor_y >= rect.y and self.last_cursor_y < rect.y + rect.h)
             {
                 const ss = self.scene.scrollStateOf(idx);
+                const max_y = @max(0.0, ss.content_height - ss.container_height);
+                if (max_y <= 0 and dy != 0) continue; // can't scroll vertically, try parent
                 self.scene.setScrollOffset(idx, ss.scroll_y - dy * 16.0, ss.scroll_x - dx * 16.0);
+                break;
+            }
+        }
+
+        // Scroll data_table widgets under the cursor.
+        var j = n;
+        while (j > 0) {
+            j -= 1;
+            const idx = @as(u32, @intCast(j));
+            if (self.scene.kindOfIdx(idx) != .data_table) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const rect = self.scene.elements.layout.items[idx].computed;
+            if (self.last_cursor_x >= rect.x and self.last_cursor_x < rect.x + rect.w and
+                self.last_cursor_y >= rect.y and self.last_cursor_y < rect.y + rect.h)
+            {
+                const ts = self.scene.tableStateOf(idx);
+                const header_h: f32 = 36.0;
+                const view_h = rect.h - header_h;
+                const n_rows: u32 = if (ts.rows) |r| r.row_count else 0;
+                const max_scroll = @max(0.0, ts.row_height * @as(f32, @floatFromInt(n_rows)) - view_h);
+                ts.scroll_y = std.math.clamp(ts.scroll_y - dy * 32.0, 0.0, max_scroll);
+                if (idx < self.scene.elements.dirty.bit_length) self.scene.elements.dirty.set(idx);
                 break;
             }
         }
