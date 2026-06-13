@@ -797,6 +797,23 @@ pub fn build(b: *std.Build) void {
     signal_test_step.dependOn(&run_signal_test.step);
 
     // -----------------------------------------------------------------------
+    // test-anim-timeline — AnimTimeline and easing unit tests (pure, no GPU).
+    //   zig build                   → compile only (compile check)
+    //   zig build test-anim-timeline → compile + run
+    // -----------------------------------------------------------------------
+    const anim_timeline_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/anim_timeline_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // anim_timeline.zig imports only std — no additional module wiring needed.
+    const anim_timeline_test = b.addTest(.{ .name = "anim-timeline-test", .root_module = anim_timeline_test_mod });
+    b.default_step.dependOn(&anim_timeline_test.step);
+    const run_anim_timeline_test = b.addRunArtifact(anim_timeline_test);
+    const anim_timeline_test_step = b.step("test-anim-timeline", "Run AnimTimeline unit tests (pure, no GPU)");
+    anim_timeline_test_step.dependOn(&run_anim_timeline_test.step);
+
+    // -----------------------------------------------------------------------
     // test-overlay — OverlayLayer unit tests (no GPU, no GLFW).
     //   zig build               → compile only (compile check)
     //   zig build test-overlay  → compile + run

@@ -513,6 +513,107 @@ test "R51: mx-4 sets left and right margin to 16px, top and bottom zero" {
 }
 
 // ===========================================================================
+// M14-02 — Transition class resolution
+// ===========================================================================
+
+test "M14-02: transition-opacity sets transition_opacity=true" {
+    const r = M.resolveClasses("transition-opacity", tokens());
+    try testing.expect(r.style.transition_opacity);
+}
+
+test "M14-02: transition-background sets transition_background=true" {
+    const r = M.resolveClasses("transition-background", tokens());
+    try testing.expect(r.style.transition_background);
+}
+
+test "M14-02: transition-colors sets both opacity and background" {
+    const r = M.resolveClasses("transition-colors", tokens());
+    try testing.expect(r.style.transition_opacity);
+    try testing.expect(r.style.transition_background);
+}
+
+test "M14-02: duration-60 sets transition_duration=60" {
+    const r = M.resolveClasses("duration-60", tokens());
+    try testing.expectEqual(@as(u32, 60), r.style.transition_duration);
+}
+
+test "M14-02: duration-0 sets transition_duration=0" {
+    const r = M.resolveClasses("duration-0", tokens());
+    try testing.expectEqual(@as(u32, 0), r.style.transition_duration);
+}
+
+test "M14-02: duration-120 sets transition_duration=120" {
+    const r = M.resolveClasses("duration-120", tokens());
+    try testing.expectEqual(@as(u32, 120), r.style.transition_duration);
+}
+
+// ===========================================================================
+// M14-03 — Enter/exit class resolution
+// ===========================================================================
+
+test "M14-03: animate-in sets animate_in=true" {
+    const r = M.resolveClasses("animate-in", tokens());
+    try testing.expect(r.style.animate_in);
+}
+
+test "M14-03: animate-out sets animate_out=true" {
+    const r = M.resolveClasses("animate-out", tokens());
+    try testing.expect(r.style.animate_out);
+}
+
+test "M14-03: fade-in sets fade_in=true" {
+    const r = M.resolveClasses("fade-in", tokens());
+    try testing.expect(r.style.fade_in);
+}
+
+test "M14-03: fade-out sets fade_out=true" {
+    const r = M.resolveClasses("fade-out", tokens());
+    try testing.expect(r.style.fade_out);
+}
+
+test "M14-03: slide-in-from-top sets slide_in_from_top=true" {
+    const r = M.resolveClasses("slide-in-from-top", tokens());
+    try testing.expect(r.style.slide_in_from_top);
+}
+
+test "M14-03: slide-in-from-bottom sets slide_in_from_bottom=true" {
+    const r = M.resolveClasses("slide-in-from-bottom", tokens());
+    try testing.expect(r.style.slide_in_from_bottom);
+}
+
+test "M14-03: slide-out-to-top sets slide_out_to_top=true" {
+    const r = M.resolveClasses("slide-out-to-top", tokens());
+    try testing.expect(r.style.slide_out_to_top);
+}
+
+test "M14-03: slide-out-to-bottom sets slide_out_to_bottom=true" {
+    const r = M.resolveClasses("slide-out-to-bottom", tokens());
+    try testing.expect(r.style.slide_out_to_bottom);
+}
+
+test "M14: multiple classes compose correctly" {
+    const r = M.resolveClasses("transition-opacity animate-in fade-in duration-60", tokens());
+    try testing.expect(r.style.transition_opacity);
+    try testing.expect(!r.style.transition_background);
+    try testing.expect(r.style.animate_in);
+    try testing.expect(r.style.fade_in);
+    try testing.expectEqual(@as(u32, 60), r.style.transition_duration);
+}
+
+test "M14: all enter/exit classes compose" {
+    const r = M.resolveClasses("animate-in animate-out fade-in fade-out slide-in-from-top slide-in-from-bottom slide-out-to-top slide-out-to-bottom duration-120", tokens());
+    try testing.expect(r.style.animate_in);
+    try testing.expect(r.style.animate_out);
+    try testing.expect(r.style.fade_in);
+    try testing.expect(r.style.fade_out);
+    try testing.expect(r.style.slide_in_from_top);
+    try testing.expect(r.style.slide_in_from_bottom);
+    try testing.expect(r.style.slide_out_to_top);
+    try testing.expect(r.style.slide_out_to_bottom);
+    try testing.expectEqual(@as(u32, 120), r.style.transition_duration);
+}
+
+// ===========================================================================
 // R54 — parseWithDiag
 // ===========================================================================
 

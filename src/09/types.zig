@@ -352,6 +352,17 @@ pub fn applyOpacity(col: Color, factor: f32) Color {
     return .{ .r = col.r, .g = col.g, .b = col.b, .a = @intFromFloat(a) };
 }
 
+/// Linearly interpolate between two Colors by factor t [0, 1].
+pub fn lerpColor(a: Color, b: Color, t: f32) Color {
+    const ct = std.math.clamp(t, 0.0, 1.0);
+    return .{
+        .r = @intFromFloat(@as(f32, @floatFromInt(a.r)) + (@as(f32, @floatFromInt(b.r)) - @as(f32, @floatFromInt(a.r))) * ct),
+        .g = @intFromFloat(@as(f32, @floatFromInt(a.g)) + (@as(f32, @floatFromInt(b.g)) - @as(f32, @floatFromInt(a.g))) * ct),
+        .b = @intFromFloat(@as(f32, @floatFromInt(a.b)) + (@as(f32, @floatFromInt(b.b)) - @as(f32, @floatFromInt(a.b))) * ct),
+        .a = @intFromFloat(@as(f32, @floatFromInt(a.a)) + (@as(f32, @floatFromInt(b.a)) - @as(f32, @floatFromInt(a.a))) * ct),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // R40 — Style resolution helper
 // ---------------------------------------------------------------------------
@@ -1213,7 +1224,7 @@ pub fn buildDrawList(
                     }
                 } else {
                     // Indeterminate: moving 40% fill band.
-                    const phase: f32 = @as(f32, @floatFromInt(scene.frame_count % 120)) / 120.0;
+                    const phase = ps.anim_frame_value;
                     const fill_w = computed.w * 0.4;
                     const travel = computed.w + fill_w;
                     const fill_x = computed.x - fill_w + travel * phase;
@@ -1222,14 +1233,16 @@ pub fn buildDrawList(
             },
             .spinner => {
                 // R73 — Spinner: 8 tick marks rotating.
+                const ps = scene.progressStateOf(id.index);
                 const N: u32 = 8;
                 const cx = computed.x + computed.w / 2.0;
                 const cy = computed.y + computed.h / 2.0;
                 const r = computed.w * 0.35;
                 const tw = computed.w * 0.10;
                 const th = computed.w * 0.25;
-                // Advance one tick every 10 frames (~8 steps/sec at 80 fps).
-                const phase_idx: u32 = @intCast((scene.frame_count / 10) % N);
+                // Read animation phase from timeline (synced each frame via syncAnimationState).
+                const raw_t = ps.anim_frame_value;
+                const phase_idx: u32 = @intFromFloat(raw_t * 7.999);
                 var i: u32 = 0;
                 while (i < N) : (i += 1) {
                     const angle = @as(f32, @floatFromInt(i)) * (std.math.tau / @as(f32, @floatFromInt(N)));

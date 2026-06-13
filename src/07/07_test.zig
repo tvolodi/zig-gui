@@ -1391,3 +1391,111 @@ test "R53: removeChildren followed by instantiateUnder produces correct child co
     while (it.next()) |_| count += 1;
     try testing.expectEqual(@as(u32, 3), count);
 }
+
+// ===========================================================================
+// M14-02 — TransitionState tests
+// ===========================================================================
+
+test "TransitionState defaults: active_opacity=false, timeline_idx=0xFFFFFFFF" {
+    const ts = C.TransitionState{};
+    try testing.expect(!ts.active_opacity);
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), ts.opacity_timeline_idx);
+    try testing.expect(!ts.active_background);
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), ts.background_timeline_idx);
+}
+
+test "TransitionState from_opacity defaults to 1.0" {
+    const ts = C.TransitionState{};
+    try testing.expectEqual(@as(f32, 1.0), ts.from_opacity);
+    try testing.expectEqual(@as(f32, 1.0), ts.to_opacity);
+}
+
+test "transitionStateOf returns pointer to correct element" {
+    const t = testTokens();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, t);
+
+    const ts = scene.transitionStateOf(id.index);
+    try testing.expect(!ts.active_opacity);
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), ts.opacity_timeline_idx);
+
+    // Mutate via the pointer
+    ts.active_opacity = true;
+    ts.opacity_timeline_idx = 42;
+    const ts2 = scene.transitionStateOf(id.index);
+    try testing.expect(ts2.active_opacity);
+    try testing.expectEqual(@as(u32, 42), ts2.opacity_timeline_idx);
+}
+
+test "Scene.reset clears transition state" {
+    const t = testTokens();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, t);
+
+    scene.transitionStateOf(0).active_opacity = true;
+    scene.transitionStateOf(0).opacity_timeline_idx = 7;
+
+    scene.reset();
+
+    // After reset, the transition_state array is cleared (length = 0).
+    try testing.expectEqual(@as(usize, 0), scene._transition_state.items.len);
+}
+
+// ===========================================================================
+// M14-03 — EnterExitState tests
+// ===========================================================================
+
+test "EnterExitState defaults: entering=false, exiting=false, pending_hidden=false" {
+    const ees = C.EnterExitState{};
+    try testing.expect(!ees.entering);
+    try testing.expect(!ees.exiting);
+    try testing.expect(!ees.pending_hidden);
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), ees.enter_timeline_idx);
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), ees.exit_timeline_idx);
+}
+
+test "enterExitStateOf returns pointer to correct element" {
+    const t = testTokens();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, t);
+
+    const ees = scene.enterExitStateOf(id.index);
+    try testing.expect(!ees.entering);
+
+    // Mutate via the pointer
+    ees.entering = true;
+    ees.pending_hidden = true;
+    const ees2 = scene.enterExitStateOf(id.index);
+    try testing.expect(ees2.entering);
+    try testing.expect(ees2.pending_hidden);
+}
+
+test "Scene.reset clears enter/exit state" {
+    const t = testTokens();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<Button text=\"x\"/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    _ = try scene.instantiate(desc, t);
+
+    scene.enterExitStateOf(0).entering = true;
+    scene.enterExitStateOf(0).exit_timeline_idx = 3;
+
+    scene.reset();
+
+    // After reset, the enter_exit_state array is cleared (length = 0).
+    try testing.expectEqual(@as(usize, 0), scene._enter_exit_state.items.len);
+}

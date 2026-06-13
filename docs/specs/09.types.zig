@@ -127,6 +127,17 @@ pub fn applyOpacity(col: Color, factor: f32) Color {
     @compileError("applyOpacity: not implemented");
 }
 
+/// Linearly interpolate between two Colors by factor t [0, 1].
+pub fn lerpColor(a: Color, b: Color, t: f32) Color {
+    const ct = std.math.clamp(t, 0.0, 1.0);
+    return .{
+        .r = @intFromFloat(@as(f32, @floatFromInt(a.r)) + (@as(f32, @floatFromInt(b.r)) - @as(f32, @floatFromInt(a.r))) * ct),
+        .g = @intFromFloat(@as(f32, @floatFromInt(a.g)) + (@as(f32, @floatFromInt(b.g)) - @as(f32, @floatFromInt(a.g))) * ct),
+        .b = @intFromFloat(@as(f32, @floatFromInt(a.b)) + (@as(f32, @floatFromInt(b.b)) - @as(f32, @floatFromInt(a.b))) * ct),
+        .a = @intFromFloat(@as(f32, @floatFromInt(a.a)) + (@as(f32, @floatFromInt(b.a)) - @as(f32, @floatFromInt(a.a))) * ct),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // R46 — Box shadow helper
 // ---------------------------------------------------------------------------

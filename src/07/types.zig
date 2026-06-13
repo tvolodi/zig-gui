@@ -245,6 +245,13 @@ pub const SliderState = struct {
 pub const ProgressState = struct {
     value: f32 = 0,
     indeterminate: bool = false,
+    /// Cached animation phase value synced from AnimTimeline each frame.
+    /// For spinner: used to compute phase_idx (0-7).
+    /// For progress_bar (indeterminate): used directly as band phase.
+    anim_frame_value: f32 = 0,
+    /// Index into AppInner.anim_timelines for spinner rotation or indeterminate animation.
+    /// 0xFFFFFFFF = no active animation.
+    anim_timeline_idx: u32 = 0xFFFFFFFF,
 };
 
 // ---------------------------------------------------------------------------
@@ -452,6 +459,34 @@ fn colorEq(a: theme.Color, b: theme.Color) bool {
 }
 
 // ---------------------------------------------------------------------------
+// M14-02 — Per-element transition state for style animations
+// ---------------------------------------------------------------------------
+
+pub const TransitionState = struct {
+    active_opacity: bool = false,
+    opacity_timeline_idx: u32 = 0xFFFFFFFF,
+    from_opacity: f32 = 1.0,
+    to_opacity: f32 = 1.0,
+
+    active_background: bool = false,
+    background_timeline_idx: u32 = 0xFFFFFFFF,
+    from_background: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    to_background: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+};
+
+// ---------------------------------------------------------------------------
+// M14-03 — Per-element state for enter/exit animations
+// ---------------------------------------------------------------------------
+
+pub const EnterExitState = struct {
+    entering: bool = false,
+    exiting: bool = false,
+    enter_timeline_idx: u32 = 0xFFFFFFFF,
+    exit_timeline_idx: u32 = 0xFFFFFFFF,
+    pending_hidden: bool = false,
+};
+
+// ---------------------------------------------------------------------------
 // Dimension equality helper (tagged union)
 // ---------------------------------------------------------------------------
 
@@ -560,6 +595,11 @@ pub const Scene = struct {
     // M12 RC1 — per-element sticky draw-time y-offset (0 = not sticky or not active).
     _sticky_offset_y: std.ArrayListUnmanaged(f32) = .empty,
 
+    // M14-02 — Transition state parallel array.
+    _transition_state: std.ArrayListUnmanaged(TransitionState) = .empty,
+    // M14-03 — Enter/exit state parallel array.
+    _enter_exit_state: std.ArrayListUnmanaged(EnterExitState) = .empty,
+
     // R93 — Class string parallel array for theme live-swap (one entry per element).
     // Stores the `NodeDesc.classes` slice (owned by the markup arena — no copy needed).
     // Used by rebuildStyles to re-run class resolution after a theme change.
@@ -633,6 +673,9 @@ pub const Scene = struct {
         self._pinch.deinit(self.gpa);
         // M12 RC1
         self._sticky_offset_y.deinit(self.gpa);
+        // M14-02/M14-03
+        self._transition_state.deinit(self.gpa);
+        self._enter_exit_state.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -678,6 +721,9 @@ pub const Scene = struct {
         self._pinch.clearRetainingCapacity();
         // M12 RC1
         self._sticky_offset_y.clearRetainingCapacity();
+        // M14-02/M14-03
+        self._transition_state.items.len = 0;
+        self._enter_exit_state.items.len = 0;
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -847,6 +893,16 @@ pub const Scene = struct {
     /// M13-04 RD3 — Set the SDF icon name for element at idx.
     pub fn setIconName(self: *Scene, idx: u32, name: []const u8) void {
         self._icon_name.items[idx] = name;
+    }
+
+    // M14-02 — Transition state accessor.
+    pub fn transitionStateOf(self: *Scene, idx: u32) *TransitionState {
+        return &self._transition_state.items[idx];
+    }
+
+    // M14-03 — Enter/exit state accessor.
+    pub fn enterExitStateOf(self: *Scene, idx: u32) *EnterExitState {
+        return &self._enter_exit_state.items[idx];
     }
 
     pub fn count(self: *Scene) u32 {
@@ -2115,6 +2171,20 @@ pub const Scene = struct {
             self._sticky_offset_y.items.len = needed;
         }
         self._sticky_offset_y.items[id.index] = 0;
+
+        // M14-02: transition state
+        try self._transition_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._transition_state.items.len <= id.index) {
+            self._transition_state.items.len = needed;
+        }
+        self._transition_state.items[id.index] = .{};
+
+        // M14-03: enter/exit state
+        try self._enter_exit_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._enter_exit_state.items.len <= id.index) {
+            self._enter_exit_state.items.len = needed;
+        }
+        self._enter_exit_state.items[id.index] = .{};
 
         // RB0: parse cursor= attribute
         for (desc.attrs) |attr| {

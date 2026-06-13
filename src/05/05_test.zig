@@ -174,3 +174,31 @@ test "ComputedStyle defaults" {
     try testing.expectEqual(@as(f32, 0), cs.gap);
     try testing.expectEqual(@as(f32, 0), cs.radius);
 }
+
+// ===========================================================================
+// M14-02 — ComputedStyle transition defaults
+// ===========================================================================
+
+test "ComputedStyle transition fields default to false/0" {
+    const cs = Th.ComputedStyle{};
+    try testing.expect(!cs.transition_opacity);
+    try testing.expect(!cs.transition_background);
+    try testing.expect(!cs.transition_colors);
+    try testing.expectEqual(@as(u32, 0), cs.transition_duration);
+}
+
+// ===========================================================================
+// M14-03 — ComputedStyle enter/exit defaults
+// ===========================================================================
+
+test "ComputedStyle enter/exit fields default to false" {
+    const cs = Th.ComputedStyle{};
+    try testing.expect(!cs.animate_in);
+    try testing.expect(!cs.animate_out);
+    try testing.expect(!cs.fade_in);
+    try testing.expect(!cs.fade_out);
+    try testing.expect(!cs.slide_in_from_top);
+    try testing.expect(!cs.slide_in_from_bottom);
+    try testing.expect(!cs.slide_out_to_top);
+    try testing.expect(!cs.slide_out_to_bottom);
+}

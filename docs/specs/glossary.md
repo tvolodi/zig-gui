@@ -1079,3 +1079,78 @@ is the pure function that multiplies each text size and clamps to `[6, 96]`.
 
 See: R94, `src/app/app.zig`, `src/05/types.zig` `Tokens.scaled`.
 
+---
+
+## AnimTimeline
+
+A pure scalar animator (`src/app/anim_timeline.zig`) that drives a `f32` value from 0→1 over a
+configurable `duration` (in frames) with an easing function. Supports repeating (loop), yoyo
+(ping-pong), and four easing modes (linear, ease-in, ease-out, ease-in-out). The timeline does
+NOT hold a subscriber list or dirty-bitset reference — the caller (`AppInner.tickAnimations`)
+is responsible for marking elements dirty after each tick. Used as the foundation for style
+transitions (M14-02), enter/exit animations (M14-03), and spinner/progress animation (M14-04).
+
+See: RD6 (M14-01), `src/app/anim_timeline.zig`.
+
+---
+
+## TransitionState
+
+Per-element state stored in `Scene._transition_state` (a parallel array) that tracks active
+style transitions. For each transitioning property (opacity, background), stores the from/to
+values and the index of the driving `AnimTimeline` in `AppInner.anim_timelines`. When a
+transition completes, `syncAnimationState` resets the active flag so the renderer uses the
+base `_style` value. See: RD7 (M14-02), `src/07/types.zig`.
+
+---
+
+## EnterExitState
+
+Per-element state stored in `Scene._enter_exit_state` (a parallel array) that tracks active
+enter/exit animations. When an element with `animate-out` is hidden, the state records
+`exiting = true` and `pending_hidden = true` while the exit timeline plays; the actual
+`_hidden` bit is set only after the timeline completes. For `animate-in`, the element is
+shown immediately but its opacity is animated from 0→1. See: RD8 (M14-03), `src/07/types.zig`.
+
+---
+
+## prefer_reduced_motion
+
+A `bool` flag on `AppInner` (M14-05). When `true`, `AppInner.tickAnimations()` immediately
+completes all active `AnimTimeline` instances (setting `value = 1.0`, `running = false`)
+instead of advancing them by one frame. This makes all transitions, enter/exit animations, and
+spinner/progress animations jump to their end state instantly. Set via
+`AppInner.setReducedMotion(bool)`. See: RDA (M14-05), `src/app/app.zig`.
+
+---
+
+## transition-opacity / transition-background / transition-colors
+
+Tailwind utility classes (M14-02) that enable smooth interpolation when the corresponding
+`ComputedStyle` field changes. `transition-opacity` enables opacity blending, `transition-background`
+enables background color blending, `transition-colors` enables both. The transition duration in
+frames is set by the `duration-{n}` class (e.g. `duration-60` = 60 frames ≈ 1 s at 60 fps).
+See: RD7 (M14-02), `docs/specs/06.types.zig`.
+
+---
+
+## animate-in / animate-out
+
+Tailwind utility classes (M14-03) that enable fade transitions when an element's visibility
+state changes. `animate-in` fades the element from transparent to opaque when `setHidden(false)`
+is called. `animate-out` fades the element from opaque to transparent when `setHidden(true)` is
+called, deferring the actual `_hidden` bit until the animation completes. Duration is set by
+the `duration-{n}` class. Combine with `fade-in`/`fade-out` class. Slide variants
+(`slide-in-from-top`, etc.) are defined but not emitted by the renderer in v1.
+See: RD8 (M14-03), `docs/specs/06.types.zig`.
+
+---
+
+## lerpColor
+
+A pure helper function (`docs/specs/09.types.zig`) that linearly interpolates between two
+`Color` values by a factor `t ∈ [0, 1]`. Used by `syncAnimationState` to blend transition
+from/to background colors. Each channel (r, g, b, a) is interpolated independently as floats
+and truncated to `u8`. `t` is clamped to [0, 1] internally.
+See: RD7 (M14-02), `docs/specs/09.types.zig` `lerpColor`.
+

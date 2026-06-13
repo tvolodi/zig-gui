@@ -225,17 +225,17 @@ Closes the gap between functional and polished.
 
 ---
 
-## Milestone 14 — Animation `planned`
+## Milestone 14 — Animation `done`
 
-A minimal, principled animation model that fits the architecture.
+A minimal, principled animation model that fits the architecture. Requires: RD6, RD7, RD8, RD9, RDA.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M14-01 | **Animation timeline** — `AnimTimeline` drives a `f32` value from 0→1 over a duration with an easing function; ticks mark subscribed elements dirty | M2-01 |
-| M14-02 | **Style transitions** — `transition-{opacity,background,border}` Tailwind class triggers an `AnimTimeline` when the value changes; blends old and new `ComputedStyle` fields over the duration | M14-01, 09 |
-| M14-03 | **Enter / exit animations** — `animate-in` / `animate-out` classes play a fade+translate when an element's `isHidden` state changes | M14-01, M5-03 |
-| M14-04 | **Spinner and progress animation** — `ProgressBar` indeterminate mode and `Spinner` use a proper `AnimTimeline` instead of marking dirty every frame | M14-01, M7-04 |
-| M14-05 | **Reduced-motion respect** — `prefer_reduced_motion: bool` on `AppInner` disables all `AnimTimeline` playback; set by the app from OS accessibility settings | M14-01 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M14-01 | **Animation timeline** — `AnimTimeline` drives a `f32` value from 0→1 over a duration with an easing function; ticks mark subscribed elements dirty | M2-01 | [RD6](requirements/RD6_animation_timeline.md) | `done` |
+| M14-02 | **Style transitions** — `transition-{opacity,background}` Tailwind class triggers an `AnimTimeline` when the value changes; blends old and new `ComputedStyle` fields over the duration | M14-01, 09 | [RD7](requirements/RD7_style_transitions.md) | `done` |
+| M14-03 | **Enter / exit animations** — `animate-in` / `animate-out` classes play a fade when an element's `isHidden` state changes | M14-01, M5-03 | [RD8](requirements/RD8_enter_exit_animations.md) | `done` |
+| M14-04 | **Spinner and progress animation** — `ProgressBar` indeterminate mode and `Spinner` use a proper `AnimTimeline` instead of `frame_count` arithmetic | M14-01, M7-04 | [RD9](requirements/RD9_spinner_progress_animation.md) | `done` |
+| M14-05 | **Reduced-motion respect** — `prefer_reduced_motion: bool` on `AppInner` disables all `AnimTimeline` playback | M14-01 | [RDA](requirements/RDA_reduced_motion.md) | `done` |
 
 ---
 

@@ -643,6 +643,36 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.shadow_offset_y = 0;
         r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
+        // --- M14-02 Transition classes ---
+    } else if (std.mem.eql(u8, cls, "transition-opacity")) {
+        r.style.transition_opacity = true;
+    } else if (std.mem.eql(u8, cls, "transition-background")) {
+        r.style.transition_background = true;
+    } else if (std.mem.eql(u8, cls, "transition-colors")) {
+        r.style.transition_opacity = true;
+        r.style.transition_background = true;
+    } else if (cls.len > 9 and std.mem.eql(u8, cls[0..9], "duration-")) {
+        const val = std.fmt.parseInt(u32, cls[9..], 10) catch { return; };
+        r.style.transition_duration = val;
+        return;
+        // --- M14-03 Enter/exit classes ---
+    } else if (std.mem.eql(u8, cls, "animate-in")) {
+        r.style.animate_in = true;
+    } else if (std.mem.eql(u8, cls, "animate-out")) {
+        r.style.animate_out = true;
+    } else if (std.mem.eql(u8, cls, "fade-in")) {
+        r.style.fade_in = true;
+    } else if (std.mem.eql(u8, cls, "fade-out")) {
+        r.style.fade_out = true;
+    } else if (std.mem.eql(u8, cls, "slide-in-from-top")) {
+        r.style.slide_in_from_top = true;
+    } else if (std.mem.eql(u8, cls, "slide-in-from-bottom")) {
+        r.style.slide_in_from_bottom = true;
+    } else if (std.mem.eql(u8, cls, "slide-out-to-top")) {
+        r.style.slide_out_to_top = true;
+    } else if (std.mem.eql(u8, cls, "slide-out-to-bottom")) {
+        r.style.slide_out_to_bottom = true;
+
         // --- M12 RC0 — absolute positioning classes ---
     } else if (std.mem.eql(u8, cls, "absolute")) {
         r.layout.position = .absolute;

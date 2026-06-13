@@ -1058,6 +1058,102 @@ test "buildDrawList: parent opacity=0.5, child opacity=0.5 produces effective 0.
     try testing.expect(inner_found);
 }
 
+// ---------------------------------------------------------------------------
+// M14-02 — lerpColor tests
+// ---------------------------------------------------------------------------
+
+test "lerpColor blends correctly at t=0.5" {
+    const a = C.Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    const b = C.Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const m = C.lerpColor(a, b, 0.5);
+    try testing.expectEqual(@as(u8, 127), m.r);
+    try testing.expectEqual(@as(u8, 127), m.g);
+    try testing.expectEqual(@as(u8, 127), m.b);
+    try testing.expectEqual(@as(u8, 127), m.a);
+}
+
+test "lerpColor at t=0 returns a" {
+    const a = C.Color{ .r = 100, .g = 150, .b = 200, .a = 50 };
+    const b = C.Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const result = C.lerpColor(a, b, 0.0);
+    try testing.expectEqual(@as(u8, 100), result.r);
+    try testing.expectEqual(@as(u8, 150), result.g);
+    try testing.expectEqual(@as(u8, 200), result.b);
+    try testing.expectEqual(@as(u8, 50), result.a);
+}
+
+test "lerpColor at t=1 returns b" {
+    const a = C.Color{ .r = 100, .g = 150, .b = 200, .a = 50 };
+    const b = C.Color{ .r = 255, .g = 10, .b = 30, .a = 200 };
+    const result = C.lerpColor(a, b, 1.0);
+    try testing.expectEqual(@as(u8, 255), result.r);
+    try testing.expectEqual(@as(u8, 10), result.g);
+    try testing.expectEqual(@as(u8, 30), result.b);
+    try testing.expectEqual(@as(u8, 200), result.a);
+}
+
+test "lerpColor clamps t below 0 returns a" {
+    const a = C.Color{ .r = 50, .g = 60, .b = 70, .a = 80 };
+    const b = C.Color{ .r = 200, .g = 210, .b = 220, .a = 230 };
+    const result = C.lerpColor(a, b, -0.5);
+    // t clamped to 0 → returns a unchanged
+    try testing.expectEqual(@as(u8, 50), result.r);
+    try testing.expectEqual(@as(u8, 60), result.g);
+    try testing.expectEqual(@as(u8, 70), result.b);
+    try testing.expectEqual(@as(u8, 80), result.a);
+}
+
+test "lerpColor clamps t above 1 returns b" {
+    const a = C.Color{ .r = 10, .g = 20, .b = 30, .a = 40 };
+    const b = C.Color{ .r = 100, .g = 110, .b = 120, .a = 130 };
+    const result = C.lerpColor(a, b, 2.0);
+    // t clamped to 1 → returns b unchanged
+    try testing.expectEqual(@as(u8, 100), result.r);
+    try testing.expectEqual(@as(u8, 110), result.g);
+    try testing.expectEqual(@as(u8, 120), result.b);
+    try testing.expectEqual(@as(u8, 130), result.a);
+}
+
+test "lerpColor at t=0.25" {
+    const a = C.Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    const b = C.Color{ .r = 100, .g = 100, .b = 100, .a = 200 };
+    const result = C.lerpColor(a, b, 0.25);
+    // 0 + (100-0)*0.25 = 25
+    try testing.expectEqual(@as(u8, 25), result.r);
+    try testing.expectEqual(@as(u8, 25), result.g);
+    try testing.expectEqual(@as(u8, 25), result.b);
+    // 0 + (200-0)*0.25 = 50
+    try testing.expectEqual(@as(u8, 50), result.a);
+}
+
+test "lerpColor identity: lerping same color returns that color" {
+    const c = C.Color{ .r = 123, .g = 45, .b = 67, .a = 89 };
+    const result = C.lerpColor(c, c, 0.5);
+    try testing.expectEqual(@as(u8, 123), result.r);
+    try testing.expectEqual(@as(u8, 45), result.g);
+    try testing.expectEqual(@as(u8, 67), result.b);
+    try testing.expectEqual(@as(u8, 89), result.a);
+}
+
+test "lerpColor symmetry: lerp(a,b,t) == lerp(b,a,1-t)" {
+    const a = C.Color{ .r = 10, .g = 20, .b = 30, .a = 40 };
+    const b = C.Color{ .r = 200, .g = 180, .b = 160, .a = 220 };
+    const t: f32 = 0.3;
+    const fwd = C.lerpColor(a, b, t);
+    const rev = C.lerpColor(b, a, 1.0 - t);
+    try testing.expectEqual(fwd.r, rev.r);
+    try testing.expectEqual(fwd.g, rev.g);
+    try testing.expectEqual(fwd.b, rev.b);
+    try testing.expectEqual(fwd.a, rev.a);
+}
+
+test "lerpColor preserves exact endpoint when a == b" {
+    const c = C.Color{ .r = 42, .g = 73, .b = 128, .a = 200 };
+    try testing.expectEqual(c.r, C.lerpColor(c, c, 0.0).r);
+    try testing.expectEqual(c.r, C.lerpColor(c, c, 0.5).r);
+    try testing.expectEqual(c.r, C.lerpColor(c, c, 1.0).r);
+}
+
 test "buildDrawList: element with shadow-md emits shadow rects before background rect" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

@@ -323,6 +323,44 @@ pub const ComputedStyle = struct {
     font_italic: bool = false,
     /// M13-01 RD0 — gradient direction (0=none, 1=right, 2=bottom, 3=bottom_right).
     gradient_direction: u32 = 0,
+
+    /// M14-02 — Transition property flags.
+    transition_opacity: bool = false,
+    transition_background: bool = false,
+    transition_colors: bool = false,
+    /// Transition duration in frames. 0 = no transition.
+    transition_duration: u32 = 0,
+    /// M14-03 — Enter/exit animation flags.
+    animate_in: bool = false,
+    animate_out: bool = false,
+    fade_in: bool = false,
+    fade_out: bool = false,
+    slide_in_from_top: bool = false,
+    slide_in_from_bottom: bool = false,
+    slide_out_to_top: bool = false,
+    slide_out_to_bottom: bool = false,
+};
+
+/// M14-02 — Per-element transition state for style animations.
+pub const TransitionState = struct {
+    active_opacity: bool = false,
+    opacity_timeline_idx: u32 = 0xFFFFFFFF,
+    from_opacity: f32 = 1.0,
+    to_opacity: f32 = 1.0,
+
+    active_background: bool = false,
+    background_timeline_idx: u32 = 0xFFFFFFFF,
+    from_background: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    to_background: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+};
+
+/// M14-03 — Per-element state for enter/exit animations.
+pub const EnterExitState = struct {
+    entering: bool = false,
+    exiting: bool = false,
+    enter_timeline_idx: u32 = 0xFFFFFFFF,
+    exit_timeline_idx: u32 = 0xFFFFFFFF,
+    pending_hidden: bool = false,
 };
 
 // ---------------------------------------------------------------------------
