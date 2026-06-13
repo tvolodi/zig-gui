@@ -29,7 +29,16 @@ const FlexCb = struct {
     pub fn onChange(ptr: *anyopaque) void {
         const self: *FlexCb = @ptrCast(@alignCast(ptr));
         const checked = self.scene.isCheckboxChecked(self.checkbox_idx);
-        self.scene.elements.layout.items[self.card_idx].flex_grow = if (checked) 1 else 0;
+        const node = &self.scene.elements.layout.items[self.card_idx];
+        if (checked) {
+            node.flex_grow  = 1;
+            node.flex_basis = .{ .px = 0 };
+            node.height     = .auto;
+        } else {
+            node.flex_grow  = 0;
+            node.flex_basis = .auto;
+            node.height     = .{ .px = 32 }; // h-8
+        }
         if (self.card_idx < self.scene.elements.dirty.bit_length)
             self.scene.elements.dirty.set(self.card_idx);
     }
