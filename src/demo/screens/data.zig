@@ -68,7 +68,7 @@ pub fn build(
     // --- 4a. Data table ---
     const sub_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Showing 200 rows \xe2\x80\x94 click a header to sort" } }};
     const sub = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &sub_attrs };
-    const table = NodeDesc{ .tag = "DataTable", .classes = "flex-1" };
+    const table = NodeDesc{ .tag = "DataTable", .classes = "h-64 shrink-0" };
 
     const table_sect_children = [3]NodeDesc{ sub, table, NodeDesc{ .tag = "Separator" } };
     const table_sect = NodeDesc{ .tag = "Column", .classes = "gap-2", .children = &table_sect_children };
@@ -121,7 +121,7 @@ pub fn build(
         .{ .tag = "Text", .attrs = &r19_attrs }, .{ .tag = "Text", .attrs = &r20_attrs },
     };
     const scroll_inner = NodeDesc{ .tag = "Column", .classes = "gap-1 p-2", .children = &scroll_rows };
-    const scroll_view  = NodeDesc{ .tag = "ScrollView", .classes = "h-48", .children = &[1]NodeDesc{scroll_inner} };
+    const scroll_view  = NodeDesc{ .tag = "ScrollView", .classes = "h-48 shrink-0", .children = &[1]NodeDesc{scroll_inner} };
 
     const scroll_sect_children = [3]NodeDesc{ scroll_h, scroll_note, scroll_view };
     const scroll_sect = NodeDesc{ .tag = "Column", .classes = "gap-2", .children = &scroll_sect_children };
@@ -129,8 +129,11 @@ pub fn build(
     // --- Assemble ---
     const body_children = [3]NodeDesc{ table_sect, scroll_sect, NodeDesc{ .tag = "Separator" } };
     const body = NodeDesc{ .tag = "Column", .classes = "gap-4", .children = &body_children };
+    const scroll = NodeDesc{ .tag = "ScrollView", .classes = "flex-1", .children = &[1]NodeDesc{
+        NodeDesc{ .tag = "Column", .classes = "p-2", .children = &[1]NodeDesc{body} },
+    } };
 
-    const content_children = [3]NodeDesc{ heading, sep, body };
+    const content_children = [4]NodeDesc{ heading, sep, scroll, NodeDesc{ .tag = "Separator" } };
     const content = NodeDesc{ .tag = "Column", .classes = "flex-1 gap-3 p-6", .children = &content_children };
 
     const root_children = [2]NodeDesc{ sidebar.buildSidebar(), content };
@@ -139,11 +142,11 @@ pub fn build(
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 5); // 5 = Data button
 
-    // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=body,
-    //      14=table_sect,15=sub,16=table,17=sep2,
-    //      18=scroll_sect,...
-    scene.setTableData(16, &_table_rows);
-    scene.setTableColumns(16, &_columns);
+    // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=scroll,
+    //      14=inner-col,15=body,16=table_sect,17=sub,18=table,19=sep2,
+    //      20=scroll_sect,...
+    scene.setTableData(18, &_table_rows);
+    scene.setTableColumns(18, &_columns);
 
 
 }

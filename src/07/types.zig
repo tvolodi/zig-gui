@@ -96,7 +96,7 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
         .card => .{ .display = .flex, .direction = .column },
         .scrollview => .{ .display = .block, .overflow = .hidden },
         .textarea => .{ .display = .block, .overflow = .hidden },
-        .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 1 } },
+        .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 4 }, .flex_shrink = 0, .min_size = .{ .h = 4 } },
         .checkbox => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
         .radio => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
         .slider => .{ .display = .block, .height = .{ .px = 24 }, .flex_shrink = 0, .min_size = .{ .h = 24 } },
@@ -120,7 +120,7 @@ pub fn defaultStyleFor(kind: WidgetKind, tokens: Tokens) ComputedStyle {
         .button => theme.buttonPrimary(tokens),
         .card => theme.cardSurface(tokens),
         .input, .dropdown, .textarea => theme.inputDefault(tokens),
-        .separator => ComputedStyle{ .background = tokens.border_default },
+        .separator => ComputedStyle{ .background = tokens.border_strong },
         .text => ComputedStyle{ .text_color = tokens.text_body, .font_size = tokens.text_base },
         .checkbox, .radio => ComputedStyle{ .text_color = tokens.text_body },
         .row, .column, .scrollview, .image, .icon, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table => ComputedStyle{},
@@ -647,6 +647,28 @@ pub const Scene = struct {
             const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, str, style.font_size, 1e6, self.font_family);
             defer self.gpa.free(para.glyphs);
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
+        }
+
+        // Rasterize data_table column headers and first-row cell text so their glyphs
+        // are in the atlas before buildDrawList calls emitGlyphs on them directly.
+        for (self._table_state.items, 0..) |*ts, i| {
+            if (i >= self._kind.items.len) break;
+            if (self._kind.items[i] != .data_table) continue;
+            const tbl_font = font;
+            // Column headers (bold, 13px)
+            for (ts.columns[0..ts.col_count]) |*col| {
+                const hdr = col.headerSlice();
+                if (hdr.len == 0) continue;
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, hdr, 13.0, 1e6, self.font_family);
+                defer self.gpa.free(para.glyphs);
+            }
+            // Warm the full printable ASCII range at 13px so all cell text renders
+            // immediately without waiting multiple frames for glyph rasterization.
+            {
+                const ascii_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,_-()/%+";
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, ascii_chars, 13.0, 1e6, self.font_family);
+                defer self.gpa.free(para.glyphs);
+            }
         }
 
         // Rasterize dropdown option labels so their glyphs are in the atlas before
