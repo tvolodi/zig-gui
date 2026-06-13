@@ -62,6 +62,155 @@ pub const ImageState = struct {
     tint: theme.Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
 };
 
+// ---------------------------------------------------------------------------
+// RG1 — Accessibility tree types
+// ---------------------------------------------------------------------------
+
+/// RG1 — Semantic roles for accessibility tree (AT-SPI, UIA, Narrator, Orca, NVDA).
+pub const AccessRole = enum(u8) {
+    none,           // element has no semantic role (e.g. a generic container)
+    text,           // static text, not interactive
+    button,         // clickable button
+    link,           // hyperlink (navigation)
+    checkbox,       // boolean toggle
+    radio,          // one-of-many selection
+    combobox,       // dropdown selection widget
+    listbox,        // list of selectable items
+    option,         // item within a list or combo
+    slider,         // continuous range input
+    spinbutton,     // numeric input with +/- spinners
+    textbox,        // single-line text input
+    textarea,       // multi-line text input
+    list,           // container for list items (role=list in markup)
+    listitem,       // child of a list (role=listitem in markup)
+    tab,            // tab header in a tablist
+    tablist,        // container of tabs
+    tabpanel,       // content area of an active tab
+    menu,           // context menu or app menu
+    menuitem,       // item within a menu
+    menuitemcheckbox, // togglable menu item
+    menuitemradio,  // radio-style menu item
+    dialog,         // modal dialog overlay
+    progressbar,    // progress indicator
+    tooltip,        // hover-triggered info popup
+    img,            // image / icon element
+    region,         // semantic region (e.g. main, footer, aside)
+};
+
+/// RG1 — Accessibility state flags (packed into u8).
+pub const AccessState = packed struct(u8) {
+    /// Whether the element is currently disabled and cannot be interacted with
+    disabled: bool = false,
+    /// Whether a checkbox/radio/toggle is in the checked/selected/on state
+    checked: bool = false,
+    /// Whether the element currently has keyboard focus
+    focused: bool = false,
+    /// Whether an expandable element (accordion, details, menu) is open
+    expanded: bool = false,
+    /// Whether the element is hidden from the accessibility tree and UI
+    hidden: bool = false,
+    /// Whether the element is selected (e.g. in a listbox or tabs)
+    selected: bool = false,
+    /// Whether the element has invalid input (form validation error)
+    invalid: bool = false,
+    /// Padding for u8 alignment
+    _padding: u1 = 0,
+};
+
+/// RG1 — Accessibility node for a single element in the tree.
+/// Parallel array indexed by element index, same as _kind[], _style[], etc.
+pub const AccessNode = struct {
+    /// Semantic role of this element (e.g. button, text, list)
+    role: AccessRole = .none,
+
+    /// Human-readable name (from aria-label, label child, or text content)
+    /// Owned by the Scene arena; may be empty string if unnamed
+    name: []const u8 = "",
+
+    /// Optional description or long-form label (aria-description attribute)
+    /// Owned by the Scene arena; may be empty string if not set
+    description: []const u8 = "",
+
+    /// Semantic state flags (disabled, checked, focused, expanded, hidden, selected, invalid)
+    state: AccessState = .{},
+
+    /// For checkbox/radio/toggle: current value (true = checked, false = unchecked)
+    /// For slider/spinbutton: current numeric value as f32
+    /// For text input: not used (name field carries the content)
+    /// For combobox/listbox: index of selected item (or NONE if no selection)
+    value: f32 = 0.0,
+
+    /// For rangeable elements (slider, progress bar): minimum value
+    value_min: f32 = 0.0,
+
+    /// For rangeable elements: maximum value
+    value_max: f32 = 100.0,
+};
+
+/// RG1 — Parse a role string from markup into an AccessRole enum.
+/// Returns null if the role string is not recognized.
+pub fn parseAccessRole(role_str: []const u8) ?AccessRole {
+    const eql = std.mem.eql;
+    if (eql(u8, role_str, "none")) return .none;
+    if (eql(u8, role_str, "text")) return .text;
+    if (eql(u8, role_str, "button")) return .button;
+    if (eql(u8, role_str, "link")) return .link;
+    if (eql(u8, role_str, "checkbox")) return .checkbox;
+    if (eql(u8, role_str, "radio")) return .radio;
+    if (eql(u8, role_str, "combobox")) return .combobox;
+    if (eql(u8, role_str, "listbox")) return .listbox;
+    if (eql(u8, role_str, "option")) return .option;
+    if (eql(u8, role_str, "slider")) return .slider;
+    if (eql(u8, role_str, "spinbutton")) return .spinbutton;
+    if (eql(u8, role_str, "textbox")) return .textbox;
+    if (eql(u8, role_str, "textarea")) return .textarea;
+    if (eql(u8, role_str, "list")) return .list;
+    if (eql(u8, role_str, "listitem")) return .listitem;
+    if (eql(u8, role_str, "tab")) return .tab;
+    if (eql(u8, role_str, "tablist")) return .tablist;
+    if (eql(u8, role_str, "tabpanel")) return .tabpanel;
+    if (eql(u8, role_str, "menu")) return .menu;
+    if (eql(u8, role_str, "menuitem")) return .menuitem;
+    if (eql(u8, role_str, "menuitemcheckbox")) return .menuitemcheckbox;
+    if (eql(u8, role_str, "menuitemradio")) return .menuitemradio;
+    if (eql(u8, role_str, "dialog")) return .dialog;
+    if (eql(u8, role_str, "progressbar")) return .progressbar;
+    if (eql(u8, role_str, "tooltip")) return .tooltip;
+    if (eql(u8, role_str, "img")) return .img;
+    if (eql(u8, role_str, "region")) return .region;
+    return null;
+}
+
+/// RG1 — Map WidgetKind to default AccessRole.
+pub fn defaultAccessRoleFor(kind: WidgetKind) AccessRole {
+    return switch (kind) {
+        .text => .text,
+        .button => .button,
+        .input => .textbox,
+        .checkbox => .checkbox,
+        .radio => .radio,
+        .dropdown => .combobox,
+        .scrollview => .none,
+        .card => .none,
+        .row => .none,
+        .column => .none,
+        .textarea => .textarea,
+        .slider => .slider,
+        .progress_bar => .progressbar,
+        .spinner => .progressbar,
+        .tabs => .tablist,
+        .tab_item => .tabpanel,
+        .accordion => .region,
+        .date_picker => .combobox,
+        .avatar => .img,
+        .badge => .text,
+        .separator => .none,
+        .icon => .img,
+        .image => .img,
+        .data_table => .none,
+    };
+}
+
 /// Map a markup tag to a widget kind. Unknown tag → null.
 pub fn tagToKind(tag: []const u8) ?WidgetKind {
     const eql = std.mem.eql;
@@ -606,6 +755,12 @@ pub const Scene = struct {
     // NOTE: Inline style:* overrides are NOT preserved through a theme swap (v1 limitation).
     _classes: std.ArrayListUnmanaged([]const u8) = .empty,
 
+    // RG1 — Accessibility tree parallel array (one entry per element).
+    // Indexed by element index, same as kind[], style[], text[], etc.
+    // Populated during instantiate(); kept in sync with element tree.
+    // Owned by the Scene arena.
+    _access_nodes: std.ArrayListUnmanaged(AccessNode) = .empty,
+
     // R73 — Frame counter and timestamp for animation (updated each frame by app).
     frame_count: u64 = 0,
     frame_time_ms: u64 = 0,
@@ -676,6 +831,8 @@ pub const Scene = struct {
         // M14-02/M14-03
         self._transition_state.deinit(self.gpa);
         self._enter_exit_state.deinit(self.gpa);
+        // RG1 — Accessibility tree
+        self._access_nodes.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -724,6 +881,8 @@ pub const Scene = struct {
         // M14-02/M14-03
         self._transition_state.items.len = 0;
         self._enter_exit_state.items.len = 0;
+        // RG1 — Accessibility tree
+        self._access_nodes.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -1708,6 +1867,54 @@ pub const Scene = struct {
         return self.instantiateNode(desc, tokens, parent_id);
     }
 
+    // -----------------------------------------------------------------------
+    // RG1 — Accessibility tree API
+    // -----------------------------------------------------------------------
+
+    /// Return mutable pointer to the AccessNode for element at idx.
+    /// Does NOT check bounds; caller must ensure idx is valid.
+    pub fn accessNodeOf(self: *Scene, idx: u32) *AccessNode {
+        return &self._access_nodes.items[idx];
+    }
+
+    /// Set the semantic role for element idx. Mark element dirty.
+    pub fn setAccessRole(self: *Scene, idx: u32, role: AccessRole) void {
+        self._access_nodes.items[idx].role = role;
+        self.elements.markDirty(idx);
+    }
+
+    /// Set the human-readable name for element idx. Allocate into arena if needed.
+    /// Mark element dirty.
+    pub fn setAccessName(self: *Scene, idx: u32, name: []const u8) void {
+        self._access_nodes.items[idx].name = name;
+        self.elements.markDirty(idx);
+    }
+
+    /// Set the description / long-form label for element idx.
+    pub fn setAccessDescription(self: *Scene, idx: u32, desc: []const u8) void {
+        self._access_nodes.items[idx].description = desc;
+        self.elements.markDirty(idx);
+    }
+
+    /// Set the state flags for element idx. Mark element dirty.
+    pub fn setAccessState(self: *Scene, idx: u32, state: AccessState) void {
+        self._access_nodes.items[idx].state = state;
+        self.elements.markDirty(idx);
+    }
+
+    /// Set the numeric/index value for element idx (slider, spinner, radio index, etc.).
+    pub fn setAccessValue(self: *Scene, idx: u32, value: f32) void {
+        self._access_nodes.items[idx].value = value;
+        self.elements.markDirty(idx);
+    }
+
+    /// Set min/max range for a rangeable element (slider, progress bar, spinbutton).
+    pub fn setAccessValueRange(self: *Scene, idx: u32, min: f32, max: f32) void {
+        self._access_nodes.items[idx].value_min = min;
+        self._access_nodes.items[idx].value_max = max;
+        self.elements.markDirty(idx);
+    }
+
     // --- private helpers ---
 
     /// Apply inline style:* attributes to a ComputedStyle. (R50)
@@ -2185,6 +2392,33 @@ pub const Scene = struct {
             self._enter_exit_state.items.len = needed;
         }
         self._enter_exit_state.items[id.index] = .{};
+
+        // RG1: accessibility node
+        try self._access_nodes.ensureTotalCapacity(self.gpa, needed);
+        if (self._access_nodes.items.len <= id.index) {
+            self._access_nodes.items.len = needed;
+        }
+        // Initialize AccessNode with default role based on kind
+        var access_node: AccessNode = .{
+            .role = defaultAccessRoleFor(kind),
+        };
+        // RG4: If desc has a parsed role, override the default
+        if (desc.role.len > 0) {
+            if (parseAccessRole(desc.role)) |parsed_role| {
+                access_node.role = parsed_role;
+            }
+        }
+        // RG4: Set accessibility name from aria-label or text_val (extracted above)
+        if (desc.aria_label.len > 0) {
+            access_node.name = desc.aria_label;
+        } else if (text_val) |tv| {
+            access_node.name = tv;
+        }
+        // RG4: Set accessibility description from aria-description
+        if (desc.aria_description.len > 0) {
+            access_node.description = desc.aria_description;
+        }
+        self._access_nodes.items[id.index] = access_node;
 
         // RB0: parse cursor= attribute
         for (desc.attrs) |attr| {

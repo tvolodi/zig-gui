@@ -37,6 +37,10 @@ pub const NodeDesc = struct {
     classes: []const u8 = "", // value of class="..." ("" if absent)
     attrs: []const Attr = &.{}, // every attribute except class
     children: []const NodeDesc = &.{},
+    // RG4 — Accessibility attributes
+    role: []const u8 = "", // value of role="..." (e.g. "button", "list")
+    aria_label: []const u8 = "", // value of aria-label="..."
+    aria_description: []const u8 = "", // value of aria-description="..."
 };
 
 /// Error variants returned by `parse` on failure.
@@ -175,6 +179,10 @@ const Parser = struct {
         // Collect attributes
         var attrs_list: std.ArrayListUnmanaged(Attr) = .empty;
         var classes: []const u8 = "";
+        // RG4 — Accessibility attributes
+        var role: []const u8 = "";
+        var aria_label: []const u8 = "";
+        var aria_description: []const u8 = "";
 
         while (true) {
             p.skipWs();
@@ -194,6 +202,24 @@ const Parser = struct {
                     .literal => |s| classes = s,
                     .bind => |s| classes = s,
                 }
+            } else if (std.mem.eql(u8, name, "role")) {
+                // RG4 — parse role attribute (only literal, not bind paths)
+                switch (val) {
+                    .literal => |s| role = s,
+                    .bind => {}, // ignore bind paths for role
+                }
+            } else if (std.mem.eql(u8, name, "aria-label")) {
+                // RG4 — parse aria-label attribute
+                switch (val) {
+                    .literal => |s| aria_label = s,
+                    .bind => |s| aria_label = s,
+                }
+            } else if (std.mem.eql(u8, name, "aria-description")) {
+                // RG4 — parse aria-description attribute
+                switch (val) {
+                    .literal => |s| aria_description = s,
+                    .bind => |s| aria_description = s,
+                }
             } else {
                 try attrs_list.append(p.alloc, Attr{ .name = name, .value = val });
             }
@@ -210,6 +236,9 @@ const Parser = struct {
                 .classes = classes,
                 .attrs = attrs,
                 .children = &.{},
+                .role = role,
+                .aria_label = aria_label,
+                .aria_description = aria_description,
             };
         }
 
@@ -249,6 +278,9 @@ const Parser = struct {
             .classes = classes,
             .attrs = attrs,
             .children = children,
+            .role = role,
+            .aria_label = aria_label,
+            .aria_description = aria_description,
         };
     }
 };
@@ -325,6 +357,14 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
     // --- R51 Group A: Visibility ---
     if (std.mem.eql(u8, cls, "hidden")) {
         r.layout.display = .none;
+
+        // --- RG5: sr-only (screen-reader-only) ---
+    } else if (std.mem.eql(u8, cls, "sr-only")) {
+        // Make element fully transparent and zero-size, but keep in accessibility tree
+        r.style.opacity = 0.0;
+        r.layout.width = .{ .px = 0 };
+        r.layout.height = .{ .px = 0 };
+        r.layout.overflow = .hidden;
 
         // --- R51 Group B: Overflow ---
     } else if (std.mem.eql(u8, cls, "overflow-hidden")) {

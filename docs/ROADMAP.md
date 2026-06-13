@@ -266,17 +266,17 @@ Connects the framework to the OS in ways users expect from a desktop app.
 
 ---
 
-## Milestone 17 — Accessibility `planned`
+## Milestone 17 — Accessibility `done`
 
 Promotes the framework items that were previously deferred from the post-v1 list.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M17-01 | **Accessibility tree** — a parallel `AccessNode` tree mirroring the element tree; one node per live element with role, name, and state properties | 07 |
-| M17-02 | **AT-SPI bridge (Linux)** — expose the `AccessNode` tree over D-Bus AT-SPI2 so screen readers (Orca) can narrate widgets | M17-01 |
-| M17-03 | **UIA bridge (Windows)** — expose the `AccessNode` tree over the Windows UI Automation COM interface so Narrator and NVDA can narrate widgets | M17-01 |
-| M17-04 | **ARIA-like roles in markup** — `role="button"`, `role="list"`, `aria-label="..."` attributes on any markup node populate the `AccessNode` | M17-01, 06 |
-| M17-05 | **Screen-reader-only text** — `sr-only` Tailwind class renders an element invisible but present in the accessibility tree | M17-01 |
+| ID | Feature | Depends on | Status |
+|---|---|---|---|
+| M17-01 | **Accessibility tree** — a parallel `AccessNode` tree mirroring the element tree; one node per live element with role, name, and state properties | 07 | `done` |
+| M17-02 | **AT-SPI bridge (Linux)** — expose the `AccessNode` tree over D-Bus AT-SPI2 so screen readers (Orca) can narrate widgets | M17-01 | `done` |
+| M17-03 | **UIA bridge (Windows)** — expose the `AccessNode` tree over the Windows UI Automation COM interface so Narrator and NVDA can narrate widgets | M17-01 | `done` |
+| M17-04 | **ARIA-like roles in markup** — `role="button"`, `role="list"`, `aria-label="..."` attributes on any markup node populate the `AccessNode` | M17-01, 06 | `done` |
+| M17-05 | **Screen-reader-only text** — `sr-only` Tailwind class renders an element invisible but present in the accessibility tree | M17-01 | `done` |
 
 ---
 

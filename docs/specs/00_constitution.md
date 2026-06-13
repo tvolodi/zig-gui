@@ -149,11 +149,12 @@ not act on the disagreement.
 
 - **INV-5.6 — No dependencies beyond the approved list.**
   Rationale: Approved native deps for v1: GLFW, the Vulkan loader, the Zig standard
-  library, and stb_truetype (single-header, public domain; used by module 02 for glyph
-  rasterization). Approved build-time tools: glslc (from the Vulkan SDK, for GLSL→SPIR-V
-  compilation). Do NOT add a package, vendored library, or build-time tool without an explicit
-  human decision recorded here. (Taffy is being *ported*, i.e. reimplemented in Zig, not
-  added as a dependency — see `specs/04_layout_engine/`.)
+  library, stb_truetype (single-header, public domain; used by module 02 for glyph
+  rasterization), and libdbus (Linux D-Bus client library for AT-SPI2 accessibility bridge;
+  M17 approved on 2026-06-13). Approved build-time tools: glslc (from the Vulkan SDK, for
+  GLSL→SPIR-V compilation). Do NOT add a package, vendored library, or build-time tool
+  without an explicit human decision recorded here. (Taffy is being *ported*, i.e.
+  reimplemented in Zig, not added as a dependency — see `specs/04_layout_engine/`.)
 
 ---
 

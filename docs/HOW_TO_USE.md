@@ -2167,6 +2167,136 @@ On Linux only `"text/plain"` is supported; other MIME types are no-ops / return 
 
 ---
 
+## 20. Accessibility (M17)
+
+Make your UI perceivable and navigable by screen readers and assistive technologies.
+
+### AccessNode and the accessibility tree
+
+Every live element in a `Scene` has a corresponding `AccessNode` in the `_access_nodes` parallel array.
+Each node carries semantic metadata:
+
+```zig
+pub const AccessNode = struct {
+    role: AccessRole,               // button, text, checkbox, list, …
+    name: ?[]const u8,              // aria-label, or element text
+    description: ?[]const u8,       // aria-description
+    value: ?[]const u8,             // current value (for sliders, inputs)
+    value_min: f32 = 0,             // min value
+    value_max: f32 = 1,             // max value
+    state: AccessState,             // disabled, checked, focused, …
+};
+```
+
+**Building the tree:** `Scene.instantiate()` creates `AccessNode` entries alongside element nodes.
+The tree is kept in sync with element state throughout the frame lifecycle.
+
+### ARIA roles in markup
+
+Use the `role` attribute to override a widget's inferred semantic role:
+
+```xml
+<Row role="navigation">
+  <Button text="Home" role="link"/>
+  <Separator role="presentation"/>
+</Row>
+
+<Column role="list">
+  <Text role="listitem" text="Item 1"/>
+  <Text role="listitem" text="Item 2"/>
+</Column>
+```
+
+Valid `AccessRole` values: `button`, `text`, `checkbox`, `radio`, `slider`, `textbox`, `listbox`,
+`option`, `list`, `listitem`, `link`, `navigation`, `main`, `region`, `dialog`, `alert`,
+`alertdialog`, `status`, `progressbar`, `tablist`, `tab`, `tabpanel`, `tab_item`, `group`,
+`presentation`, `none`.
+
+If `role=` is omitted, the role is inferred from the widget's kind (e.g. `WidgetKind.button` →
+`AccessRole.button`).
+
+### ARIA labels and descriptions
+
+Use `aria-label` for a human-readable widget name (overrides text content):
+
+```xml
+<Button text="✕" aria-label="Close window"/>
+<Icon icon_name="search" aria-label="Search the document"/>
+<Card aria-label="User profile" aria-description="Displays your name, avatar, and settings">
+  <!-- content -->
+</Card>
+```
+
+Use `aria-description` for extended context:
+
+```xml
+<Input
+  placeholder="Password"
+  aria-label="Password"
+  aria-description="Minimum 12 characters; include uppercase, number, and symbol"
+/>
+```
+
+Both attributes accept static text; bindings like `aria-label="{bind field.name}"` are not
+yet supported (post-v1).
+
+### Screen-reader-only content (sr-only)
+
+The `sr-only` class hides an element visually but keeps it in the accessibility tree. Use it for
+labels, skip links, and live status text that screen readers should announce:
+
+```xml
+<Column>
+  <Button text="Content">
+    <Text class="sr-only" text="Jump to main content"/>
+  </Button>
+  <Text class="sr-only" role="status" text="File saved successfully"/>
+</Column>
+```
+
+`sr-only` sets opacity to 0.0 and may set zero layout size; the element is invisible but
+remains in the DOM and is navigable by screen readers.
+
+### Platform details
+
+#### Linux (AT-SPI2 via D-Bus)
+
+On Linux, `src/app/atspi_bridge.zig` exposes the accessibility tree over D-Bus AT-SPI2.
+When you call `App.run()`, the bridge is initialized and pumped each frame.
+
+Screen readers (Orca) connect via D-Bus and query:
+- Window hierarchy (AccessNode tree)
+- Element roles and names
+- Current state (checked, disabled, focused, etc.)
+- Actions (button click, checkbox toggle, text input focus)
+
+No user configuration needed — the bridge is transparent. Ensure D-Bus is running.
+
+#### Windows (UIA via COM)
+
+On Windows, `src/app/uia_bridge.zig` exposes the accessibility tree via the Windows UI
+Automation (UIA) COM interface. Narrator, NVDA, JAWS, and other screen readers connect via
+the UIA provider.
+
+The bridge registers an overlay window with `IRawElementProvider` and pumps the tree on demand.
+No setup required beyond having a screen reader running.
+
+### Supported screen readers
+
+- **Linux:** Orca (via AT-SPI2)
+- **Windows:** Narrator (built-in), NVDA (open source), JAWS (commercial)
+
+### Limitations and future work
+
+- **Live regions (ARIA `live` and `aria-live`):** Status and alert regions that announce
+  changes without focus shifts are stubbed. Requires `frame_count`-based change detection.
+- **Keyboard shortcuts (ARIA `aria-keyshortcuts`):** Registered via the accelerator system
+  (M11-05) but not yet exposed to accessibility bridges.
+- **Rich text formatting:** Screen readers see flattened text; styled runs (bold, color) are
+  not conveyed. Markup-level semantic emphasis (emphasis, strong) can bridge this gap in future.
+
+---
+
 ## 16. Constraints to respect (abridged)
 
 - **No per-widget heap objects.** An element IS an index. Data lives in parallel arrays.

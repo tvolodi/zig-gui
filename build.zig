@@ -1490,6 +1490,30 @@ pub fn build(b: *std.Build) void {
     m16_test_step.dependOn(&run_m16_test.step);
 
     // -----------------------------------------------------------------------
+    // test-m17 — M17 accessibility unit tests (RG1, RG4, RG5, headless).
+    //   zig build          → compile only
+    //   zig build test-m17 → compile + run
+    // -----------------------------------------------------------------------
+    const m17_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/m17_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    m17_test_mod.addImport("../07/types.zig", mod07);
+    m17_test_mod.addImport("../03/types.zig", mod03);
+    m17_test_mod.addImport("../05/types.zig", mod05);
+    m17_test_mod.addImport("../06/types.zig", mod06);
+    // stb_truetype needed by mod06 (indirectly for resolveClasses)
+    m17_test_mod.addIncludePath(b.path("deps"));
+    m17_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    m17_test_mod.link_libc = true;
+    const m17_test = b.addTest(.{ .name = "m17-test", .root_module = m17_test_mod });
+    b.default_step.dependOn(&m17_test.step);
+    const run_m17_test = b.addRunArtifact(m17_test);
+    const m17_test_step = b.step("test-m17", "Run M17 accessibility unit tests (RG1, RG4, RG5, headless)");
+    m17_test_step.dependOn(&run_m17_test.step);
+
+    // -----------------------------------------------------------------------
     // test-tray — Tray unit tests (RF0, headless — no GPU, no real tray icon).
     //   zig build           → compile only
     //   zig build test-tray → compile + run

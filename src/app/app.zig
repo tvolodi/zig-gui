@@ -263,6 +263,12 @@ pub const AppOptions = struct {
     /// Caller retains ownership; AppInner calls pumpMessages() each frame.
     tray: ?*@import("tray.zig").Tray = null,
 
+    // RG2/RG3 — Accessibility bridges (AT-SPI2, UIA).
+    /// Optional application name for accessibility services.
+    /// If non-null, accessibility tree is exposed (Linux AT-SPI2 + Windows UIA).
+    /// Caller retains ownership; copied into AppInner if needed.
+    app_name: ?[]const u8 = null,
+
     // RA4 — Window state persistence.
     /// Enable automatic window state persistence.
     /// When true, AppInner.init restores the saved window state (if any) from
@@ -470,6 +476,12 @@ pub const AppInner = struct {
     // RF0 — System tray (M16-01).
     /// Optional reference to a Tray instance. Non-null → pumpMessages called each frame.
     _tray: ?*@import("tray.zig").Tray = null,
+
+    // RG2 — AT-SPI2 bridge (Linux D-Bus). Non-null if app_name was provided.
+    atspi_service: ?@import("atspi_bridge.zig").AtSpiService = null,
+
+    // RG3 — UIA bridge (Windows COM). Non-null if app_name was provided.
+    uia_bridge: ?@import("uia_bridge.zig").UiaBridge = null,
 
     // -----------------------------------------------------------------------
     // hasAnimatedElements — poll-mode vs. wait-mode decision
@@ -706,6 +718,12 @@ pub const AppInner = struct {
         // RF0: Store tray reference for per-frame pumpMessages call.
         self._tray = opts.tray;
 
+        // RG2/RG3: Initialize accessibility bridges if app_name is provided.
+        if (opts.app_name) |app_name| {
+            self.atspi_service = try @import("atspi_bridge.zig").AtSpiService.init(&self.scene, app_name, gpa);
+            self.uia_bridge = try @import("uia_bridge.zig").UiaBridge.init(&self.scene, &self.platform, app_name, gpa);
+        }
+
         return self;
     }
 
@@ -885,6 +903,11 @@ pub const AppInner = struct {
             // Build draw list (module 09).
             // Fire queued callbacks after layout, before render (INV-3.3).
             self.scene.fireQueuedCallbacks();
+
+            // RG2/RG3: Tick accessibility bridges
+            if (self.atspi_service) |*svc| svc.tick();
+            if (self.uia_bridge) |*br| br.tick();
+
             self.scene.font_family = &self.font_family;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
@@ -1593,6 +1616,10 @@ pub const AppInner = struct {
     // -----------------------------------------------------------------------
 
     pub fn deinit(self: *AppInner) void {
+        // RG2/RG3: Deinit accessibility bridges
+        if (self.atspi_service) |*svc| svc.deinit();
+        if (self.uia_bridge) |*br| br.deinit();
+
         // RA4: Save window state before tearing down the window.
         if (self.window_state_mgr) |*wsm| {
             const state = window_state_mod.readFromPlatform(&self.platform);

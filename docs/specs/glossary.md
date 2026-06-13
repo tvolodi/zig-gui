@@ -1219,3 +1219,93 @@ Read once at startup in `AppInner.init`; the app layer maps it to `mod05.Mode` a
 `setTheme`. Module 01 does NOT import module 05 — the mapping lives in the app layer only.
 
 See: M16-04 (RF3), `src/01/types.zig`, `src/app/app.zig`.
+
+---
+
+## AccessRole
+
+An enum defined in `src/07/types.zig` (M17-01) with 25+ semantic role variants (button, text,
+checkbox, list, listitem, slider, dialog, etc.). Each live element gets one `AccessRole` in its
+`AccessNode`. The role is either explicit (from `role=` markup attribute) or inferred from the
+element's `WidgetKind` via `defaultAccessRoleFor()`. Used by accessibility bridges (RG2, RG3)
+to expose the UI semantically to screen readers.
+
+See: M17-01 (RG1), `src/07/types.zig` AccessRole enum.
+
+---
+
+## AccessState
+
+A packed struct defined in `src/07/types.zig` (M17-01) holding seven boolean state flags:
+`disabled`, `checked`, `focused`, `expanded`, `hidden`, `selected`, `invalid`. Fits in a single
+u8. Stored in each `AccessNode` and synchronized with widget state by `Scene.setAccessState()`.
+Used by accessibility bridges to report interactive state to screen readers.
+
+See: M17-01 (RG1), `src/07/types.zig` AccessState struct.
+
+---
+
+## AccessNode
+
+A struct defined in `src/07/types.zig` (M17-01) carrying semantic information for one accessible
+element: `role`, `name`, `description`, `state`, `value`, `value_min`, `value_max`. Stored in
+a parallel array `Scene._access_nodes` indexed by element index. Built during `Scene.instantiate()`
+and kept in sync with the element tree. Queried by accessibility bridges (RG2, RG3) to expose
+the UI to screen readers.
+
+See: M17-01 (RG1), M17-04 (RG4), `src/07/types.zig` AccessNode struct.
+
+---
+
+## accessibility tree
+
+A parallel tree of `AccessNode` entries (M17-01) mirroring the visual element tree in `Scene`.
+Each live element gets one `AccessNode` containing its semantic role, name, description, and
+state. Built during `Scene.instantiate()` and kept in sync with element state changes. Exposed
+to screen readers via accessibility bridges (AT-SPI2 on Linux, UIA on Windows).
+
+See: M17-01 (RG1), M17-02 (RG2), M17-03 (RG3), `src/07/types.zig` Scene._access_nodes.
+
+---
+
+## aria-label
+
+An accessibility attribute (M17-04) that assigns a human-readable label to an element. Parsed
+from markup as `aria-label="text"` and stored in `AccessNode.name`. Takes precedence over the
+element's text content when both are present. Used by screen readers to identify interactive
+widgets and regions.
+
+See: M17-04 (RG4), `src/06/types.zig` NodeDesc.aria_label, `src/07/types.zig` AccessNode.name.
+
+---
+
+## aria-description
+
+An accessibility attribute (M17-04) that assigns a longer description to an element. Parsed
+from markup as `aria-description="text"` and stored in `AccessNode.description`. Used by
+screen readers to provide context or instructions. May be omitted if empty.
+
+See: M17-04 (RG4), `src/06/types.zig` NodeDesc.aria_description, `src/07/types.zig` AccessNode.description.
+
+---
+
+## role= (accessibility attribute)
+
+An accessibility attribute (M17-04) that overrides the semantic role of an element. Parsed from
+markup as `role="button"`, `role="list"`, etc., and stored in `AccessNode.role`. Valid values
+are the `AccessRole` enum variants. If invalid, a `ParseDiagnostic` is emitted. When absent,
+the role is inferred from the element's `WidgetKind` via `defaultAccessRoleFor()`.
+
+See: M17-04 (RG4), M17-01 (RG1), `src/06/types.zig` NodeDesc.role, `src/06/parser.zig` parseRole().
+
+---
+
+## sr-only
+
+A Tailwind utility class (M17-05) that hides an element visually while keeping it in the
+accessibility tree. The element is rendered fully transparent (`opacity = 0.0`) and may take
+zero layout space. Useful for hidden labels, skip links, and live status regions that screen
+readers should announce but sighted users should not see. Variants like `focus:not-sr-only`
+make the element visible on focus (skip links).
+
+See: M17-05 (RG5), `src/06/types.zig` resolveClasses.
