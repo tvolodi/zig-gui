@@ -618,7 +618,6 @@ pub const AppInner = struct {
             const fb2 = self.platform.framebufferSize();
             const hud_cmds = self.perf_hud.buildHudDrawList(
                 self.gpa,
-                self.debug_overlay.enabled,
                 @as(f32, @floatFromInt(fb2.width)),
                 self.tokens,
                 self.font_family.face(false, false),
@@ -852,7 +851,6 @@ pub const AppInner = struct {
             const fb2 = self.platform.framebufferSize();
             const hud_cmds = self.perf_hud.buildHudDrawList(
                 self.gpa,
-                self.debug_overlay.enabled,
                 @as(f32, @floatFromInt(fb2.width)),
                 self.tokens,
                 self.font_family.face(false, false),
@@ -1687,8 +1685,15 @@ pub const AppInner = struct {
     }
 
     fn handleKey(self: *AppInner, key: mod01.Key, mods: mod01.Modifiers) void {
-        // R90: F1 toggles the debug overlay.
+        // F1: toggle performance HUD (frame time, FPS, draw commands).
         if (key == .f1) {
+            self.perf_hud.toggleHud();
+            self.scene.elements.markAllDirty();
+            return;
+        }
+
+        // F3: toggle debug bounds overlay (element rects + hover info).
+        if (key == .f3) {
             self.debug_overlay.toggle();
             self.scene.elements.markAllDirty();
             return;

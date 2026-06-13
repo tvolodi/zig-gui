@@ -30,9 +30,15 @@ pub const PerfHud = struct {
     /// Ring buffer of the last 16 frame times for smoothing.
     frame_ms_history: [16]f32 = [_]f32{0} ** 16,
     history_idx: u8 = 0,
+    /// Whether the HUD is visible (toggled independently of the debug bounds overlay).
+    hud_enabled: bool = false,
 
     pub fn init() PerfHud {
         return .{};
+    }
+
+    pub fn toggleHud(self: *PerfHud) void {
+        self.hud_enabled = !self.hud_enabled;
     }
 
     /// Record one frame's worth of counters. Updates the ring buffer.
@@ -62,13 +68,12 @@ pub const PerfHud = struct {
     pub fn buildHudDrawList(
         self: *const PerfHud,
         alloc: std.mem.Allocator,
-        enabled: bool,
         viewport_w: f32,
         tokens: Tokens,
         font: *Font,
         atlas: *GlyphAtlas,
     ) ![]DrawCommand {
-        if (!enabled) return &[_]DrawCommand{};
+        if (!self.hud_enabled) return &[_]DrawCommand{};
 
         var list: std.ArrayListUnmanaged(DrawCommand) = .empty;
         errdefer list.deinit(alloc);

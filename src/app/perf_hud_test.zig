@@ -158,15 +158,14 @@ test "smoothFrameMs: after wrap-around overwrites one slot" {
 //    Font and atlas are never accessed when enabled=false.
 // ---------------------------------------------------------------------------
 
-test "buildHudDrawList: returns empty slice when disabled" {
-    const hud = PerfHud.init();
+test "buildHudDrawList: returns empty slice when hud_enabled=false (default)" {
+    const hud = PerfHud.init(); // hud_enabled defaults to false
     const tokens = mod05.Tokens.light(mod05.Palette.default());
     var font: mod02.Font = undefined;
     var atlas: mod02.GlyphAtlas = undefined;
 
     const cmds = try hud.buildHudDrawList(
         testing.allocator,
-        false, // enabled = false
         1920.0,
         tokens,
         &font,
@@ -181,7 +180,7 @@ test "buildHudDrawList: disabled with zero viewport returns empty" {
     var font: mod02.Font = undefined;
     var atlas: mod02.GlyphAtlas = undefined;
 
-    const cmds = try hud.buildHudDrawList(testing.allocator, false, 0.0, tokens, &font, &atlas);
+    const cmds = try hud.buildHudDrawList(testing.allocator, 0.0, tokens, &font, &atlas);
     try testing.expectEqual(@as(usize, 0), cmds.len);
 }
 
@@ -192,7 +191,7 @@ test "buildHudDrawList: repeated disabled calls do not leak memory" {
     var atlas: mod02.GlyphAtlas = undefined;
 
     for (0..8) |_| {
-        const cmds = try hud.buildHudDrawList(testing.allocator, false, 800.0, tokens, &font, &atlas);
+        const cmds = try hud.buildHudDrawList(testing.allocator, 800.0, tokens, &font, &atlas);
         try testing.expectEqual(@as(usize, 0), cmds.len);
     }
 }
