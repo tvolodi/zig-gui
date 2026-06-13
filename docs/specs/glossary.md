@@ -1179,3 +1179,43 @@ unaffected. Set via the `direction-rtl` / `direction-ltr` Tailwind utility class
 
 See: M15-04 (RE3), `docs/specs/03.types.zig`, `docs/specs/04.types.zig`.
 
+
+---
+
+## Tray
+
+`src/app/tray.zig`. System tray icon with optional popup menu. On Windows, backed by Win32
+`Shell_NotifyIconW` via a message-only HWND; menu items are registered with `addMenuItem` and
+the popup is shown on right-click via `TrackPopupMenu`. On Linux, all methods compile and run
+as no-ops — no tray icon is shown until `libnotify` is approved (INV-5.6). One `Tray` per
+application; caller retains ownership and passes a `?*Tray` to `AppOptions.tray`.
+`AppInner` calls `pumpMessages()` once per frame to drain the Win32 message queue.
+
+See: M16-01 (RF0), `src/app/tray.zig`.
+
+---
+
+## FileDialogFilter
+
+`src/01/types.zig`. `pub const FileDialogFilter = struct { name: []const u8, pattern: []const u8 }`.
+Passed to `Platform.showOpenDialog` or `Platform.showSaveDialog` to restrict visible file
+types in the native file picker. `name` is the human-readable label shown in the filter
+dropdown (e.g. "Zig source files"); `pattern` is the glob pattern (e.g. "*.zig"). An empty
+slice means "all files". On Linux (stub path), filters are accepted but have no effect.
+
+See: M16-02 (RF1), M16-03 (RF2), `src/01/types.zig`.
+
+---
+
+## ColorScheme
+
+`src/01/types.zig`. `pub const ColorScheme = enum { light, dark, unknown }`. Returned by
+`Platform.getColorScheme()`. On Windows, read from
+`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`
+(REG_DWORD: 0 = `.dark`, 1 = `.light`, absent = `.unknown`). On Linux, inferred from the
+`GTK_THEME` environment variable suffix (`:dark` / `:light`) or `COLORFGBG` (ends with `;0`
+= `.dark`). When `.unknown`, `AppOptions.default_theme_mode` is used as the fallback.
+Read once at startup in `AppInner.init`; the app layer maps it to `mod05.Mode` and calls
+`setTheme`. Module 01 does NOT import module 05 — the mapping lives in the app layer only.
+
+See: M16-04 (RF3), `src/01/types.zig`, `src/app/app.zig`.

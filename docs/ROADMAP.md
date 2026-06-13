@@ -252,17 +252,17 @@ Extends the text model within the Latin + Cyrillic scope. Requires: RE0, RE1, RE
 
 ---
 
-## Milestone 16 — Platform integrations `planned`
+## Milestone 16 — Platform integrations `done`
 
 Connects the framework to the OS in ways users expect from a desktop app.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M16-01 | **System tray** — `Tray` struct adds an icon to the OS notification area with a popup menu; Win32 + libnotify (Linux) | M8-04 |
-| M16-02 | **Native file-open dialog** — `Platform.showOpenDialog(filters) ?[]const u8` wraps Win32 `GetOpenFileName` / GTK `GtkFileChooserDialog` | M1-01 |
-| M16-03 | **Native file-save dialog** — `Platform.showSaveDialog(default_name) ?[]const u8` | M16-02 |
-| M16-04 | **OS native color-scheme detection** — read the OS light/dark preference at startup and apply it as the initial theme mode | M9-04 |
-| M16-05 | **MIME clipboard** — extend `Platform.setClipboard` / `getClipboard` to carry a MIME type alongside text; enables copying images and rich text | M3-07 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M16-01 | **System tray** — `Tray` struct adds an icon to the OS notification area with a popup menu; Win32 + libnotify (Linux) | M8-04 | [RF0](requirements/RF0_system_tray.md) | `done` |
+| M16-02 | **Native file-open dialog** — `Platform.showOpenDialog(filters) ?[]const u8` wraps Win32 `GetOpenFileName` / GTK `GtkFileChooserDialog` | M1-01 | [RF1](requirements/RF1_file_open_dialog.md) | `done` |
+| M16-03 | **Native file-save dialog** — `Platform.showSaveDialog(default_name) ?[]const u8` | M16-02 | [RF2](requirements/RF2_file_save_dialog.md) | `done` |
+| M16-04 | **OS native color-scheme detection** — read the OS light/dark preference at startup and apply it as the initial theme mode | M9-04 | [RF3](requirements/RF3_color_scheme_detection.md) | `done` |
+| M16-05 | **MIME clipboard** — extend `Platform.setClipboard` / `getClipboard` to carry a MIME type alongside text; enables copying images and rich text | M3-07 | [RF4](requirements/RF4_mime_clipboard.md) | `done` |
 
 ---
 

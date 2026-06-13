@@ -690,6 +690,21 @@ pub fn build(b: *std.Build) void {
     // binding.zig imports signal.zig via relative path — no extra wiring needed for it
     // since signal.zig only imports std.
 
+    // tray.zig — RF0 system tray (M16-01). Depends on mod07 for CallbackFn.
+    // Registered as a named module so tray_test.zig and app.zig share the same
+    // module identity (build rule: each .zig file belongs to exactly one module).
+    const mod_tray = b.addModule("tray.zig", .{
+        .root_source_file = b.path("src/app/tray.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_tray.addImport("../07/types.zig", mod07);
+    if (target.result.os.tag == .windows) {
+        mod_tray.linkSystemLibrary("gdi32", .{});
+        mod_tray.linkSystemLibrary("user32", .{});
+        mod_tray.linkSystemLibrary("shell32", .{});
+    }
+
     // app.zig — one module, shared everywhere.
     const mod_app_impl = b.addModule("app.zig", .{
         .root_source_file = b.path("src/app/app.zig"),
@@ -720,6 +735,7 @@ pub fn build(b: *std.Build) void {
     mod_app_impl.addImport("window_state.zig", mod_window_state);
     mod_app_impl.addImport("error_boundary.zig", mod_error_boundary);
     mod_app_impl.addImport("startup_error.zig", mod_startup_error);
+    mod_app_impl.addImport("tray.zig", mod_tray);
 
     // types.zig — the public root module.
     const mod_app = b.addModule("app", .{
@@ -1453,6 +1469,55 @@ pub fn build(b: *std.Build) void {
     const run_m12_test = b.addRunArtifact(m12_test);
     const m12_test_step = b.step("test-m12", "Run M12 layout extension tests (RC0–RC4, headless)");
     m12_test_step.dependOn(&run_m12_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-m16 — M16 platform integration unit tests (RF1–RF4, headless).
+    //   zig build          → compile only
+    //   zig build test-m16 → compile + run
+    // -----------------------------------------------------------------------
+    const m16_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/m16_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    m16_test_mod.addImport("../01/types.zig", mod01);
+    m16_test_mod.addImport("../05/types.zig", mod05);
+    m16_test_mod.addImport("app.zig", mod_app_impl);
+    const m16_test = b.addTest(.{ .name = "m16-test", .root_module = m16_test_mod });
+    b.default_step.dependOn(&m16_test.step);
+    const run_m16_test = b.addRunArtifact(m16_test);
+    const m16_test_step = b.step("test-m16", "Run M16 platform integration unit tests (RF1–RF4, headless)");
+    m16_test_step.dependOn(&run_m16_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-tray — Tray unit tests (RF0, headless — no GPU, no real tray icon).
+    //   zig build           → compile only
+    //   zig build test-tray → compile + run
+    // -----------------------------------------------------------------------
+    const tray_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/tray_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // tray.zig is registered as mod_tray (named module) so the build system sees
+    // only one canonical identity for src/app/tray.zig across app.zig and the test.
+    tray_test_mod.addImport("tray.zig", mod_tray);
+    tray_test_mod.addImport("app.zig", mod_app_impl);
+    // app.zig brings in stb_truetype (via mod02) and Win32 libs transitively;
+    // re-add them explicitly here so the standalone test binary links correctly.
+    tray_test_mod.addIncludePath(b.path("deps"));
+    tray_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    tray_test_mod.link_libc = true;
+    if (target.result.os.tag == .windows) {
+        tray_test_mod.linkSystemLibrary("gdi32", .{});
+        tray_test_mod.linkSystemLibrary("user32", .{});
+        tray_test_mod.linkSystemLibrary("shell32", .{});
+    }
+    const tray_test = b.addTest(.{ .name = "tray-test", .root_module = tray_test_mod });
+    b.default_step.dependOn(&tray_test.step);
+    const run_tray_test = b.addRunArtifact(tray_test);
+    const tray_test_step = b.step("test-tray", "Run Tray unit tests (RF0, headless — no GPU, no tray icon shown)");
+    tray_test_step.dependOn(&run_tray_test.step);
 
     // -----------------------------------------------------------------------
     // run-demo — Showcase Demo Application (DEMO_APP.md).

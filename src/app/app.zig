@@ -252,6 +252,17 @@ pub const AppOptions = struct {
     /// Enable subpixel text rendering for font sizes 12–14 px.
     subpixel_text: bool = false,
 
+    // RF3 — OS color-scheme detection (M16-04).
+    /// Theme mode applied when the OS color-scheme preference cannot be determined.
+    /// When `getColorScheme()` returns `.unknown`, this value is used.
+    /// Defaults to .light.
+    default_theme_mode: mod05.Mode = .light,
+
+    // RF0 — System tray (M16-01).
+    /// Optional system tray icon. Non-null enables tray support.
+    /// Caller retains ownership; AppInner calls pumpMessages() each frame.
+    tray: ?*@import("tray.zig").Tray = null,
+
     // RA4 — Window state persistence.
     /// Enable automatic window state persistence.
     /// When true, AppInner.init restores the saved window state (if any) from
@@ -455,6 +466,10 @@ pub const AppInner = struct {
 
     /// M14-02 — Previous frame's style values for transition detection.
     _prev_styles: std.ArrayListUnmanaged(mod05.ComputedStyle) = .empty,
+
+    // RF0 — System tray (M16-01).
+    /// Optional reference to a Tray instance. Non-null → pumpMessages called each frame.
+    _tray: ?*@import("tray.zig").Tray = null,
 
     // -----------------------------------------------------------------------
     // hasAnimatedElements — poll-mode vs. wait-mode decision
@@ -678,6 +693,18 @@ pub const AppInner = struct {
         self._screenshot_frames = opts.screenshot_frames;
         self._screenshot_out = opts.screenshot_out;
         self.double_click_threshold_ms = opts.double_click_threshold_ms;
+
+        // RF3: Apply OS color-scheme preference as initial theme mode.
+        const scheme = self.platform.getColorScheme();
+        const initial_mode: mod05.Mode = switch (scheme) {
+            .dark => .dark,
+            .light => .light,
+            .unknown => opts.default_theme_mode,
+        };
+        self.setTheme(mod05.Theme.build(self._current_palette, initial_mode));
+
+        // RF0: Store tray reference for per-frame pumpMessages call.
+        self._tray = opts.tray;
 
         return self;
     }
@@ -962,6 +989,9 @@ pub const AppInner = struct {
                 .element_count = live_count,
             });
 
+            // RF0: Pump tray message queue (Win32 only; no-op on Linux).
+            if (self._tray) |t| t.pumpMessages();
+
             // M2-02: Clear dirty bits — every dirty element was just painted.
             self.scene.elements.dirty.unsetAll();
         }
@@ -1229,6 +1259,9 @@ pub const AppInner = struct {
                 .dirty_count = @intCast(dirty_count2),
                 .element_count = live_count,
             });
+
+            // RF0: Pump tray message queue (Win32 only; no-op on Linux).
+            if (self._tray) |t| t.pumpMessages();
 
             self.scene.elements.dirty.unsetAll();
 

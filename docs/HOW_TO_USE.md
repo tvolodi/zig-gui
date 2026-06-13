@@ -2085,6 +2085,88 @@ is written and flushed. Has zero overhead when `persist_window_state = false` (t
 
 ---
 
+## Platform integrations (M16)
+
+### System tray icon (Win32)
+
+```zig
+const tray_mod = @import("tray.zig");
+var tray = try tray_mod.Tray.init(
+    &icon_rgba_bytes,   // []const u8 — raw RGBA pixels (16×16 or 32×32)
+    16, 16,             // width, height
+    "My App",           // tooltip
+    allocator,
+);
+defer tray.deinit();
+
+try tray.addMenuItem("Open", callback_fn, false);
+try tray.addSeparator();
+try tray.addMenuItem("Quit", quit_fn, false);
+tray.update();
+tray.setVisible(true);
+
+// Pass to AppOptions so it is pumped each frame:
+var app = try App.init(.{ .tray = &tray, ... });
+```
+
+On Linux the `Tray` struct compiles and all methods are no-ops (libnotify not yet approved).
+
+### Native file dialogs (Win32)
+
+```zig
+const filters = &[_]types.FileDialogFilter{
+    .{ .name = "Zig files", .pattern = "*.zig" },
+    .{ .name = "All files", .pattern = "*.*" },
+};
+
+// Open dialog — returns allocator-owned path or null on cancel
+if (try platform.showOpenDialog(filters, allocator)) |path| {
+    defer allocator.free(path);
+    // use path
+}
+
+// Save dialog
+if (try platform.showSaveDialog("output.zig", filters, allocator)) |path| {
+    defer allocator.free(path);
+    // use path
+}
+```
+
+On Linux both functions return null (no GTK dependency approved yet).
+
+### OS color-scheme detection
+
+```zig
+// Read once at startup — already called automatically by AppInner.init.
+const scheme = platform.getColorScheme(); // .light | .dark | .unknown
+
+// Control the fallback used when scheme == .unknown:
+var app = try App.init(.{
+    .default_theme_mode = .dark,  // default: .light
+    ...
+});
+```
+
+### MIME clipboard
+
+```zig
+// Write HTML to clipboard
+platform.setClipboardMime("text/html", html_bytes);
+
+// Read HTML from clipboard
+var buf: [64 * 1024]u8 = undefined;
+if (platform.getClipboardMime("text/html", &buf)) |html| {
+    // html is a slice of buf
+}
+
+// text/plain delegates to existing setClipboard/getClipboard (R36)
+platform.setClipboardMime("text/plain", "hello");
+```
+
+On Linux only `"text/plain"` is supported; other MIME types are no-ops / return null.
+
+---
+
 ## 16. Constraints to respect (abridged)
 
 - **No per-widget heap objects.** An element IS an index. Data lives in parallel arrays.

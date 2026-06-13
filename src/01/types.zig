@@ -11,6 +11,14 @@ const shaders = @import("embedded_shaders");
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_VULKAN", "1");
     @cInclude("GLFW/glfw3.h");
+    if (builtin.os.tag == .windows) {
+        @cDefine("GLFW_EXPOSE_NATIVE_WIN32", "1");
+        @cInclude("GLFW/glfw3native.h");
+        @cInclude("windows.h");
+        @cInclude("commdlg.h");
+        @cInclude("shellapi.h");
+        @cInclude("winreg.h");
+    }
 });
 
 const enable_validation = (builtin.mode == .Debug);
@@ -585,6 +593,29 @@ fn debugCallback(
 }
 
 // ---------------------------------------------------------------------------
+// RF3 — OS color-scheme detection (M16-04).
+// ---------------------------------------------------------------------------
+
+/// The OS-reported user preference for light or dark UI.
+pub const ColorScheme = enum {
+    light,
+    dark,
+    /// The OS preference could not be determined; use the app default.
+    unknown,
+};
+
+// ---------------------------------------------------------------------------
+// RF1/RF2 — Native file dialogs (M16-02, M16-03).
+// ---------------------------------------------------------------------------
+
+/// A single file-type filter entry for the file dialog.
+/// Example: .{ .name = "PNG images", .pattern = "*.png" }
+pub const FileDialogFilter = struct {
+    name: []const u8,    // human-readable label shown in the filter dropdown
+    pattern: []const u8, // glob pattern, e.g. "*.png" or "*.zig"
+};
+
+// ---------------------------------------------------------------------------
 // Platform — GLFW-backed window + Vulkan surface + input (INV-2.2).
 // ---------------------------------------------------------------------------
 
@@ -787,9 +818,387 @@ pub const Platform = struct {
         c.glfwGetMonitorContentScale(monitor, &scale_x, &scale_y);
         return @max(scale_x, scale_y);
     }
+
+    // -----------------------------------------------------------------------
+    // RF3 — OS color-scheme detection (M16-04).
+    // -----------------------------------------------------------------------
+
+    /// Read the OS current color-scheme preference.
+    /// Call this once at startup before the first frame.
+    /// Returns .light, .dark, or .unknown.
+    /// Does NOT register a system listener — call again to refresh if needed.
+    pub fn getColorScheme(self: *const Platform) ColorScheme {
+        _ = self;
+        if (comptime builtin.os.tag == .windows) {
+            // Registry path:
+            //   HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize
+            //   Value name: AppsUseLightTheme (REG_DWORD)
+            //   0 = dark mode, 1 = light mode, absent = unknown
+            // Win32 predefined HKEY constants (e.g. HKEY_CURRENT_USER = 0x80000001) are
+            // magic unaligned pointer values. Zig's @ptrFromInt rejects them because the
+            // target HKEY type has alignment > 1. Work around by calling the registry
+            // functions via extern declarations that accept *anyopaque for the hkey param.
+            const RegOpenFn = *const fn (*anyopaque, [*:0]const u16, c.DWORD, c.REGSAM, *c.HKEY) callconv(.c) c.LONG;
+            const RegQueryFn = *const fn (c.HKEY, [*:0]const u16, ?*c.DWORD, ?*c.DWORD, ?*c.BYTE, ?*c.DWORD) callconv(.c) c.LONG;
+            const regOpen: RegOpenFn = @ptrCast(&c.RegOpenKeyExW);
+            const regQuery: RegQueryFn = @ptrCast(&c.RegQueryValueExW);
+            // HKCU = 0x80000001 as a *anyopaque — alignment 1, valid for this cast.
+            const hkcu: *anyopaque = @ptrFromInt(0x80000001);
+            var hkey: c.HKEY = undefined;
+            const key_path = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+            if (regOpen(hkcu, key_path, 0, c.KEY_READ, &hkey) != 0) {
+                return .unknown;
+            }
+            defer _ = c.RegCloseKey(hkey);
+
+            var data: c.DWORD = 0;
+            var data_size: c.DWORD = @sizeOf(c.DWORD);
+            var reg_type: c.DWORD = 0;
+            const value_name = std.unicode.utf8ToUtf16LeStringLiteral("AppsUseLightTheme");
+            const query_result = regQuery(
+                hkey,
+                value_name,
+                null,
+                &reg_type,
+                @ptrCast(&data),
+                &data_size,
+            );
+            if (query_result != 0) return .unknown;
+            return if (data == 0) .dark else .light;
+        } else {
+            // Linux: check environment variables.
+            const gtk_theme = std.posix.getenv("GTK_THEME") orelse "";
+            if (std.mem.endsWith(u8, gtk_theme, ":dark")) return .dark;
+            if (std.mem.endsWith(u8, gtk_theme, ":light")) return .light;
+
+            // KDE hint via COLORFGBG: dark bg is "15;default;0" (ends with ";0")
+            const colorfgbg = std.posix.getenv("COLORFGBG") orelse "";
+            if (std.mem.endsWith(u8, colorfgbg, ";0")) return .dark;
+
+            return .unknown;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // RF1 — Native file-open dialog (M16-02).
+    // -----------------------------------------------------------------------
+
+    /// Display the native file-open dialog.
+    ///
+    /// `filters`    — slice of FileDialogFilter entries (may be empty for "all files").
+    /// `allocator`  — used to allocate the returned path string.
+    ///
+    /// Returns an allocator-owned UTF-8 path string, or null if:
+    ///   - the user cancelled,
+    ///   - no file was selected,
+    ///   - or (Linux stub) the platform does not support native dialogs yet.
+    ///
+    /// Caller must free the returned slice with `allocator.free(path)`.
+    /// Blocking: does not return until the dialog is dismissed.
+    pub fn showOpenDialog(
+        self: *Platform,
+        filters: []const FileDialogFilter,
+        allocator: std.mem.Allocator,
+    ) ?[]u8 {
+        if (comptime builtin.os.tag == .windows) {
+            return showOpenDialogWin32(self, filters, allocator);
+        } else {
+            @compileLog("showOpenDialog: GTK not yet approved (INV-5.6) — returns null on Linux");
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // RF2 — Native file-save dialog (M16-03).
+    // -----------------------------------------------------------------------
+
+    /// Display the native file-save dialog.
+    ///
+    /// `default_name` — initial filename pre-filled in the filename field (may be empty).
+    /// `filters`      — slice of FileDialogFilter entries (may be empty for "all files").
+    /// `allocator`    — used to allocate the returned path string.
+    ///
+    /// Returns an allocator-owned UTF-8 path string, or null if:
+    ///   - the user cancelled,
+    ///   - or (Linux stub) the platform does not support native dialogs yet.
+    ///
+    /// Caller must free the returned slice with `allocator.free(path)`.
+    /// Blocking: does not return until the dialog is dismissed.
+    pub fn showSaveDialog(
+        self: *Platform,
+        default_name: []const u8,
+        filters: []const FileDialogFilter,
+        allocator: std.mem.Allocator,
+    ) ?[]u8 {
+        if (comptime builtin.os.tag == .windows) {
+            return showSaveDialogWin32(self, default_name, filters, allocator);
+        } else {
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // RF4 — MIME clipboard (M16-05).
+    // -----------------------------------------------------------------------
+
+    /// Write data of a specific MIME type to the system clipboard.
+    ///
+    /// `mime_type` — MIME type string, e.g. "text/plain", "text/html", "image/png".
+    /// `data`      — raw bytes to place on the clipboard.
+    ///
+    /// On Windows, MIME types are mapped to Win32 clipboard formats:
+    ///   "text/plain"       → CF_UNICODETEXT (data is interpreted as UTF-8, converted to UTF-16)
+    ///   "text/html"        → registered custom format "HTML Format"
+    ///   any other MIME     → RegisterClipboardFormatA(mime_type) → custom format
+    ///
+    /// On Linux (GLFW): only "text/plain" is supported; all other types are no-ops.
+    pub fn setClipboardMime(
+        self: *Platform,
+        mime_type: []const u8,
+        data: []const u8,
+    ) void {
+        if (comptime builtin.os.tag == .windows) {
+            setClipboardMimeWin32(self, mime_type, data);
+        } else {
+            if (std.mem.eql(u8, mime_type, "text/plain")) {
+                self.setClipboard(data);
+            }
+            // All other MIME types: no-op on Linux.
+        }
+    }
+
+    /// Read data of a specific MIME type from the system clipboard.
+    ///
+    /// `mime_type`  — MIME type string to request, e.g. "text/html".
+    /// `buf`        — caller-supplied buffer to receive the data.
+    ///
+    /// Returns a slice of `buf` containing the clipboard data, or null if:
+    ///   - the clipboard does not contain data of the requested MIME type,
+    ///   - the data is larger than `buf`,
+    ///   - or (Linux) the requested MIME type is not "text/plain".
+    pub fn getClipboardMime(
+        self: *Platform,
+        mime_type: []const u8,
+        buf: []u8,
+    ) ?[]const u8 {
+        if (builtin.os.tag == .windows) {
+            return getClipboardMimeWin32(self, mime_type, buf);
+        } else {
+            const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+            if (std.mem.eql(u8, mime_type, "text/plain")) {
+                const raw = c.glfwGetClipboardString(impl.window) orelse return null;
+                const len = std.mem.len(raw);
+                if (len > buf.len) return null;
+                @memcpy(buf[0..len], raw[0..len]);
+                return buf[0..len];
+            }
+            return null;
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// RF1 Win32 — showOpenDialog implementation
+// ---------------------------------------------------------------------------
+
+fn buildWideFilterString(filters: []const FileDialogFilter, buf: []u16) usize {
+    var pos: usize = 0;
+    for (filters) |f| {
+        // name\0
+        const name_wide_len = std.unicode.calcUtf16LeLen(f.name) catch f.name.len;
+        if (pos + name_wide_len + 1 > buf.len) break;
+        const name_written = std.unicode.utf8ToUtf16Le(buf[pos..], f.name) catch 0;
+        pos += name_written;
+        buf[pos] = 0;
+        pos += 1;
+        // pattern\0
+        const pat_wide_len = std.unicode.calcUtf16LeLen(f.pattern) catch f.pattern.len;
+        if (pos + pat_wide_len + 1 > buf.len) break;
+        const pat_written = std.unicode.utf8ToUtf16Le(buf[pos..], f.pattern) catch 0;
+        pos += pat_written;
+        buf[pos] = 0;
+        pos += 1;
+    }
+    // Terminating null (double-null at end).
+    if (pos < buf.len) {
+        buf[pos] = 0;
+        pos += 1;
+    }
+    return pos;
+}
+
+fn wideToUtf8Alloc(wide: [*:0]const u16, allocator: std.mem.Allocator) ?[]u8 {
+    if (builtin.os.tag != .windows) return null;
+    const wide_len = std.mem.len(wide);
+    if (wide_len == 0) return null;
+    // Calculate required UTF-8 buffer length via WideCharToMultiByte.
+    const needed = c.WideCharToMultiByte(c.CP_UTF8, 0, wide, @intCast(wide_len), null, 0, null, null);
+    if (needed <= 0) return null;
+    const buf = allocator.alloc(u8, @intCast(needed)) catch return null;
+    const written = c.WideCharToMultiByte(c.CP_UTF8, 0, wide, @intCast(wide_len), buf.ptr, needed, null, null);
+    if (written <= 0) {
+        allocator.free(buf);
+        return null;
+    }
+    return buf[0..@intCast(written)];
+}
+
+fn utf8ToWide(src: []const u8, out: []u16) usize {
+    if (src.len == 0) return 0;
+    if (builtin.os.tag != .windows) return 0;
+    const written = c.MultiByteToWideChar(c.CP_UTF8, 0, src.ptr, @intCast(src.len), out.ptr, @intCast(out.len));
+    if (written <= 0) return 0;
+    return @intCast(written);
+}
+
+fn showOpenDialogWin32(
+    self: *Platform,
+    filters: []const FileDialogFilter,
+    allocator: std.mem.Allocator,
+) ?[]u8 {
+    const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+    const hwnd = c.glfwGetWin32Window(impl.window);
+
+    // Build filter string: "Name\0*.ext\0\0"
+    var filter_buf: [4096]u16 = undefined;
+    const filter_len = buildWideFilterString(filters, &filter_buf);
+    const filter_ptr: ?[*:0]const u16 = if (filter_len > 0) @ptrCast(filter_buf[0..filter_len].ptr) else null;
+
+    var file_buf: [c.MAX_PATH + 1]u16 = undefined;
+    @memset(&file_buf, 0);
+
+    var ofn = std.mem.zeroes(c.OPENFILENAMEW);
+    ofn.lStructSize = @sizeOf(c.OPENFILENAMEW);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = filter_ptr;
+    ofn.lpstrFile = @ptrCast(&file_buf);
+    ofn.nMaxFile = c.MAX_PATH;
+    ofn.Flags = c.OFN_FILEMUSTEXIST | c.OFN_PATHMUSTEXIST;
+
+    if (c.GetOpenFileNameW(&ofn) == 0) return null;
+
+    return wideToUtf8Alloc(@ptrCast(&file_buf), allocator);
+}
+
+fn showSaveDialogWin32(
+    self: *Platform,
+    default_name: []const u8,
+    filters: []const FileDialogFilter,
+    allocator: std.mem.Allocator,
+) ?[]u8 {
+    const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+    const hwnd = c.glfwGetWin32Window(impl.window);
+
+    // Build filter string.
+    var filter_buf: [4096]u16 = undefined;
+    const filter_len = buildWideFilterString(filters, &filter_buf);
+    const filter_ptr: ?[*:0]const u16 = if (filter_len > 0) @ptrCast(filter_buf[0..filter_len].ptr) else null;
+
+    // Pre-fill szFile with default_name converted to wide chars.
+    var file_buf: [c.MAX_PATH + 1]u16 = undefined;
+    @memset(&file_buf, 0);
+    if (default_name.len > 0) {
+        _ = utf8ToWide(default_name, &file_buf);
+    }
+
+    var ofn = std.mem.zeroes(c.OPENFILENAMEW);
+    ofn.lStructSize = @sizeOf(c.OPENFILENAMEW);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = filter_ptr;
+    ofn.lpstrFile = @ptrCast(&file_buf);
+    ofn.nMaxFile = c.MAX_PATH;
+    ofn.Flags = c.OFN_OVERWRITEPROMPT; // no OFN_FILEMUSTEXIST — save target may not exist
+
+    if (c.GetSaveFileNameW(&ofn) == 0) return null;
+
+    return wideToUtf8Alloc(@ptrCast(&file_buf), allocator);
+}
+
+// ---------------------------------------------------------------------------
+// RF4 Win32 — MIME clipboard implementation
+// ---------------------------------------------------------------------------
+
+fn mimeToClipboardFormat(mime_type: []const u8) c.UINT {
+    if (std.mem.eql(u8, mime_type, "text/plain")) return c.CF_UNICODETEXT;
+    if (std.mem.eql(u8, mime_type, "text/html")) {
+        return c.RegisterClipboardFormatA("HTML Format");
+    }
+    // For all other MIME types: register a custom Win32 format by the MIME string.
+    // RegisterClipboardFormatA is idempotent — returns the same UINT for the same string.
+    var cbuf: [256]u8 = undefined;
+    const len = @min(mime_type.len, cbuf.len - 1);
+    @memcpy(cbuf[0..len], mime_type[0..len]);
+    cbuf[len] = 0;
+    return c.RegisterClipboardFormatA(&cbuf[0]);
+}
+
+fn setClipboardMimeWin32(
+    self: *Platform,
+    mime_type: []const u8,
+    data: []const u8,
+) void {
+    // "text/plain" delegates to the existing R36 setClipboard (UTF-8 → CF_UNICODETEXT).
+    if (std.mem.eql(u8, mime_type, "text/plain")) {
+        self.setClipboard(data);
+        return;
+    }
+    const fmt = mimeToClipboardFormat(mime_type);
+    if (fmt == 0) return;
+
+    if (c.OpenClipboard(null) == 0) return;
+    defer _ = c.CloseClipboard();
+    _ = c.EmptyClipboard();
+
+    const hMem = c.GlobalAlloc(c.GMEM_MOVEABLE, data.len);
+    if (hMem == null) return;
+
+    const ptr = c.GlobalLock(hMem);
+    if (ptr == null) {
+        _ = c.GlobalFree(hMem);
+        return;
+    }
+    @memcpy(@as([*]u8, @ptrCast(ptr))[0..data.len], data);
+    _ = c.GlobalUnlock(hMem);
+    _ = c.SetClipboardData(fmt, hMem);
+    // Clipboard takes ownership of hMem on success; do not free.
+}
+
+fn getClipboardMimeWin32(
+    self: *Platform,
+    mime_type: []const u8,
+    buf: []u8,
+) ?[]const u8 {
+    // "text/plain": use existing getClipboard logic via CF_UNICODETEXT.
+    if (std.mem.eql(u8, mime_type, "text/plain")) {
+        // Re-use glfwGetClipboardString for the plain-text fast path.
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        const raw = c.glfwGetClipboardString(impl.window) orelse return null;
+        const len = std.mem.len(raw);
+        if (len > buf.len) return null;
+        @memcpy(buf[0..len], raw[0..len]);
+        return buf[0..len];
+    }
+    const fmt = mimeToClipboardFormat(mime_type);
+    if (fmt == 0) return null;
+
+    if (c.OpenClipboard(null) == 0) return null;
+    defer _ = c.CloseClipboard();
+
+    const hMem = c.GetClipboardData(fmt);
+    if (hMem == null) return null;
+
+    const ptr = c.GlobalLock(hMem);
+    if (ptr == null) return null;
+    defer _ = c.GlobalUnlock(hMem);
+
+    const data_len = c.GlobalSize(hMem);
+    if (data_len == 0 or data_len > buf.len) return null;
+
+    @memcpy(buf[0..data_len], @as([*]const u8, @ptrCast(ptr))[0..data_len]);
+    return buf[0..data_len];
+}
+
 // GLFW input callbacks (R11) — C calling convention required.
 // ---------------------------------------------------------------------------
 
