@@ -205,7 +205,7 @@ pub fn build(
     const pb_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "ProgressBar (0%):" } }};
     const pb_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &pb_lbl_attrs };
     const pb_attrs = [1]Attr{.{ .name = "value", .value = .{ .literal = "0.0" } }};
-    const pb = NodeDesc{ .tag = "ProgressBar", .attrs = &pb_attrs };
+    const pb = NodeDesc{ .tag = "ProgressBar", .classes = "flex-1", .attrs = &pb_attrs };
     const pb_sim_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Step" } }};
     const btn_simulate = NodeDesc{ .tag = "Button", .classes = "text-sm", .attrs = &pb_sim_attrs };
     const pb_row_children = [2]NodeDesc{ pb, btn_simulate };
@@ -219,7 +219,7 @@ pub fn build(
     const sp_group_children = [2]NodeDesc{ sp_lbl, spinner };
     const sp_group = NodeDesc{ .tag = "Row", .classes = "gap-3 items-center", .children = &sp_group_children };
 
-    const badge_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Badge:" } }};
+    const badge_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Unread messages:" } }};
     const badge_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &badge_lbl_attrs };
     const badge_val_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "42" } }};
     const badge = NodeDesc{ .tag = "Badge", .attrs = &badge_val_attrs };

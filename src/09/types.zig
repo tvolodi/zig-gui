@@ -900,10 +900,10 @@ pub fn buildDrawList(
                 // R73 — Progress bar: track + fill or indeterminate animation.
                 const ps = scene.progressStateOf(id.index);
                 const track_h = computed.h;
-                // Track background.
+                // Track background — use border color so it's visible on any canvas.
                 try list.append(alloc, .{ .filled_rect = .{
                     .rect = toRect09(computed),
-                    .color = toColor09(applyOpacity(tokens.bg_surface, effective_alpha)),
+                    .color = toColor09(applyOpacity(tokens.border_default, effective_alpha)),
                     .radius = track_h / 2.0,
                 } });
                 if (!ps.indeterminate) {
@@ -936,7 +936,8 @@ pub fn buildDrawList(
                 const r = computed.w * 0.35;
                 const tw = computed.w * 0.10;
                 const th = computed.w * 0.25;
-                const phase_idx: u32 = @intCast(scene.frame_count % N);
+                // Advance one tick every 10 frames (~8 steps/sec at 80 fps).
+                const phase_idx: u32 = @intCast((scene.frame_count / 10) % N);
                 var i: u32 = 0;
                 while (i < N) : (i += 1) {
                     const angle = @as(f32, @floatFromInt(i)) * (std.math.tau / @as(f32, @floatFromInt(N)));
