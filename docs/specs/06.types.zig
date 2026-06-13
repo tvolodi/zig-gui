@@ -8,8 +8,8 @@
 //! All lower-numbered in the corrected build order, so these imports are legal (INV-3.4).
 
 const std = @import("std");
-const store = @import("../03_element_store/types.zig");
-const theme = @import("../05_theme/types.zig");
+const store = @import("../../src/03/types.zig");
+const theme = @import("../../src/05/types.zig");
 
 pub const LayoutNode = store.LayoutNode;
 pub const Tokens = theme.Tokens;

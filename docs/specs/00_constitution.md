@@ -13,6 +13,17 @@ This file is the shared memory.
 
 ---
 
+## V2 RATIFICATION (human override, 2026-06-13)
+
+The project owner ratified the Version 2 scope on 2026-06-13. This override replaces INV-1.2,
+INV-1.3, INV-2.1, and INV-4.2 with their `-v2` successors (inline below), extends INV-5.6 with
+the v2 dependency list, and adds modules 10–13 to the build order (§7). The full rationale and
+the design that follows from it live in `V2_ARCHITECTURE.md`; the proposal this ratifies is
+`V2_constitution_amendment.md`. Recorded choices: WebGPU = **wgpu-native**; bidi = **pure-Zig
+UBA port**. Where a rule below shows both a v1 and a `-v2` form, the `-v2` form is binding.
+
+---
+
 ## 0. How to read these rules
 
 Each rule has the form **RULE — rationale**. The rationale is not optional decoration:
@@ -30,26 +41,46 @@ not act on the disagreement.
   options "for flexibility." Hardcoding a single correct behavior is preferred over a
   configurable one unless a spec explicitly requires configuration.
 
-- **INV-1.2 — Target platforms are Windows and Linux only.**
-  Rationale: A single Vulkan backend covers both. Do NOT write platform-specific UI code
-  paths beyond the windowing/surface layer. Do NOT add macOS, web, or mobile code.
+- **INV-1.2-v2 — Target platforms are Windows, Linux, macOS, and Web (WebGPU). Mobile is
+  out of scope.** (Ratified 2026-06-13; replaces v1 INV-1.2 "Windows and Linux only.")
+  Rationale: macOS and Web are reachable through the backend seam (INV-2.1-v2) and GLFW's
+  Cocoa support with no change to the data-oriented core. Mobile (iOS/Android) remains out of
+  scope — it requires a touch-first model, a different lifecycle, and store packaging the
+  architecture does not address. Do NOT add iOS, Android, or any mobile code path. Per-OS code
+  stays confined to the platform-surface layer (`src/01/surface_*.zig`) and module 10; no
+  platform branch may leak into layout, style, the element store, or components.
 
-- **INV-1.3 — No complex-script shaping; fallback glyph lookup for symbols and emoji is permitted.**
-  Rationale: No bidirectional text, no Arabic/CJK shaping. Do NOT pull in HarfBuzz or any
-  complex text-shaping dependency. A glyph atlas with kerning and basic line breaking is the
-  entire text model. If a task seems to need complex shaping, it is out of scope — surface it.
+- **INV-1.3-v2 — Complex-script shaping is permitted via HarfBuzz; the text model gains a
+  shaping stage and a bidirectional stage, and nothing else.** (Ratified 2026-06-13; replaces
+  v1 INV-1.3 "No complex-script shaping.")
+  Rationale: Arabic, Indic, and CJK demand contextual glyph selection, ligatures, mark
+  positioning, and bidirectional reordering a kerning-only model cannot express. HarfBuzz is
+  added as an approved dependency (INV-5.6) and bidi follows the Unicode Bidirectional
+  Algorithm. The shaping stage sits between line breaking and glyph rasterization; it does NOT
+  change the glyph atlas, the draw-command vocabulary, or the renderer. Do NOT invent a custom
+  shaper, and do NOT add line-layout features beyond shaping + bidi (no vertical writing modes,
+  no kashida justification) without a further override. See modules 11 (`text_shaping`),
+  RK0–RK3.
   Fallback font lookup via `stbtt_FindGlyphIndex` (to render emoji, symbols, or extended
-  Unicode codepoints from a secondary TTF) is explicitly permitted: it adds no shaping, only
-  a glyph-index check. This was authorized by the project owner on 2026-06-03 when R64
+  Unicode codepoints from a secondary TTF) remains explicitly permitted: it adds no shaping,
+  only a glyph-index check. This was authorized by the project owner on 2026-06-03 when R64
   (font fallback) was approved.
 
 ---
 
 ## 2. Rendering invariants
 
-- **INV-2.1 — One GPU backend: Vulkan, via SPIR-V shaders.**
-  Rationale: Covers both target OSes with one code path. A seam (an interface other backends
-  *could* implement later) is allowed and encouraged, but DO NOT implement DX12 or Metal.
+- **INV-2.1-v2 — Multiple GPU backends behind one seam: Vulkan, Metal, DX12, WebGPU. The
+  seam, not any single backend, is the contract.** (Ratified 2026-06-13; replaces v1 INV-2.1
+  "One GPU backend: Vulkan.")
+  Rationale: macOS has no first-class Vulkan and Web has none; Windows benefits from a native
+  DX12 path. The seam the v1 rule deferred is now required and implemented (`GpuBackend`,
+  module 10, RJ0). All backends consume the identical `DrawCommand` list (INV-2.3, now
+  load-bearing) and implement the same fragment-mode table. A backend may NOT add a
+  draw-command variant or shader mode for its own convenience; new visual primitives go in the
+  shared vocabulary or not at all. Exactly one backend is selected at build time per target
+  (`-Dgpu`); no runtime backend switching. `VulkanBackend` is the reference implementation
+  (RJ1).
 
 - **INV-2.2 — Windowing, input, and the Vulkan surface come from GLFW.**
   Rationale: Solved, boring, cross-platform. Do NOT write a custom windowing or OS-event
@@ -103,11 +134,19 @@ not act on the disagreement.
   schema-driven forms (the shape is unknown at compile time — it is impossible, not just
   discouraged).
 
-- **INV-4.2 — Styling mimics Tailwind utility semantics, NOT the CSS cascade.**
-  Rationale: Classes are flat, atomic, order-independent. There is NO cascade, NO
-  specificity, NO inheritance, NO selectors. A class maps to a fixed set of resolved
-  properties. Do NOT implement descendant selectors, `!important`, or property inheritance.
-  If a feature requires the cascade, it is out of scope.
+- **INV-4.2-v2 — Styling supports a bounded CSS cascade: type/class/id/descendant selectors,
+  specificity ordering, and a fixed inheritance set. No `@media`/`@supports`, no sibling
+  combinators, no `!important`.** (Ratified 2026-06-13; replaces v1 INV-4.2 "Tailwind utility
+  semantics, NOT the CSS cascade.")
+  Rationale: A flat utility model cannot express component-library theming, descendant
+  styling, or shared rule sets. v2 adds a cascade engine (module 12, RL0–RL3) that resolves
+  rules at **build time** into the same `ComputedStyle` the renderer already consumes — the
+  cascade is a compile-time concern, preserving INV-4.4 (no parser in the production binary)
+  and the runtime data-oriented model. The Tailwind-subset resolver is NOT removed: utility
+  classes are the class-specificity tier and continue to work. Inheritance is limited to a
+  closed six-property set (RL2). Do NOT implement `@media`, sibling combinators, pseudo-
+  elements, or `!important` (rejected at build time). Utility-only screens are guaranteed
+  unchanged (RL3).
 
 - **INV-4.3 — Style values resolve through the four-layer token model.**
   Rationale: palette (raw values) → semantic tokens (roles) → component tokens (per-widget
@@ -156,7 +195,22 @@ not act on the disagreement.
   without an explicit human decision recorded here. (Taffy is being *ported*, i.e.
   reimplemented in Zig, not added as a dependency — see `specs/04_layout_engine/`.
   NOTE (2026-06-13): Pure-Zig vendored regex engine approved for M18-01 pattern validation
-  (RH1). No external C library; implementation shall use only Zig std.)
+  (RH1). No external C library; implementation shall use only Zig std.
+  NOTE (2026-06-13, V2 ratification): The following are approved for v2 (modules 10–13). Each
+  must be pinned to a specific version and fetched reproducibly via `build.zig.zon`:
+    • HarfBuzz (C, MIT) — text shaping, RK0.
+    • Bidirectional algorithm — **pure-Zig UBA port** (owner-selected over SheenBidi), RK1.
+      No external C library; Zig std only.
+    • Metal / Metal-cpp headers (Apple SDK) — macOS backend, RJ2. System framework only.
+    • D3D12 / DXGI headers (Windows SDK) — Windows backend, RJ3. System headers only.
+    • WebGPU — **wgpu-native** (Rust→C ABI, MPL; owner-selected over Dawn) for the native
+      path; the browser uses built-in `navigator.gpu`. RJ4.
+  Approved build-time tools for v2: the Metal shader compiler (metallib), `dxc` (DXIL), and
+  WGSL handled by the WebGPU toolchain — analogues of glslc, one per backend.
+  Still forbidden without a further override: any HTTP client, any font-discovery/fontconfig
+  dependency (the app ships its own fonts), any CSS-parsing C library (the cascade parser is
+  build-time Zig, RL0), and any charting library (charts use the native draw-command
+  vocabulary, RM0). The auto-update deferral (§6) is unchanged.)
 
 ---
 
@@ -187,10 +241,16 @@ Do NOT introduce a dependency from a lower number onto a higher one.
 07  components                      — text, button, input, card, row/column, dropdown
 08  schema_forms                    — Value tree, schema walker, widget registry, validator
 09  renderer                        — DrawCommand list, Scene→GPU serializer, quad pipeline, atlas upload
+10  gpu_backend (v2)                 — GpuBackend seam; Vulkan/Metal/DX12/WebGPU; surface layer (RJ0–RJ5)
+11  text_shaping (v2)                — HarfBuzz shaping + Unicode bidi reordering (RK0–RK3)
+12  cascade (v2)                     — build-time selector + specificity + inheritance resolver (RL0–RL3)
+13  charts (v2)                      — chart-command vocabulary, scales/axes, chart components (RM0–RM3)
 ```
 
-Anything not in this list (DataTable, auto-update/CDN delivery, virtualization, charts)
-is post-v1 and must not be started without a human decision.
+Modules 10–13 were added by the V2 ratification (2026-06-13); each depends only on
+lower-numbered modules (10→01/09, 11→02/04, 12→05/06, 13→04/09). Anything not in this list
+(auto-update/CDN delivery, mobile targets, additional chart types beyond RM2) remains post-v2
+and must not be started without a human decision.
 
 NOTE (2026-06-03, human override): DataTable (M7-10) and row virtualization are
 approved for Milestone 7. See R79_data_table.md. This overrides the post-v1

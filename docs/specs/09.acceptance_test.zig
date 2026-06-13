@@ -67,7 +67,7 @@ test "invisible element (transparent bg, no border, no text) emits no commands" 
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -91,7 +91,7 @@ test "zero-size element emits no commands" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -114,7 +114,7 @@ test "button with solid background emits filled_rect with correct color and rect
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Must contain at least one filled_rect (background).
@@ -155,7 +155,7 @@ test "element with border emits border_rect command" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     var found_border = false;
@@ -183,7 +183,7 @@ test "painter order: parent filled_rect comes before child filled_rect" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     // Find index of parent (card) bg and child (button) bg.
@@ -280,7 +280,7 @@ test "text element emits glyph commands (font present, else skip)" {
     var img_atlas = try makeDummyImageAtlas(testing.allocator);
     defer img_atlas.deinit();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     var glyph_count: usize = 0;
@@ -316,7 +316,7 @@ test "empty draw list is valid (no commands emitted, no crash)" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens()), null, false;
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);

@@ -19,7 +19,7 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec4 outColor = vec4(0.0);
+    outColor = vec4(0.0);
 
     switch(int(fragMode)) {
         case 0: // solid rect
@@ -101,5 +101,4 @@ void main() {
         if (r < 0.0) discard;
     }
 
-    gl_FragColor = outColor;
 }

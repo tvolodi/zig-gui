@@ -6,6 +6,26 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // -----------------------------------------------------------------------
+    // GPU backend selection (-Dgpu=vulkan|metal|dx12|webgpu, default per target).
+    // -----------------------------------------------------------------------
+    const gpu_backend_type = @import("./src/10/types.zig").BackendKind;
+    const gpu_default: gpu_backend_type = switch (target.result.os.tag) {
+        .windows, .linux => .vulkan,
+        .macos => .metal,
+        .emscripten => .webgpu,
+        else => .vulkan,  // Default to Vulkan for unsupported targets (safe fallback)
+    };
+    const gpu_backend = b.option(
+        gpu_backend_type,
+        "gpu",
+        "GPU backend (vulkan, metal, dx12, webgpu)",
+    ) orelse gpu_default;
+
+    // Create build_options module for comptime backend selection (module 10).
+    const gpu_build_options = b.addOptions();
+    gpu_build_options.addOption(gpu_backend_type, "gpu", gpu_backend);
+
+    // -----------------------------------------------------------------------
     // Vulkan SDK paths (read from env; override with -Dvulkan_sdk=<path>).
     // -----------------------------------------------------------------------
     const vulkan_sdk = b.option(
@@ -578,6 +598,51 @@ pub fn build(b: *std.Build) void {
     const run_unit09 = b.addRunArtifact(unit09_test);
     const unit09_test_step = b.step("test-09-unit", "Run module 09 unit tests (pure CPU)");
     unit09_test_step.dependOn(&run_unit09.step);
+
+    // -----------------------------------------------------------------------
+    // Module 10 — GPU backend seam (RJ0).
+    // Imports: 01 (Platform), 09 (DrawCommand, SdfAtlas), 02 (GlyphAtlas).
+    // Defines: GpuBackend interface, comptime dispatch via -Dgpu build option.
+    // -----------------------------------------------------------------------
+    const mod10 = b.addModule("gpu_backend", .{
+        .root_source_file = b.path("src/10/types.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod10.addImport("../01/types.zig", mod01);
+    mod10.addImport("../09/types.zig", mod09);
+    mod10.addImport("../02/types.zig", mod02);
+
+    // Acceptance test — docs/specs/10.acceptance_test.zig (or smoke test if acceptance test not yet written).
+    //   zig build test-10  → compile + run (pure CPU tests; GPU tests skip if backend unavailable)
+    const accept10_mod = b.createModule(.{
+        .root_source_file = b.path("docs/specs/10.smoke_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    accept10_mod.addImport("types.zig", mod10);
+    accept10_mod.addImport("../01_platform/types.zig", mod01);
+    accept10_mod.addImport("../09_renderer/types.zig", mod09);
+    accept10_mod.addImport("../02_text/types.zig", mod02);
+    // For GPU tests: Vulkan SDK paths.
+    accept10_mod.addIncludePath(glfw_dep.path("include"));
+    accept10_mod.addIncludePath(.{ .cwd_relative = vulkan_include });
+    accept10_mod.linkLibrary(glfw_lib);
+    accept10_mod.addLibraryPath(.{ .cwd_relative = vulkan_lib });
+    accept10_mod.linkSystemLibrary("vulkan-1", .{});
+    accept10_mod.link_libc = true;
+    if (target.result.os.tag == .windows) {
+        accept10_mod.linkSystemLibrary("gdi32", .{});
+        accept10_mod.linkSystemLibrary("user32", .{});
+        accept10_mod.linkSystemLibrary("shell32", .{});
+    }
+    const accept10 = b.addTest(.{
+        .name = "10-smoke-test",
+        .root_module = accept10_mod,
+    });
+    const run_accept10 = b.addRunArtifact(accept10);
+    const accept10_step = b.step("test-10", "Run module 10 GPU backend seam tests (compiles with -Dgpu option)");
+    accept10_step.dependOn(&run_accept10.step);
 
     // -----------------------------------------------------------------------
     // App layer (R10-R13) — src/app/

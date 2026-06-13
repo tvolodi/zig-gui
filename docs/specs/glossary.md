@@ -1459,3 +1459,135 @@ application updates (M19-01 through M19-04):
 5. Boot-time swap: On next app launch, rename staged binary into place before any modules run.
 
 See: M19 (auto-update / delivery), RI1–RI4, `src/app/update_manager.zig`, `src/app/update_ui_manager.zig`.
+
+---
+
+# Version 2 terms
+
+> The following terms are introduced by Version 2 (modules 10–13). They are **provisional**
+> until `V2_constitution_amendment.md` is ratified; see that file and `V2_ARCHITECTURE.md`.
+> Listed here per INV-5.5 so v2 requirement files reference defined terms, not improvised ones.
+
+## GpuBackend
+
+The single interface every GPU backend implements (module 10). A backend owns the device,
+swapchain/drawable, pipelines, atlas uploads, and `drawFrame`. The seam — not any single
+backend — is the contract (INV-2.1-v2): all backends consume the identical `DrawCommand` list
+(INV-2.3) and the same fragment-mode table. Exactly one backend is selected at build time via
+`-Dgpu`; there is no runtime switching. Concrete backends: `VulkanBackend` (reference),
+`MetalBackend`, `Dx12Backend`, `WebGpuBackend`.
+
+See: RJ0–RJ4, `src/10/`.
+
+## shader-mode parity table
+
+The canonical list of fragment "modes" (solid rect, glyph, image, SDF icon, gradient, AA
+circle, subpixel glyph, curve) that every backend's shaders must implement identically. A
+backend may not add a private mode (INV-2.1-v2). A build-time test asserts equal mode counts
+across all backend shader sets.
+
+See: RJ0, `src/10/types.zig`.
+
+## Surface (v2)
+
+The per-target drawable handle a backend renders into: `VkSurfaceKHR`, `CAMetalLayer`,
+`HWND`+`IDXGISwapChain`, or a web `GPUCanvasContext`. Produced by `Platform.createSurface`.
+Per-OS code is confined to the surface layer and module 10 (INV-1.2-v2).
+
+See: RJ5, `src/01/surface.zig`.
+
+## shaping
+
+The stage (module 11) that maps a text run to positioned glyph IDs using HarfBuzz, providing
+contextual glyph selection, ligatures, and mark positioning (INV-1.3-v2). Sits between line
+breaking and rasterization; its output feeds the existing line-box and glyph-draw path
+unchanged. A `ShapedGlyph` carries a `glyph_id`, a `cluster` (source byte offset), and offsets.
+
+See: RK0, `src/11/`.
+
+## bidi (Unicode Bidirectional Algorithm)
+
+Resolution of embedding levels and visual reordering of mixed LTR/RTL text per the UBA
+(module 11). `itemize` splits a paragraph into runs by level/script/font in logical order;
+`reorderVisual` reorders a line's runs to visual order before shaping. The RE3 `direction`
+flag is the paragraph base direction input.
+
+See: RK1, `src/11/bidi.zig`.
+
+## cluster
+
+A HarfBuzz cluster: the unit a caret stops on after shaping. One ligature or combining
+sequence is one cluster even when it spans multiple codepoints. Caret movement, hit-testing,
+and selection operate on cluster boundaries (mapped to source byte offsets), not codepoints.
+
+See: RK3, `src/11/`.
+
+## ShapedLine
+
+The query API (module 11) widgets use instead of per-codepoint advances: `caretX`, `byteAtX`,
+`nextCaret`/`prevCaret` (visual order), and `selectionRects`. Lets text input, textarea, and
+selection work correctly under shaping and bidi.
+
+See: RK3, R32, R62, R63, `src/11/types.zig`.
+
+## cascade
+
+The build-time resolver (module 12) that, for each baked element, matches selectors, orders
+declarations by specificity then source order, applies the inherited-property set, and folds
+the result into the same `ComputedStyle` the renderer consumes. Bounded per INV-4.2-v2: no
+`@media`, no sibling combinators, no `!important`. Runs only at build-time codegen
+(INV-4.4) — the production binary contains no cascade engine.
+
+See: RL0–RL3, `src/12/`.
+
+## specificity
+
+The ordering key for cascade conflicts: a triple `(id count, class/attribute count, type
+count)`, with utility classes at the class tier and inline `style:` above all selector tiers;
+ties break by source order. `!important` is rejected at build time.
+
+See: RL1, `src/12/types.zig`.
+
+## inherited-property set
+
+The closed, hardcoded list of properties that inherit parent→child in the cascade: `color`,
+`font-family`, `font-size`, `line-height`, `text-align`, `direction`. No other property
+inherits; the set is not configurable (INV-1.1). `inherit`/`initial` keywords are the only
+per-property escape hatches.
+
+See: RL2, `src/12/`.
+
+## curve primitive
+
+A general GPU drawing command added for charts (module 13, fragment mode 8): `PolylineCmd`
+(stroked, with join), `FilledPathCmd` (CPU-triangulated region), and `ArcCmd` (stroked arc or
+filled wedge). General primitives in the shared vocabulary (INV-2.3), not a chart-private
+path; CPU pre-tessellated to keep all backend shaders in parity.
+
+See: RM0, `src/01/types.zig`, `src/13/tessellate.zig`.
+
+## Scale
+
+A data→pixel mapping for charts (module 13): `linear`, `log`, `band`, or `time`. Provides
+`map` (data→pixel), `invert` (pixel→data, for hit-testing), and `ticks` (human-friendly tick
+values). Tick labels format through M15 (RE0/RE1) for locale support.
+
+See: RM1, `src/13/scale.zig`.
+
+## ChartFrame
+
+The resolved coordinate context for a chart (module 13): the inner `plot_rect` (frame minus
+axis gutters) plus the x and y `Scale`s. Axis gutters are sized from measured label widths so
+labels never clip. `drawAxes` emits axis lines, ticks, gridlines, and labels for a frame.
+
+See: RM1, `src/13/axes.zig`.
+
+## Chart
+
+A widget kind (module 13) occupying a layout rect that, given `Series` data and a
+`ChartKind` (line/bar/area/scatter/pie), emits curve primitives for its marks. Series colors
+come from theme palette tokens (INV-4.3). Re-renders on data change through the normal
+signal→dirty→scan path (INV-3.3); hover/legend/selection reuse existing events, overlays, and
+signals — no chart-specific interaction mechanism.
+
+See: RM2, RM3, `src/13/chart.zig`.

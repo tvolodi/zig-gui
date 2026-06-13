@@ -259,9 +259,9 @@ Connects the framework to the OS in ways users expect from a desktop app.
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
 | M16-01 | **System tray** — `Tray` struct adds an icon to the OS notification area with a popup menu; Win32 + libnotify (Linux) | M8-04 | [RF0](requirements/RF0_system_tray.md) | `done` |
-| M16-02 | **Native file-open dialog** — `Platform.showOpenDialog(filters) ?[]const u8` wraps Win32 `GetOpenFileName` / GTK `GtkFileChooserDialog` | M1-01 | [RF1](requirements/RF1_file_open_dialog.md) | `done` |
-| M16-03 | **Native file-save dialog** — `Platform.showSaveDialog(default_name) ?[]const u8` | M16-02 | [RF2](requirements/RF2_file_save_dialog.md) | `done` |
-| M16-04 | **OS native color-scheme detection** — read the OS light/dark preference at startup and apply it as the initial theme mode | M9-04 | [RF3](requirements/RF3_color_scheme_detection.md) | `done` |
+| M16-02 | **Native file-open dialog** — `Platform.showOpenDialog(filters) ?[]const u8` wraps Win32 `GetOpenFileName` / GTK `GtkFileChooserDialog` | M1-01 | [RF1](requirements/RF1_native_file_open_dialog.md) | `done` |
+| M16-03 | **Native file-save dialog** — `Platform.showSaveDialog(default_name) ?[]const u8` | M16-02 | [RF2](requirements/RF2_native_file_save_dialog.md) | `done` |
+| M16-04 | **OS native color-scheme detection** — read the OS light/dark preference at startup and apply it as the initial theme mode | M9-04 | [RF3](requirements/RF3_os_color_scheme_detection.md) | `done` |
 | M16-05 | **MIME clipboard** — extend `Platform.setClipboard` / `getClipboard` to carry a MIME type alongside text; enables copying images and rich text | M3-07 | [RF4](requirements/RF4_mime_clipboard.md) | `done` |
 
 ---
@@ -312,16 +312,113 @@ approval. RI5 (packaging) implemented for v1 with uncompressed archive (zero new
 
 ## Version 2 (post-v1 — requires explicit decision in `00_constitution.md`)
 
-These require architectural decisions that go beyond the current scope invariants.
-A human override recorded in `00_constitution.md` is required before any work begins.
+Version 2 widens the framework at three seams (GPU backend, text pipeline, style resolver)
+and adds one leaf vocabulary (charts), while leaving the data-oriented core untouched. The
+full design lives in `docs/specs/V2_ARCHITECTURE.md`; the invariant changes it requires are in
+`docs/specs/V2_constitution_amendment.md`.
 
-| Feature | Blocking invariant | What must change |
+> **RATIFIED 2026-06-13 — v2 is unblocked.** The project owner ratified
+> `V2_constitution_amendment.md` into `00_constitution.md` (INV-1.2/1.3/2.1/4.2 replaced by
+> their `-v2` successors; INV-5.6 extended; modules 10–13 added to §7). Recorded choices:
+> WebGPU = wgpu-native, bidi = pure-Zig UBA port. v2 milestones below may now begin, in the
+> sequencing order recommended in `V2_ARCHITECTURE.md` §7 (backend seam first).
+
+### Candidate → milestone map
+
+| v1 candidate | Blocking invariant | v2 milestone |
 |---|---|---|
-| **macOS / web / mobile** | INV-1.2 — Windows + Linux only | Lift INV-1.2; add a Metal backend (macOS) or WebGPU backend (web); new windowing surface layer per platform |
-| **Complex-script shaping (Arabic, CJK)** | INV-1.3 — Latin + Cyrillic only | Lift INV-1.3; add HarfBuzz as an approved dependency (INV-5.6); add bidirectional text model |
-| **DX12 / Metal backend** | INV-2.1 — Vulkan only | Lift INV-2.1; implement the backend seam that INV-2.1 explicitly permits but defers |
-| **CSS cascade / specificity** | INV-4.2 — flat utility classes only | Lift INV-4.2; replace the flat resolver with a cascade engine; breaking change to all existing markup |
-| **Charts / data visualization** | Separate concern | Define a chart-command vocabulary alongside `DrawCommand`; needs GPU curve primitives (M13) as foundation |
+| macOS / web (mobile out of scope) | INV-1.2 | M21 (macOS), M23 (web) |
+| DX12 / Metal backend (the seam) | INV-2.1 | M20 (seam), M21 (Metal), M22 (DX12) |
+| Complex-script shaping (Arabic, CJK) | INV-1.3 | M24 |
+| CSS cascade / specificity | INV-4.2 | M25 |
+| Charts / data visualization | separate concern | M26 |
+
+---
+
+## Milestone 20 — GPU backend seam `planned (v2)`
+
+Generalize the single Vulkan backend into one interface with multiple implementations.
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M20-01 | **`GpuBackend` seam** — one interface; comptime-selected backend; shader-mode parity table | 01, 09 | [RJ0](requirements/RJ0_gpu_backend_seam.md) | `planned` |
+| M20-02 | **Vulkan conformance** — refactor `VulkanBackend` behind the seam, zero behavior change | RJ0 | [RJ1](requirements/RJ1_vulkan_backend_conformance.md) | `planned` |
+| M20-03 | **Platform surface layer** — per-target surface handles (VkSurface/CAMetalLayer/HWND/canvas) | 01, RJ0 | [RJ5](requirements/RJ5_platform_surface_layer.md) | `planned` |
+
+---
+
+## Milestone 21 — macOS target (Metal) `planned (v2)`
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M21-01 | **Metal backend** — native macOS rendering via Metal/MSL | RJ0, RJ1, RJ5 | [RJ2](requirements/RJ2_metal_backend_macos.md) | `planned` |
+
+---
+
+## Milestone 22 — Windows DX12 backend `planned (v2)`
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M22-01 | **DX12 backend** — native D3D12 path on Windows (Vulkan stays default) | RJ0, RJ1, RJ5 | [RJ3](requirements/RJ3_dx12_backend_windows.md) | `planned` |
+
+---
+
+## Milestone 23 — Web target (WebGPU) `planned (v2)`
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M23-01 | **WebGPU backend + web surface** — WASM/`<canvas>` and native WebGPU | RJ0, RJ1, RJ5 | [RJ4](requirements/RJ4_webgpu_backend_web.md) | `planned` |
+
+---
+
+## Milestone 24 — Complex-script text `planned (v2)`
+
+Adds a shaping stage and bidirectional reordering (module 11). Highest regression risk.
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M24-01 | **HarfBuzz shaping** — contextual glyph selection, ligatures, mark positioning | 02, 04 | [RK0](requirements/RK0_harfbuzz_shaping.md) | `planned` |
+| M24-02 | **Bidirectional text** — UBA itemization + visual reorder; mixed LTR/RTL | RK0, RE3 | [RK1](requirements/RK1_bidirectional_text.md) | `planned` |
+| M24-03 | **CJK fallback + atlas scaling** — atlas growth/LRU eviction, CJK font, ideograph line breaks | RK0, R64 | [RK2](requirements/RK2_cjk_atlas_scaling.md) | `planned` |
+| M24-04 | **Shaping-aware editing** — cluster carets, visual navigation, bidi selection rects | RK0, RK1, R32, R62, R63 | [RK3](requirements/RK3_shaping_aware_editing.md) | `planned` |
+
+---
+
+## Milestone 25 — CSS cascade `planned (v2)`
+
+Adds a bounded, build-time cascade (module 12). Utility classes remain first-class.
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M25-01 | **Selector model** — type/class/id/attr + descendant/child combinators; build-time parser | 05, 06 | [RL0](requirements/RL0_selector_model.md) | `planned` |
+| M25-02 | **Cascade + specificity** — match, order by specificity/source, fold into `ComputedStyle` | RL0, 06 | [RL1](requirements/RL1_cascade_specificity_resolver.md) | `planned` |
+| M25-03 | **Inheritance** — closed six-property inherited set; `inherit`/`initial` keywords | RL1 | [RL2](requirements/RL2_inheritance.md) | `planned` |
+| M25-04 | **Markup migration** — utility-only compatibility guarantee; authoring guidance; showcase | RL0, RL1, RL2 | [RL3](requirements/RL3_markup_migration.md) | `planned` |
+
+---
+
+## Milestone 26 — Charts / data visualization `planned (v2)`
+
+A leaf module (13) built on new GPU curve primitives + existing systems.
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M26-01 | **Chart command vocabulary** — polyline/filled-path/arc primitives; shader mode 8 (all backends) | 09, RJ0 | [RM0](requirements/RM0_chart_command_vocabulary.md) | `planned` |
+| M26-02 | **Scales + axes** — linear/log/band/time scales, ticks, axes, gridlines, chart frame | RM0, 04, 02 | [RM1](requirements/RM1_scales_axes.md) | `planned` |
+| M26-03 | **Chart marks** — line, bar, area, scatter, pie; palette-sourced series colors | RM0, RM1, 05 | [RM2](requirements/RM2_chart_marks.md) | `planned` |
+| M26-04 | **Chart interactivity** — hover/tooltip/legend/selection via existing events + signals | RM1, RM2, R7C, R41 | [RM3](requirements/RM3_chart_interactivity.md) | `planned` |
+
+---
+
+## Explicitly out of scope for v2
+
+| Item | Why deferred |
+|---|---|
+| **Mobile (iOS / Android)** | Touch-first interaction, app lifecycle, and store packaging the current architecture does not address (INV-1.2-v2 keeps it out) |
+| **Vertical writing modes, kashida justification** | Beyond the bounded shaping scope (INV-1.3-v2) |
+| **`@media` / `@supports` / sibling combinators / `!important`** | Beyond the bounded cascade (INV-4.2-v2) |
+| **Auto-update pipeline (M19-01…04)** | Still pending HTTP + bsdiff approval (`00_constitution.md` §6) |
+| **Animated chart transitions, zoom/pan, advanced chart types** | Out of the v2 chart scope (RM2/RM3 non-goals) |
 
 ---
 
