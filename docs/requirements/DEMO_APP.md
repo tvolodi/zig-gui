@@ -321,7 +321,14 @@ Labels show the opacity value.
 Four cards demonstrating `shadow-sm`, `shadow`, `shadow-md`, `shadow-lg`.
 Each card contains a label with the class name.
 
-**Framework features exercised:** Flexbox, grid, `col-span`, opacity (M4-06), box shadow (M4-07), dynamic class changes via scene reset, `Dropdown` for live control.
+#### 7f. RTL layout direction (M15-04)
+A `Row` flex container with `direction-rtl` class containing 3 colored boxes
+(`w-16 h-16`) in order [Red, Green, Blue].
+- With `direction-rtl`, the boxes are rendered right-to-left: Blue, Green, Red.
+- A `Text` element with `direction-rtl` shows right-aligned text.
+- A label explains: `"RTL: first child appears on the right"`.
+
+**Framework features exercised:** Flexbox, grid, `col-span`, opacity (M4-06), box shadow (M4-07), dynamic class changes via scene reset, `Dropdown` for live control, RTL direction (M15-04).
 
 ---
 

@@ -60,6 +60,12 @@ pub const AlignItems = enum { start, center, end, stretch };
 pub const AlignSelf = enum { auto, start, center, end, stretch }; // new (R51)
 pub const Overflow = enum { visible, hidden };
 
+/// M15-04: Text/layout direction.
+pub const Direction = enum(u8) {
+    ltr = 0,
+    rtl = 1,
+};
+
 /// Margin value that supports auto (for centering) in addition to fixed px. (R51)
 pub const MarginValue = union(enum) {
     zero,     // 0 px
@@ -129,6 +135,10 @@ pub const LayoutNode = struct {
 
     // M12 RC4 — z-index within siblings. 0 = default (document order).
     z_index: i16 = 0,
+
+    /// M15-04: text/layout direction. Default ltr.
+    /// When rtl, flex main axis is reversed and text baseline is right-aligned.
+    layout_direction: Direction = .ltr,
 };
 
 // ===========================================================================

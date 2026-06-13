@@ -1005,7 +1005,20 @@ pub fn buildDrawList(
                             .h = computed.h,
                         };
                     } else computed;
-                    try emitGlyphs(&list, alloc, id, str, text_rect, &style, atlas, elem_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
+                    // M15-04 RTL: for text elements, right-align within the content rect.
+                    const adjusted_rect = if (s.get(id).layout_direction == .rtl and kind != .button) blk: {
+                        const px_u16: u16 = text_mod.fontSizePx(@round(style.font_size * scene.dpi_scale));
+                        const text_w = computeTextX(0, str, @intCast(str.len), px_u16, atlas, elem_font);
+                        const content_w = computed.w - style.padding.left - style.padding.right;
+                        const offset_x = if (text_w > 0 and text_w < content_w) content_w - text_w else 0.0;
+                        break :blk store_mod.Rect{
+                            .x = computed.x + style.padding.left + offset_x,
+                            .y = computed.y,
+                            .w = text_w,
+                            .h = computed.h,
+                        };
+                    } else text_rect;
+                    try emitGlyphs(&list, alloc, id, str, adjusted_rect, &style, atlas, elem_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
                 }
             }
         }
@@ -1033,13 +1046,21 @@ pub fn buildDrawList(
                 const inp = scene.inputStateOf(id.index);
                 // Text and cursor start at the content area (inside padding).
                 const inp_x = computed.x + style.padding.left;
-                const inp_content = store_mod.Rect{
+                const inp_content_w = computed.w - style.padding.left - style.padding.right;
+                var inp_content = store_mod.Rect{
                     .x = inp_x,
                     .y = computed.y,
-                    .w = computed.w - style.padding.left - style.padding.right,
+                    .w = inp_content_w,
                     .h = computed.h,
                 };
                 const inp_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
+                // M15-04 RTL: for input elements, adjust content rect x for right-alignment.
+                if (s.get(id).layout_direction == .rtl and inp.text.items.len > 0) {
+                    const px_u16: u16 = text_mod.fontSizePx(@round(style.font_size * scene.dpi_scale));
+                    const text_w = computeTextX(0, inp.text.items, @intCast(inp.text.items.len), px_u16, atlas, inp_font);
+                    const offset_x = if (text_w > 0 and text_w < inp_content_w) inp_content_w - text_w else 0.0;
+                    inp_content.x = inp_x + offset_x;
+                }
                 if (inp.text.items.len > 0) {
                     try emitGlyphs(&list, alloc, id, inp.text.items, inp_content, &style, atlas, inp_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
                 } else if (scene.textOf(id)) |placeholder| {
@@ -1047,7 +1068,15 @@ pub fn buildDrawList(
                     if (placeholder.len > 0) {
                         var ph_style = style;
                         ph_style.text_color = tokens.text_muted;
-                        try emitGlyphs(&list, alloc, id, placeholder, inp_content, &ph_style, atlas, inp_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
+                        // M15-04 RTL: right-align placeholder text.
+                        var ph_rect = inp_content;
+                        if (s.get(id).layout_direction == .rtl) {
+                            const px_u16: u16 = text_mod.fontSizePx(@round(style.font_size * scene.dpi_scale));
+                            const text_w = computeTextX(0, placeholder, @intCast(placeholder.len), px_u16, atlas, inp_font);
+                            const offset_x = if (text_w > 0 and text_w < inp_content_w) inp_content_w - text_w else 0.0;
+                            ph_rect.x = inp_x + offset_x;
+                        }
+                        try emitGlyphs(&list, alloc, id, placeholder, ph_rect, &ph_style, atlas, inp_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
                     }
                 }
                 if (inp.active) {

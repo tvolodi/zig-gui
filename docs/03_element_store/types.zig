@@ -50,6 +50,12 @@ pub const FlexDirection = enum { row, column };
 pub const JustifyContent = enum { start, center, end, space_between, space_around };
 pub const AlignItems = enum { start, center, end, stretch };
 
+/// M15-04: Text/layout direction.
+pub const Direction = enum(u8) {
+    ltr = 0,
+    rtl = 1,
+};
+
 /// One LayoutNode per element index. Module 03 stores these in `ElementStore.layout`.
 /// Module 04 (layout engine) reads every field except `computed`, which it writes.
 pub const LayoutNode = struct {
@@ -82,6 +88,10 @@ pub const LayoutNode = struct {
 
     /// OUTPUT of the layout engine. Absolute px relative to the root origin.
     computed: Rect = .{},
+
+    /// M15-04: text/layout direction. Default ltr.
+    /// When rtl, flex main axis is reversed and text baseline is right-aligned.
+    layout_direction: Direction = .ltr,
 };
 
 // ===========================================================================

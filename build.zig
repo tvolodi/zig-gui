@@ -888,6 +888,29 @@ pub fn build(b: *std.Build) void {
     }
 
     // -----------------------------------------------------------------------
+    // M15-03 (RE2) — Build-time string table codegen (string_table_codegen).
+    // Generates src/strings.zig from src/strings.en.txt at build time.
+    // The generated file is a build artifact (not committed to the repo).
+    // -----------------------------------------------------------------------
+    const strings_codegen_mod = b.createModule(.{
+        .root_source_file = b.path("src/tools/string_table_codegen.zig"),
+        .target = b.resolveTargetQuery(.{}),
+        .optimize = .Debug,
+    });
+    const strings_codegen_exe = b.addExecutable(.{
+        .name = "string_table_codegen",
+        .root_module = strings_codegen_mod,
+    });
+
+    const run_strings_codegen = b.addRunArtifact(strings_codegen_exe);
+    run_strings_codegen.addArg(b.path("src/strings.en.txt").getPath(b));
+    const strings_gen = run_strings_codegen.addOutputFileArg("strings.zig");
+
+    const strings_mod = b.addModule("strings.zig", .{
+        .root_source_file = strings_gen,
+    });
+
+    // -----------------------------------------------------------------------
     // R56 — hot-reload build option and run-dev step.
     //   zig build run-dev → build + run with hot-reload enabled
     // -----------------------------------------------------------------------
@@ -1020,6 +1043,22 @@ pub fn build(b: *std.Build) void {
     const run_date_util_test = b.addRunArtifact(date_util_test);
     const date_util_test_step = b.step("test-date-util", "Run date utility unit tests (R78, pure)");
     date_util_test_step.dependOn(&run_date_util_test.step);
+
+    // -----------------------------------------------------------------------
+    // test-locale — Locale and date formatting unit tests (M15-01 + M15-02, pure).
+    //   zig build             → compile only
+    //   zig build test-locale → compile + run
+    // -----------------------------------------------------------------------
+    const locale_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/locale_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const locale_test = b.addTest(.{ .name = "locale-test", .root_module = locale_test_mod });
+    b.default_step.dependOn(&locale_test.step);
+    const run_locale_test = b.addRunArtifact(locale_test);
+    const locale_test_step = b.step("test-locale", "Run locale/date formatting unit tests (M15, pure)");
+    locale_test_step.dependOn(&run_locale_test.step);
 
     // -----------------------------------------------------------------------
     // test-context-menu — ContextMenuManager unit tests (R7D, no GPU).
@@ -1435,6 +1474,7 @@ pub fn build(b: *std.Build) void {
     demo_mod.addImport("../08/types.zig", mod08);
     demo_mod.addImport("events.zig", mod_events);
     demo_mod.addImport("build_options", build_options.createModule());
+    demo_mod.addImport("../strings.zig", strings_mod);
     // C/GPU dependencies are inherited transitively via mod_app → mod02/mod09.
     // Do NOT re-add stb_impl.c here — mod02 already owns it; adding it twice
     // causes duplicate-symbol linker errors.
@@ -1453,6 +1493,8 @@ pub fn build(b: *std.Build) void {
         .name = "showcase",
         .root_module = demo_mod,
     });
+    // Ensure the string table is generated before the demo binary compiles.
+    demo_exe.step.dependOn(&run_strings_codegen.step);
     b.installArtifact(demo_exe);
     const run_demo_cmd = b.addRunArtifact(demo_exe);
     const run_demo_step = b.step("run-demo", "Run the zig-gui Showcase Demo Application");

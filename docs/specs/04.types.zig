@@ -30,6 +30,7 @@ pub const MarginValue = store.MarginValue;
 pub const Margin = store.Margin;
 pub const LayoutNode = store.LayoutNode;
 pub const Position = store.Position;
+pub const Direction = store.Direction;
 
 // ---------------------------------------------------------------------------
 // Public API — the single entry point (INV-5.1)
@@ -522,17 +523,26 @@ fn solveFlex(
         return actual_size;
     }
 
+    // M15-04: RTL layout direction (row flex containers only).
+    const is_rtl_row = direction == .row and s.get(id).layout_direction == .rtl;
+
     // Compute remaining free space after final sizes
     var total_final: f32 = 0.0;
     for (children) |c| total_final += c.final_size;
     const gap_total_final: f32 = if (n > 1) gap * @as(f32, @floatFromInt(n - 1)) else 0.0;
     const remaining = main_size - total_final - gap_total_final;
 
-    // Compute start offset and inter-child spacing based on justify_content
+    // Compute start offset and inter-child spacing based on justify_content.
+    // For RTL row, flex-start and flex-end are mirrored.
     var main_offset: f32 = 0.0;
     var inter_gap: f32 = gap;
+    const effective_justify: JustifyContent = if (is_rtl_row) switch (justify) {
+        .start => .end,
+        .end => .start,
+        else => justify,
+    } else justify;
 
-    switch (justify) {
+    switch (effective_justify) {
         .start => {
             main_offset = 0.0;
             inter_gap = gap;
@@ -558,7 +568,10 @@ fn solveFlex(
 
     // Place each child using cumulative position tracking (no drift)
     // We track the cumulative edge position in f32 and round at each step.
-    var cursor_main_f32: f32 = if (direction == .row)
+    var cursor_main_f32: f32 = if (is_rtl_row)
+        // RTL row: start from the right edge and go left
+        origin_x + padding.left + main_size - main_offset
+    else if (direction == .row)
         origin_x + padding.left + main_offset
     else
         origin_y + padding.top + main_offset;
@@ -566,7 +579,11 @@ fn solveFlex(
     var total_main_extent: f32 = 0.0;
 
     for (children) |*c| {
-        const child_main_pos = @round(cursor_main_f32);
+        // M15-04 RTL: child is placed to the LEFT of the current right-edge cursor
+        const child_main_pos = if (is_rtl_row)
+            @round(cursor_main_f32 - c.final_size)
+        else
+            @round(cursor_main_f32);
 
         // R51: use child's align_self if not .auto, else parent's align_items
         const child_node = s.get(c.id);
@@ -636,7 +653,12 @@ fn solveFlex(
         const child_main_actual = if (direction == .row) child_size.w else child_size.h;
         const effective_advance = @max(c.final_size, child_main_actual);
         total_main_extent += effective_advance;
-        cursor_main_f32 += effective_advance + inter_gap;
+        // M15-04 RTL: cursor moves LEFT (subtract) instead of RIGHT (add)
+        if (is_rtl_row) {
+            cursor_main_f32 -= effective_advance + inter_gap;
+        } else {
+            cursor_main_f32 += effective_advance + inter_gap;
+        }
     }
     // Subtract trailing inter_gap that was added after the last child.
     const children_main_size = if (n > 0)

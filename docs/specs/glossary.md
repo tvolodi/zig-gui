@@ -1154,3 +1154,28 @@ from/to background colors. Each channel (r, g, b, a) is interpolated independent
 and truncated to `u8`. `t` is clamped to [0, 1] internally.
 See: RD7 (M14-02), `docs/specs/09.types.zig` `lerpColor`.
 
+---
+
+## Direction
+
+An `enum(u8)` defined in `src/03/types.zig` (M15-04) with variants `.ltr = 0` (default) and
+`.rtl = 1`. Controls text/layout direction for an element. When `.rtl`, flex children in a
+row-direction container are placed right-to-left and text glyphs are right-aligned within the
+element's content rect. The `.ltr` value (0) is the default and maintains the existing
+left-to-right behavior.
+
+See: M15-04 (RE3), `docs/specs/03.types.zig`.
+
+---
+
+## layout_direction
+
+A field on `LayoutNode` of type `Direction`, defaulting to `.ltr`. When set to `.rtl` on a
+flex container with `direction = .row`, children are placed right-to-left and
+`justify-content: flex-start` / `flex-end` meanings are mirrored. When set to `.rtl` on a
+text element, glyphs are right-aligned within the content rect. Only affects row-direction
+flex containers and text alignment — column containers, grid layout, and icons/images are
+unaffected. Set via the `direction-rtl` / `direction-ltr` Tailwind utility classes.
+
+See: M15-04 (RE3), `docs/specs/03.types.zig`, `docs/specs/04.types.zig`.
+

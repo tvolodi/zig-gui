@@ -1,0 +1,7 @@
+# Application strings
+app.name=zig-gui
+welcome=Welcome to zig-gui
+button.ok=OK
+button.cancel=Cancel
+button.save=Save
+greeting=Hello, {name}!

@@ -239,16 +239,16 @@ A minimal, principled animation model that fits the architecture. Requires: RD6,
 
 ---
 
-## Milestone 15 — Internationalisation `planned`
+## Milestone 15 — Internationalisation `done`
 
-Extends the text model within the Latin + Cyrillic scope.
+Extends the text model within the Latin + Cyrillic scope. Requires: RE0, RE1, RE2, RE3.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M15-01 | **Number formatting** — `formatInt(n, locale)` and `formatFloat(n, locale)` helpers applying thousands separators and decimal symbols per a locale config | — |
-| M15-02 | **Date / time formatting** — `formatDate(DateValue, locale)` with day/month/year order and separator per locale | M7-09 |
-| M15-03 | **String table** — build-time tool reads `strings.en.txt` and emits a Zig `const`-table; `t("key")` resolves at comptime; supports one additional locale file | 05 |
-| M15-04 | **RTL layout direction** — `direction: rtl` flag on `LayoutNode` reverses the main flex axis and mirrors text layout coordinates; prerequisite for Hebrew if scope expands | 04 |
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M15-01 | **Number formatting** — `formatInt(n, locale)` and `formatFloat(n, locale)` helpers applying thousands separators and decimal symbols per a locale config | — | [RE0](requirements/RE0_number_formatting.md) | `done` |
+| M15-02 | **Date / time formatting** — `formatDate(DateValue, locale)` with day/month/year order and separator per locale; `formatDateLong`/`formatDateShort` with full/abbreviated month names | M7-09 | [RE1](requirements/RE1_date_time_formatting.md) | `done` |
+| M15-03 | **String table** — build-time tool reads `strings.en.txt` and emits a Zig `const`-table; `t("key")` resolves at comptime; `formatString` for `{key}` substitution | 05 | [RE2](requirements/RE2_string_table.md) | `done` |
+| M15-04 | **RTL layout direction** — `direction: rtl` flag on `LayoutNode` reverses the main flex axis and mirrors text layout coordinates; prerequisite for Hebrew if scope expands | 04 | [RE3](requirements/RE3_rtl_layout_direction.md) | `done` |
 
 ---
 

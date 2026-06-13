@@ -744,6 +744,12 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.layout.z_index = 40;
     } else if (std.mem.eql(u8, cls, "z-50")) {
         r.layout.z_index = 50;
+
+        // M15-04: RTL layout direction
+    } else if (std.mem.eql(u8, cls, "direction-rtl")) {
+        r.layout.layout_direction = .rtl;
+    } else if (std.mem.eql(u8, cls, "direction-ltr")) {
+        r.layout.layout_direction = .ltr;
     }
     // Unknown classes: silently ignore (last-wins via sequential application)
 }
