@@ -16,7 +16,8 @@
 
 const std = @import("std");
 
-pub const BackendKind = enum { vulkan, metal, dx12, webgpu };
+// Re-export BackendKind from module 01 (the canonical home of the Surface union)
+pub const BackendKind = @import("../01/types.zig").BackendKind;
 
 pub const AtlasHandle = struct { backend_obj: *anyopaque };
 

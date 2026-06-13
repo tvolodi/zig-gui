@@ -549,12 +549,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept09_mod.addImport("types.zig", mod09);
-    accept09_mod.addImport("../03_element_store/types.zig", mod03);
-    accept09_mod.addImport("../05_theme/types.zig", mod05);
-    accept09_mod.addImport("../07_components/types.zig", mod07);
-    accept09_mod.addImport("../06_markup_style/types.zig", mod06);
-    accept09_mod.addImport("../01_platform/types.zig", mod01);
-    accept09_mod.addImport("../04_layout_engine/types.zig", mod04);
+    accept09_mod.addImport("../03/types.zig", mod03);
+    accept09_mod.addImport("../05/types.zig", mod05);
+    accept09_mod.addImport("../07/types.zig", mod07);
+    accept09_mod.addImport("../06/types.zig", mod06);
+    accept09_mod.addImport("../01/types.zig", mod01);
+    accept09_mod.addImport("../04/types.zig", mod04);
     accept09_mod.addImport("../app/font_family.zig", mod_font_family);
     // Vulkan + GLFW needed for GPU tests (link through mod01's transitive deps).
     accept09_mod.addIncludePath(glfw_dep.path("include"));
@@ -621,9 +621,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     accept10_mod.addImport("types.zig", mod10);
-    accept10_mod.addImport("../01_platform/types.zig", mod01);
-    accept10_mod.addImport("../09_renderer/types.zig", mod09);
-    accept10_mod.addImport("../02_text/types.zig", mod02);
+    accept10_mod.addImport("../01/types.zig", mod01);
+    accept10_mod.addImport("../09/types.zig", mod09);
+    accept10_mod.addImport("../02/types.zig", mod02);
     // For GPU tests: Vulkan SDK paths.
     accept10_mod.addIncludePath(glfw_dep.path("include"));
     accept10_mod.addIncludePath(.{ .cwd_relative = vulkan_include });

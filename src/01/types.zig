@@ -39,7 +39,7 @@ pub const WindowOptions = struct {
     height: u32 = 600,
 };
 
-pub const BackendKind = @import("../10/types.zig").BackendKind;
+pub const BackendKind = enum { vulkan, metal, dx12, webgpu };
 
 pub const Surface = union(BackendKind) {
     vulkan: *anyopaque,   // VkSurfaceKHR
