@@ -390,7 +390,7 @@ pub fn build(b: *std.Build) void {
 
     // -----------------------------------------------------------------------
     // Module 07 — Components (Scene, instantiate, measurePass).
-    // Imports: 02 (text/font/atlas), 03 (element store), 05 (theme), 06 (markup).
+    // Imports: 01 (platform/CursorShape), 02 (text/font/atlas), 03 (element store), 05 (theme), 06 (markup).
     // -----------------------------------------------------------------------
     const mod07 = b.addModule("components", .{
         .root_source_file = b.path("src/07/types.zig"),
@@ -399,6 +399,7 @@ pub fn build(b: *std.Build) void {
     });
     // src/07/types.zig imports the other src/ re-export wrappers by relative path.
     // Wire them so the build system resolves C dependencies (stb_truetype for mod02).
+    mod07.addImport("../01/types.zig", mod01); // M11 RB0: CursorShape re-export
     mod07.addImport("../02/types.zig", mod02);
     mod07.addImport("../03/types.zig", mod03);
     mod07.addImport("../05/types.zig", mod05);
@@ -1349,6 +1350,28 @@ pub fn build(b: *std.Build) void {
     const run_error_boundary_test = b.addRunArtifact(error_boundary_test);
     const error_boundary_test_step = b.step("test-error-boundary", "Run ErrorBoundary unit tests (RA0, headless)");
     error_boundary_test_step.dependOn(&run_error_boundary_test.step);
+
+    // test-m11 — M11 input completeness unit tests (RB0–RB5, headless).
+    //   zig build           → compile only
+    //   zig build test-m11  → compile + run
+    const m11_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/app/m11_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    m11_test_mod.addImport("../01/types.zig", mod01);
+    m11_test_mod.addImport("../05/types.zig", mod05);
+    m11_test_mod.addImport("../06/types.zig", mod06);
+    m11_test_mod.addImport("../07/types.zig", mod07);
+    m11_test_mod.addImport("app.zig", mod_app_impl);
+    m11_test_mod.addIncludePath(b.path("deps"));
+    m11_test_mod.addCSourceFile(.{ .file = b.path("deps/stb_impl.c"), .flags = &.{} });
+    m11_test_mod.link_libc = true;
+    const m11_test = b.addTest(.{ .name = "m11-test", .root_module = m11_test_mod });
+    b.default_step.dependOn(&m11_test.step);
+    const run_m11_test = b.addRunArtifact(m11_test);
+    const m11_test_step = b.step("test-m11", "Run M11 input completeness unit tests (RB0–RB5, headless)");
+    m11_test_step.dependOn(&run_m11_test.step);
 
     // -----------------------------------------------------------------------
     // run-demo — Showcase Demo Application (DEMO_APP.md).

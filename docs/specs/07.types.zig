@@ -113,6 +113,28 @@ pub const CallbackFn = struct {
     call: *const fn (*anyopaque) void,
 };
 
+// M11 RB0 — OS cursor shapes (mirrors mod01.CursorShape).
+pub const CursorShape = enum {
+    arrow, text_beam, crosshair, hand, resize_ew, resize_ns, resize_all, not_allowed,
+};
+
+// M11 RB1 — drag-and-drop callback bundles.
+pub const DragCallbacks = struct {
+    /// Called when the drag deadzone is exceeded. Returns an opaque payload carried
+    /// through subsequent drag events.
+    on_drag_start: ?*const fn (idx: u32, x: f32, y: f32) u64 = null,
+    on_drag_move: ?*const fn (idx: u32, x: f32, y: f32, payload: u64) void = null,
+    on_drag_end:  ?*const fn (idx: u32, payload: u64) void = null,
+};
+pub const DropCallbacks = struct {
+    on_drag_enter: ?*const fn (target_idx: u32, source_idx: u32) void = null,
+    on_drag_leave: ?*const fn (target_idx: u32, source_idx: u32) void = null,
+    on_drop:       ?*const fn (target_idx: u32, source_idx: u32, payload: u64) void = null,
+};
+
+// M11 RB5 — pinch callback type (called synchronously, not queued).
+pub const PinchCallbackFn = *const fn (idx: u32, scale_delta: f32) void;
+
 pub const ButtonState = struct {
     hovered: bool = false,
     pressed: bool = false,
@@ -279,6 +301,22 @@ pub const Scene = struct {
 
     // R72 — Slider state parallel array
     _slider_state: std.ArrayListUnmanaged(SliderState) = .{},
+
+    // M11 RB0 — Per-element cursor shape override (null = use defaultCursorFor).
+    _cursor: std.ArrayListUnmanaged(?CursorShape) = .{},
+
+    // M11 RB1 — Per-element drag/drop callback bundles.
+    _drag: std.ArrayListUnmanaged(?DragCallbacks) = .{},
+    _drop: std.ArrayListUnmanaged(?DropCallbacks) = .{},
+
+    // M11 RB2 — Per-element right-click callback.
+    _right_click: std.ArrayListUnmanaged(?CallbackFn) = .{},
+
+    // M11 RB3 — Per-element double-click callback.
+    _double_click: std.ArrayListUnmanaged(?CallbackFn) = .{},
+
+    // M11 RB5 — Per-element pinch callback.
+    _pinch: std.ArrayListUnmanaged(?PinchCallbackFn) = .{},
 
     gpa: std.mem.Allocator,
 
@@ -645,6 +683,86 @@ pub const Scene = struct {
         _ = self;
         _ = idx;
         _ = value;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- M11 RB0: cursor shape ---
+
+    pub fn cursorOf(self: *const Scene, idx: u32) ?CursorShape {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- M11 RB1: drag-and-drop ---
+
+    pub fn setDragSource(self: *Scene, idx: u32, cbs: DragCallbacks) void {
+        _ = self; _ = idx; _ = cbs;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearDragSource(self: *Scene, idx: u32) void {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn setDropTarget(self: *Scene, idx: u32, cbs: DropCallbacks) void {
+        _ = self; _ = idx; _ = cbs;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearDropTarget(self: *Scene, idx: u32) void {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- M11 RB2: right-click ---
+
+    pub fn setRightClick(self: *Scene, idx: u32, cb: CallbackFn) void {
+        _ = self; _ = idx; _ = cb;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearRightClick(self: *Scene, idx: u32) void {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn rightClickOf(self: *const Scene, idx: u32) ?CallbackFn {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- M11 RB3: double-click ---
+
+    pub fn setDoubleClick(self: *Scene, idx: u32, cb: CallbackFn) void {
+        _ = self; _ = idx; _ = cb;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearDoubleClick(self: *Scene, idx: u32) void {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn doubleClickOf(self: *const Scene, idx: u32) ?CallbackFn {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    // --- M11 RB5: pinch gesture ---
+
+    pub fn setPinch(self: *Scene, idx: u32, cb: PinchCallbackFn) void {
+        _ = self; _ = idx; _ = cb;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn clearPinch(self: *Scene, idx: u32) void {
+        _ = self; _ = idx;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    pub fn pinchOf(self: *const Scene, idx: u32) ?PinchCallbackFn {
+        _ = self; _ = idx;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 

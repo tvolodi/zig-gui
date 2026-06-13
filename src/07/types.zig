@@ -11,12 +11,16 @@
 //!   06 — markup (NodeDesc, resolveClasses, Resolved)
 
 const std = @import("std");
+const mod01 = @import("../01/types.zig");
 const text = @import("../02/types.zig");
 const store_mod = @import("../03/types.zig");
 const theme = @import("../05/types.zig");
 const markup = @import("../06/types.zig");
 const font_family_mod = @import("../app/font_family.zig");
 const debug = @import("debug.zig");
+
+/// RB0 — Re-export CursorShape so callers only need to import this module.
+pub const CursorShape = mod01.CursorShape;
 
 // ---------------------------------------------------------------------------
 // Re-exports used by the acceptance test
@@ -144,6 +148,35 @@ pub const CallbackFn = struct {
     ptr: *anyopaque,
     call: *const fn (*anyopaque) void,
 };
+
+// ---------------------------------------------------------------------------
+// RB1 — Drag-and-drop callback types
+// ---------------------------------------------------------------------------
+
+/// RB1 — Callbacks for a drag source element. All fields are optional.
+pub const DragCallbacks = struct {
+    /// Called once when the drag deadzone is exceeded.
+    /// Return value: u64 payload to carry through the drag lifetime.
+    on_drag_start: ?*const fn (source_idx: u32, x: f32, y: f32) u64 = null,
+    /// Called each mouse-move tick while dragging.
+    on_drag_move:  ?*const fn (source_idx: u32, x: f32, y: f32, payload: u64) void = null,
+    /// Called when the mouse button is released (whether or not over a drop target).
+    on_drag_end:   ?*const fn (source_idx: u32, payload: u64) void = null,
+};
+
+/// RB1 — Callbacks for a drop target element.
+pub const DropCallbacks = struct {
+    /// Called when a dragged element is released over this target.
+    on_drop: ?*const fn (target_idx: u32, source_idx: u32, payload: u64) void = null,
+};
+
+// ---------------------------------------------------------------------------
+// RB5 — Pinch callback type
+// ---------------------------------------------------------------------------
+
+/// RB5 — Per-element pinch callback. Called synchronously (not queued). INV-3.3 note:
+/// the callback is expected to call signal.set(), which marks dirty bits via the normal path.
+pub const PinchCallbackFn = *const fn (idx: u32, scale_delta: f32) void;
 
 pub const ButtonState = struct {
     hovered: bool = false,
@@ -503,6 +536,24 @@ pub const Scene = struct {
     // R79 — Data table state parallel array
     _table_state: std.ArrayListUnmanaged(DataTableState) = .empty,
 
+    // RB0 — Optional cursor shape override per element (null = use default).
+    _cursor: std.ArrayListUnmanaged(?CursorShape) = .empty,
+
+    // RB1 — Drag source callbacks per element (null = not a drag source).
+    _drag: std.ArrayListUnmanaged(?DragCallbacks) = .empty,
+
+    // RB1 — Drop target callbacks per element (null = not a drop target).
+    _drop: std.ArrayListUnmanaged(?DropCallbacks) = .empty,
+
+    // RB2 — Per-element right-click callbacks (null = no handler).
+    _right_click: std.ArrayListUnmanaged(?CallbackFn) = .empty,
+
+    // RB3 — Per-element double-click callbacks (null = no handler).
+    _double_click: std.ArrayListUnmanaged(?CallbackFn) = .empty,
+
+    // RB5 — Per-element pinch callbacks (null = element ignores pinch).
+    _pinch: std.ArrayListUnmanaged(?PinchCallbackFn) = .empty,
+
     // R93 — Class string parallel array for theme live-swap (one entry per element).
     // Stores the `NodeDesc.classes` slice (owned by the markup arena — no copy needed).
     // Used by rebuildStyles to re-run class resolution after a theme change.
@@ -561,6 +612,13 @@ pub const Scene = struct {
         for (self._table_state.items) |*ts| ts.sorted_indices.deinit(self.gpa);
         self._table_state.deinit(self.gpa);
         self._classes.deinit(self.gpa);
+        // RB0–RB5: new parallel arrays
+        self._cursor.deinit(self.gpa);
+        self._drag.deinit(self.gpa);
+        self._drop.deinit(self.gpa);
+        self._right_click.deinit(self.gpa);
+        self._double_click.deinit(self.gpa);
+        self._pinch.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -596,6 +654,13 @@ pub const Scene = struct {
         self._context_menu_idx.clearRetainingCapacity();
         self._table_state.clearRetainingCapacity();
         self._classes.clearRetainingCapacity();
+        // RB0–RB5: new parallel arrays
+        self._cursor.clearRetainingCapacity();
+        self._drag.clearRetainingCapacity();
+        self._drop.clearRetainingCapacity();
+        self._right_click.clearRetainingCapacity();
+        self._double_click.clearRetainingCapacity();
+        self._pinch.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -1196,6 +1261,96 @@ pub const Scene = struct {
     pub fn setContextMenuIdx(self: *Scene, idx: u32, menu_idx: u8) void {
         if (idx >= self._context_menu_idx.items.len) return;
         self._context_menu_idx.items[idx] = menu_idx;
+    }
+
+    // -----------------------------------------------------------------------
+    // M11 — Cursor shapes (RB0)
+    // -----------------------------------------------------------------------
+
+    pub fn cursorOf(self: *const Scene, idx: u32) ?CursorShape {
+        if (idx >= self._cursor.items.len) return null;
+        return self._cursor.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
+    // M11 — Drag-and-drop (RB1)
+    // -----------------------------------------------------------------------
+
+    pub fn setDragSource(self: *Scene, idx: u32, cbs: DragCallbacks) void {
+        if (idx >= self._drag.items.len) return;
+        self._drag.items[idx] = cbs;
+    }
+
+    pub fn setDropTarget(self: *Scene, idx: u32, cbs: DropCallbacks) void {
+        if (idx >= self._drop.items.len) return;
+        self._drop.items[idx] = cbs;
+    }
+
+    pub fn clearDragSource(self: *Scene, idx: u32) void {
+        if (idx >= self._drag.items.len) return;
+        self._drag.items[idx] = null;
+    }
+
+    pub fn clearDropTarget(self: *Scene, idx: u32) void {
+        if (idx >= self._drop.items.len) return;
+        self._drop.items[idx] = null;
+    }
+
+    // -----------------------------------------------------------------------
+    // M11 — Right-click routing (RB2)
+    // -----------------------------------------------------------------------
+
+    pub fn setRightClick(self: *Scene, idx: u32, cb: CallbackFn) void {
+        if (idx >= self._right_click.items.len) return;
+        self._right_click.items[idx] = cb;
+    }
+
+    pub fn clearRightClick(self: *Scene, idx: u32) void {
+        if (idx >= self._right_click.items.len) return;
+        self._right_click.items[idx] = null;
+    }
+
+    pub fn rightClickOf(self: *const Scene, idx: u32) ?CallbackFn {
+        if (idx >= self._right_click.items.len) return null;
+        return self._right_click.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
+    // M11 — Double-click detection (RB3)
+    // -----------------------------------------------------------------------
+
+    pub fn setDoubleClick(self: *Scene, idx: u32, cb: CallbackFn) void {
+        if (idx >= self._double_click.items.len) return;
+        self._double_click.items[idx] = cb;
+    }
+
+    pub fn clearDoubleClick(self: *Scene, idx: u32) void {
+        if (idx >= self._double_click.items.len) return;
+        self._double_click.items[idx] = null;
+    }
+
+    pub fn doubleClickOf(self: *const Scene, idx: u32) ?CallbackFn {
+        if (idx >= self._double_click.items.len) return null;
+        return self._double_click.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
+    // M11 — Touch/trackpad gesture support (RB5)
+    // -----------------------------------------------------------------------
+
+    pub fn setPinch(self: *Scene, idx: u32, cb: PinchCallbackFn) void {
+        if (idx >= self._pinch.items.len) return;
+        self._pinch.items[idx] = cb;
+    }
+
+    pub fn clearPinch(self: *Scene, idx: u32) void {
+        if (idx >= self._pinch.items.len) return;
+        self._pinch.items[idx] = null;
+    }
+
+    pub fn pinchOf(self: *const Scene, idx: u32) ?PinchCallbackFn {
+        if (idx >= self._pinch.items.len) return null;
+        return self._pinch.items[idx];
     }
 
     // -----------------------------------------------------------------------
@@ -1836,6 +1991,77 @@ pub const Scene = struct {
             self._classes.items.len = needed;
         }
         self._classes.items[id.index] = desc.classes;
+
+        // RB0: cursor shape override (null = use default)
+        try self._cursor.ensureTotalCapacity(self.gpa, needed);
+        if (self._cursor.items.len <= id.index) {
+            self._cursor.items.len = needed;
+        }
+        self._cursor.items[id.index] = null;
+
+        // RB1: drag source / drop target callbacks (null = not registered)
+        try self._drag.ensureTotalCapacity(self.gpa, needed);
+        if (self._drag.items.len <= id.index) {
+            self._drag.items.len = needed;
+        }
+        self._drag.items[id.index] = null;
+
+        try self._drop.ensureTotalCapacity(self.gpa, needed);
+        if (self._drop.items.len <= id.index) {
+            self._drop.items.len = needed;
+        }
+        self._drop.items[id.index] = null;
+
+        // RB2: right-click callback (null = no handler)
+        try self._right_click.ensureTotalCapacity(self.gpa, needed);
+        if (self._right_click.items.len <= id.index) {
+            self._right_click.items.len = needed;
+        }
+        self._right_click.items[id.index] = null;
+
+        // RB3: double-click callback (null = no handler)
+        try self._double_click.ensureTotalCapacity(self.gpa, needed);
+        if (self._double_click.items.len <= id.index) {
+            self._double_click.items.len = needed;
+        }
+        self._double_click.items[id.index] = null;
+
+        // RB5: pinch callback (null = element ignores pinch)
+        try self._pinch.ensureTotalCapacity(self.gpa, needed);
+        if (self._pinch.items.len <= id.index) {
+            self._pinch.items.len = needed;
+        }
+        self._pinch.items[id.index] = null;
+
+        // RB0: parse cursor= attribute
+        for (desc.attrs) |attr| {
+            if (std.mem.eql(u8, attr.name, "cursor")) {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                const shape: ?CursorShape = if (std.mem.eql(u8, attr_val, "arrow"))
+                    .arrow
+                else if (std.mem.eql(u8, attr_val, "text"))
+                    .text_beam
+                else if (std.mem.eql(u8, attr_val, "crosshair"))
+                    .crosshair
+                else if (std.mem.eql(u8, attr_val, "hand"))
+                    .hand
+                else if (std.mem.eql(u8, attr_val, "resize-ew"))
+                    .resize_ew
+                else if (std.mem.eql(u8, attr_val, "resize-ns"))
+                    .resize_ns
+                else if (std.mem.eql(u8, attr_val, "resize-all"))
+                    .resize_all
+                else if (std.mem.eql(u8, attr_val, "not-allowed"))
+                    .not_allowed
+                else
+                    null;
+                self._cursor.items[id.index] = shape;
+                break;
+            }
+        }
 
         // Parse input/textarea value= attribute to pre-populate the text buffer.
         if (kind == .input or kind == .textarea) {

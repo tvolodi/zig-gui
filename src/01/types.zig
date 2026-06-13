@@ -107,9 +107,34 @@ pub const Modifiers = packed struct {
 pub const InputEvent = union(enum) {
     mouse_move: struct { x: f32, y: f32 },
     mouse_button: struct { button: MouseButton, action: InputAction, x: f32, y: f32 },
+    /// RB3 — Synthesized by dispatchEvents; never pushed directly by GLFW callbacks.
+    mouse_button_double: struct { button: MouseButton, x: f32, y: f32 },
     scroll: struct { dx: f32, dy: f32 },
+    /// RB5 — Synthesized from trackpad fractional scroll input.
+    gesture_swipe: struct { dx: f32, dy: f32 },
+    /// RB5 — Synthesized when |dy| > PINCH_THRESHOLD with dx==0. scale_delta > 1 = zoom in.
+    gesture_pinch: struct { scale_delta: f32 },
     key: struct { key: Key, action: InputAction, mods: Modifiers },
     char: struct { codepoint: u21 },
+};
+
+/// RB5 — Scale factor applied to trackpad swipe deltas to match scroll-wheel step sizes.
+pub const SWIPE_SCALE: f32 = 20;
+/// RB5 — |dy| threshold above which a scroll event is treated as a pinch gesture.
+pub const PINCH_THRESHOLD: f32 = 5.0;
+/// RB5 — Scaling factor mapping dy to pinch scale_delta (5% per unit).
+pub const PINCH_SCALE: f32 = 0.05;
+
+/// RB0 — OS cursor shapes available via glfwCreateStandardCursor.
+pub const CursorShape = enum {
+    arrow,       // GLFW_ARROW_CURSOR
+    text_beam,   // GLFW_IBEAM_CURSOR
+    crosshair,   // GLFW_CROSSHAIR_CURSOR
+    hand,        // GLFW_POINTING_HAND_CURSOR
+    resize_ew,   // GLFW_RESIZE_EW_CURSOR   (horizontal resize)
+    resize_ns,   // GLFW_RESIZE_NS_CURSOR   (vertical resize)
+    resize_all,  // GLFW_RESIZE_ALL_CURSOR  (move/drag)
+    not_allowed, // GLFW_NOT_ALLOWED_CURSOR
 };
 
 /// Function pointer type for pushing an InputEvent into a queue (R11).
@@ -133,6 +158,8 @@ const PlatformImpl = struct {
     allocator: std.mem.Allocator,
     /// Packed callback context — glfwSetWindowUserPointer points here (R11 + R12).
     callback_ctx: GlfwCallbackContext = .{},
+    /// RB0 — Cursor cache. Indexed by CursorShape ordinal. null = not yet created.
+    cursor_cache: [8]?*c.GLFWcursor = [_]?*c.GLFWcursor{null} ** 8,
 };
 
 const VulkanImpl = struct {
@@ -498,9 +525,37 @@ pub const Platform = struct {
 
     pub fn deinit(self: *Platform) void {
         const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        // RB0: Destroy cached cursors before destroying the window.
+        for (&impl.cursor_cache) |*slot| {
+            if (slot.*) |cur| {
+                c.glfwDestroyCursor(cur);
+                slot.* = null;
+            }
+        }
         c.glfwDestroyWindow(impl.window);
         c.glfwTerminate();
         impl.allocator.destroy(impl);
+    }
+
+    /// RB0 — Change the OS cursor displayed over the GLFW window.
+    /// Cursor objects are created on first use and cached for the window's lifetime.
+    pub fn setCursor(self: *Platform, shape: CursorShape) void {
+        const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+        const idx = @intFromEnum(shape);
+        if (impl.cursor_cache[idx] == null) {
+            const cursor_shape: c_int = switch (shape) {
+                .arrow       => c.GLFW_ARROW_CURSOR,
+                .text_beam   => c.GLFW_IBEAM_CURSOR,
+                .crosshair   => c.GLFW_CROSSHAIR_CURSOR,
+                .hand        => c.GLFW_POINTING_HAND_CURSOR,
+                .resize_ew   => c.GLFW_RESIZE_EW_CURSOR,
+                .resize_ns   => c.GLFW_RESIZE_NS_CURSOR,
+                .resize_all  => c.GLFW_RESIZE_ALL_CURSOR,
+                .not_allowed => c.GLFW_NOT_ALLOWED_CURSOR,
+            };
+            impl.cursor_cache[idx] = c.glfwCreateStandardCursor(cursor_shape);
+        }
+        c.glfwSetCursor(impl.window, impl.cursor_cache[idx]);
     }
 
     pub fn shouldClose(self: *Platform) bool {
@@ -745,10 +800,27 @@ fn glfwScrollCallback(
     ));
     const q = ctx.event_queue orelse return;
     const push = ctx.push_fn orelse return;
-    push(q, InputEvent{ .scroll = .{
-        .dx = @floatCast(xoffset),
-        .dy = @floatCast(yoffset),
-    } });
+    const dx: f32 = @floatCast(xoffset);
+    const dy: f32 = @floatCast(yoffset);
+
+    // RB5: Heuristic pinch detection — large |dy| with dx==0 and non-integer dy.
+    // Check pinch before swipe so that large fractional-dy events map to pinch, not swipe.
+    if (dx == 0 and @abs(dy) > PINCH_THRESHOLD) {
+        const scale_delta: f32 = 1.0 + dy * PINCH_SCALE;
+        push(q, InputEvent{ .gesture_pinch = .{ .scale_delta = scale_delta } });
+        return;
+    }
+
+    // RB5: Swipe heuristic — fractional values or simultaneous x+y movement = trackpad swipe.
+    const is_swipe = (dx != 0 and dy != 0)
+        or (@floor(dy) != dy)
+        or (@floor(dx) != dx);
+
+    if (is_swipe) {
+        push(q, InputEvent{ .gesture_swipe = .{ .dx = dx * SWIPE_SCALE, .dy = dy * SWIPE_SCALE } });
+    } else {
+        push(q, InputEvent{ .scroll = .{ .dx = dx, .dy = dy } });
+    }
 }
 
 fn glfwKeyCallback(

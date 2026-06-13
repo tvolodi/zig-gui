@@ -49,6 +49,128 @@ const mod09 = @import("../09/types.zig");
 pub const Event = mod01.InputEvent;
 pub const EventQueue = events_mod.EventQueue;
 
+// ---------------------------------------------------------------------------
+// M11 — RB1: Drag-and-drop types
+// ---------------------------------------------------------------------------
+
+/// Transient drag-and-drop state stored on AppInner (not in Scene — one drag at a time).
+pub const DragState = struct {
+    /// Index of the element that is the drag source. NONE = no drag in progress.
+    source_idx: u32 = mod07.NONE,
+    /// True once the deadzone (4 px) has been exceeded.
+    active: bool = false,
+    origin_x: f32 = 0,
+    origin_y: f32 = 0,
+    current_x: f32 = 0,
+    current_y: f32 = 0,
+    /// App-defined opaque payload set by on_drag_start; passed to subsequent callbacks.
+    payload: u64 = 0,
+};
+
+const DRAG_DEADZONE_PX: f32 = 4;
+
+// ---------------------------------------------------------------------------
+// M11 — RB3: Double-click detection types
+// ---------------------------------------------------------------------------
+
+/// Transient double-click detection state stored on AppInner.
+pub const DoubleClickState = struct {
+    last_press_ms: u64 = 0,
+    last_x: f32 = 0,
+    last_y: f32 = 0,
+    last_hit: u32 = mod07.NONE,
+};
+
+const DOUBLE_CLICK_DEADZONE_PX: f32 = 4;
+
+// ---------------------------------------------------------------------------
+// M11 — RB4: Keyboard shortcut table
+// ---------------------------------------------------------------------------
+
+pub const ShortcutError = error{TooManyShortcuts};
+pub const MAX_SHORTCUTS: usize = 64;
+
+pub const Shortcut = struct {
+    key: mod01.Key = .other,
+    mods: mod01.Modifiers = .{},
+    cb: mod07.CallbackFn = undefined,
+    active: bool = false,
+};
+
+pub const ShortcutTable = struct {
+    entries: [MAX_SHORTCUTS]Shortcut = [_]Shortcut{.{}} ** MAX_SHORTCUTS,
+    count: usize = 0,
+
+    pub fn register(self: *ShortcutTable, key: mod01.Key, mods: mod01.Modifiers, cb: mod07.CallbackFn) ShortcutError!void {
+        // Replace existing entry for the same key+mods if present.
+        for (self.entries[0..self.count]) |*e| {
+            if (e.key == key and std.meta.eql(e.mods, mods)) {
+                e.cb = cb;
+                return;
+            }
+        }
+        if (self.count >= MAX_SHORTCUTS) return ShortcutError.TooManyShortcuts;
+        self.entries[self.count] = .{ .key = key, .mods = mods, .cb = cb, .active = true };
+        self.count += 1;
+    }
+
+    pub fn unregister(self: *ShortcutTable, key: mod01.Key, mods: mod01.Modifiers) void {
+        var i: usize = 0;
+        while (i < self.count) : (i += 1) {
+            if (self.entries[i].key == key and std.meta.eql(self.entries[i].mods, mods)) {
+                // Compact: move last entry into this slot.
+                self.count -= 1;
+                if (i < self.count) self.entries[i] = self.entries[self.count];
+                self.entries[self.count] = .{};
+                return;
+            }
+        }
+    }
+
+    pub fn lookup(self: *const ShortcutTable, key: mod01.Key, mods: mod01.Modifiers) ?mod07.CallbackFn {
+        for (self.entries[0..self.count]) |e| {
+            if (e.key == key and std.meta.eql(e.mods, mods)) return e.cb;
+        }
+        return null;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// M11 — RB0: Cursor shape helper
+// ---------------------------------------------------------------------------
+
+fn defaultCursorFor(kind: mod07.WidgetKind, disabled: bool) mod01.CursorShape {
+    if (disabled) return .not_allowed;
+    return switch (kind) {
+        .button, .checkbox, .radio, .dropdown,
+        .slider, .tabs, .accordion, .date_picker => .hand,
+        .input, .textarea                         => .text_beam,
+        else                                      => .arrow,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// M11 — RB1/RB3/RB5: General hit-test (all live elements, reverse order)
+// ---------------------------------------------------------------------------
+
+/// Hit-test ALL non-hidden elements in reverse index order (highest index = topmost).
+/// Returns the index of the topmost element whose computed rect contains (x, y), or NONE.
+fn hitTest(scene: *const mod07.Scene, x: f32, y: f32) u32 {
+    const count = scene.elements.layout.items.len;
+    if (count == 0) return mod07.NONE;
+    var i: u32 = @intCast(count);
+    while (i > 0) {
+        i -= 1;
+        if (i < scene._hidden.items.len and scene._hidden.items[i]) continue;
+        const rect = scene.elements.layout.items[i].computed;
+        if (rect.w == 0 or rect.h == 0) continue;
+        if (x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h) {
+            return i;
+        }
+    }
+    return mod07.NONE;
+}
+
 /// Application startup options (R10).
 pub const AppOptions = struct {
     window: mod01.WindowOptions = .{},
@@ -74,6 +196,10 @@ pub const AppOptions = struct {
     // RA0 — Error boundary.
     /// Enable error boundary. When true, ScreenFn errors display a fallback screen.
     enable_error_boundary: bool = false,
+
+    // M11 — RB3: Double-click timing threshold.
+    /// Maximum interval (ms) between two clicks to be considered a double-click. Default 250 ms.
+    double_click_threshold_ms: u64 = 250,
 
     // Visual testing — headless screenshot mode.
     /// When > 0, render this many frames, write a PNG screenshot, then exit.
@@ -271,6 +397,16 @@ pub const AppInner = struct {
     _screenshot_frames: u32 = 0,
     _screenshot_out: []const u8 = "testdata/screenshot_actual.png",
 
+    // M11 — RB1: Intra-window drag-and-drop state.
+    drag: DragState = .{},
+
+    // M11 — RB3: Double-click detection state and configurable threshold.
+    double_click: DoubleClickState = .{},
+    double_click_threshold_ms: u64 = 250,
+
+    // M11 — RB4: Global keyboard shortcut table.
+    shortcuts: ShortcutTable = .{},
+
     // -----------------------------------------------------------------------
     // Init
     // -----------------------------------------------------------------------
@@ -436,6 +572,7 @@ pub const AppInner = struct {
 
         self._screenshot_frames = opts.screenshot_frames;
         self._screenshot_out = opts.screenshot_out;
+        self.double_click_threshold_ms = opts.double_click_threshold_ms;
 
         return self;
     }
@@ -1072,6 +1209,18 @@ pub const AppInner = struct {
     }
 
     // -----------------------------------------------------------------------
+    // M11 — RB4: Keyboard shortcut registration
+    // -----------------------------------------------------------------------
+
+    pub fn registerShortcut(self: *AppInner, key: mod01.Key, mods: mod01.Modifiers, cb: mod07.CallbackFn) ShortcutError!void {
+        return self.shortcuts.register(key, mods, cb);
+    }
+
+    pub fn unregisterShortcut(self: *AppInner, key: mod01.Key, mods: mod01.Modifiers) void {
+        self.shortcuts.unregister(key, mods);
+    }
+
+    // -----------------------------------------------------------------------
     // R56 — Hot-reload (comptime-gated; compiled out in production)
     // -----------------------------------------------------------------------
 
@@ -1251,6 +1400,42 @@ pub const AppInner = struct {
                     if (!found_tooltip) {
                         self.tooltip_manager.onLeave(self.tooltip_manager.hover_idx);
                     }
+                    // M11 RB1: update drag position and fire on_drag_move if active.
+                    if (self.drag.source_idx != mod07.NONE) {
+                        self.drag.current_x = mm.x;
+                        self.drag.current_y = mm.y;
+                        if (!self.drag.active) {
+                            const ddx = mm.x - self.drag.origin_x;
+                            const ddy = mm.y - self.drag.origin_y;
+                            if (ddx * ddx + ddy * ddy > DRAG_DEADZONE_PX * DRAG_DEADZONE_PX) {
+                                self.drag.active = true;
+                                if (self.scene._drag.items[self.drag.source_idx]) |cbs| {
+                                    if (cbs.on_drag_start) |f| {
+                                        self.drag.payload = f(self.drag.source_idx, mm.x, mm.y);
+                                    }
+                                }
+                            }
+                        } else {
+                            if (self.scene._drag.items[self.drag.source_idx]) |cbs| {
+                                if (cbs.on_drag_move) |f| {
+                                    f(self.drag.source_idx, mm.x, mm.y, self.drag.payload);
+                                }
+                            }
+                        }
+                    }
+                    // M11 RB0: update OS cursor shape based on hovered element.
+                    {
+                        const cursor_shape: mod01.CursorShape = blk: {
+                            if (self.drag.active) break :blk .resize_all;
+                            const hovered = hitTest(&self.scene, mm.x, mm.y);
+                            if (hovered == mod07.NONE) break :blk .arrow;
+                            if (self.scene.cursorOf(hovered)) |override| break :blk override;
+                            const disabled = hovered < self.scene._pseudo.items.len and
+                                self.scene._pseudo.items[hovered].disabled;
+                            break :blk defaultCursorFor(self.scene.kindOfIdx(hovered), disabled);
+                        };
+                        self.platform.setCursor(cursor_shape);
+                    }
                     // R62: update text selection drag.
                     if (self.left_mouse_down) {
                         if (self.dragging_text_idx) |didx| {
@@ -1296,17 +1481,84 @@ pub const AppInner = struct {
                 .mouse_button => |mb| {
                     if (mb.button == .left) {
                         if (mb.action == .press) {
+                            // M11 RB3: double-click detection (BEFORE drag candidate recording).
+                            const now_ms = self.frame_time_ms;
+                            const hit_dc = hitTest(&self.scene, mb.x, mb.y);
+                            const dt = now_ms -| self.double_click.last_press_ms;
+                            const ddx = mb.x - self.double_click.last_x;
+                            const ddy = mb.y - self.double_click.last_y;
+                            const close = ddx * ddx + ddy * ddy <= DOUBLE_CLICK_DEADZONE_PX * DOUBLE_CLICK_DEADZONE_PX;
+                            const same_el = hit_dc == self.double_click.last_hit and hit_dc != mod07.NONE;
+                            if (dt <= self.double_click_threshold_ms and close and same_el) {
+                                // Synthesize double-click and dispatch it.
+                                if (self.scene.doubleClickOf(hit_dc)) |cb| {
+                                    self.scene._queued_callbacks.append(self.gpa, cb) catch {};
+                                }
+                                // Reset so triple-click doesn't produce a second double.
+                                self.double_click = .{};
+                            } else {
+                                self.double_click = .{
+                                    .last_press_ms = now_ms,
+                                    .last_x = mb.x,
+                                    .last_y = mb.y,
+                                    .last_hit = hit_dc,
+                                };
+                            }
+                            // M11 RB1: record drag candidate (AFTER double-click check).
+                            if (self.drag.source_idx == mod07.NONE) {
+                                const hit_drag = hitTest(&self.scene, mb.x, mb.y);
+                                if (hit_drag != mod07.NONE and
+                                    hit_drag < self.scene._drag.items.len and
+                                    self.scene._drag.items[hit_drag] != null)
+                                {
+                                    self.drag = .{
+                                        .source_idx = hit_drag,
+                                        .origin_x = mb.x,
+                                        .origin_y = mb.y,
+                                        .current_x = mb.x,
+                                        .current_y = mb.y,
+                                    };
+                                }
+                            }
                             self.left_mouse_down = true;
                             self.handleMousePress(mb.x, mb.y);
                         } else {
+                            // M11 RB1: complete drag on left release.
+                            if (self.drag.source_idx != mod07.NONE) {
+                                if (self.drag.active) {
+                                    if (self.scene._drag.items[self.drag.source_idx]) |cbs| {
+                                        if (cbs.on_drag_end) |f| {
+                                            f(self.drag.source_idx, self.drag.payload);
+                                        }
+                                    }
+                                    const hit_drop = hitTest(&self.scene, mb.x, mb.y);
+                                    if (hit_drop != mod07.NONE and
+                                        hit_drop < self.scene._drop.items.len and
+                                        self.scene._drop.items[hit_drop] != null)
+                                    {
+                                        if (self.scene._drop.items[hit_drop]) |dcbs| {
+                                            if (dcbs.on_drop) |f| {
+                                                f(hit_drop, self.drag.source_idx, self.drag.payload);
+                                            }
+                                        }
+                                    }
+                                }
+                                self.drag = .{};
+                            }
                             self.handleMouseRelease(mb.x, mb.y);
                             self.left_mouse_down = false;
                         }
                     } else if (mb.button == .right and mb.action == .press) {
+                        const hit_rc = hitTest(&self.scene, mb.x, mb.y);
+                        // M11 RB2: fire on_right_click callback (independent of context menu).
+                        if (hit_rc != mod07.NONE) {
+                            if (self.scene.rightClickOf(hit_rc)) |cb| {
+                                self.scene._queued_callbacks.append(self.gpa, cb) catch {};
+                            }
+                        }
                         // R7D: right-click opens context menu if widget has one registered.
-                        const hit = self.hitTestFocusable(mb.x, mb.y);
-                        if (hit != std.math.maxInt(u32)) {
-                            const menu_idx = self.scene.contextMenuIdxOf(hit);
+                        if (hit_rc != mod07.NONE) {
+                            const menu_idx = self.scene.contextMenuIdxOf(hit_rc);
                             if (menu_idx != 0xFF) {
                                 self.context_menu_manager.openAt(
                                     menu_idx,
@@ -1322,12 +1574,43 @@ pub const AppInner = struct {
                         }
                     }
                 },
+                .mouse_button_double => {
+                    // Synthesized by dispatchEvents above — already handled inline.
+                },
                 .scroll => |sc| {
                     self.handleScroll(sc.dx, sc.dy);
                 },
+                // M11 RB5: trackpad swipe — route to scroll containers like a normal scroll.
+                .gesture_swipe => |gs| {
+                    self.handleScroll(gs.dx, gs.dy);
+                },
+                // M11 RB5: pinch gesture — deliver to topmost element with on_pinch.
+                .gesture_pinch => |gp| {
+                    const hit_p = hitTest(&self.scene, self.last_cursor_x, self.last_cursor_y);
+                    if (hit_p != mod07.NONE) {
+                        if (self.scene.pinchOf(hit_p)) |cb| {
+                            cb(hit_p, gp.scale_delta);
+                        }
+                    }
+                },
                 .key => |k| {
                     if (k.action == .press) {
-                        self.handleKey(k.key, k.mods);
+                        // M11 RB4: check global shortcuts before focused-element handling.
+                        if (self.shortcuts.lookup(k.key, k.mods)) |cb| {
+                            self.scene._queued_callbacks.append(self.gpa, cb) catch {};
+                            // Shortcut consumed — do NOT fall through to handleKey.
+                        } else {
+                            // M11 RB1: Escape cancels an active drag.
+                            if (k.key == .escape and self.drag.active) {
+                                if (self.scene._drag.items[self.drag.source_idx]) |cbs| {
+                                    if (cbs.on_drag_end) |f| {
+                                        f(self.drag.source_idx, self.drag.payload);
+                                    }
+                                }
+                                self.drag = .{};
+                            }
+                            self.handleKey(k.key, k.mods);
+                        }
                     }
                 },
                 .char => |ch| {

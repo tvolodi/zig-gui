@@ -181,18 +181,18 @@ Makes the framework safe and observable when shipped as a real binary.
 
 ---
 
-## Milestone 11 — Input completeness `planned`
+## Milestone 11 — Input completeness `done`
 
 Fills the gaps in the current event model.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M11-01 | **Mouse cursor shapes** — change the OS cursor (arrow, text-beam, resize, hand, crosshair) based on hovered element; uses `glfwSetCursor` | M1-02 |
-| M11-02 | **Drag-and-drop (intra-window)** — register elements as drag sources or drop targets; deliver `drag_start`, `drag_move`, `drag_end`, `drop` events | M1-02 |
-| M11-03 | **Right-click event routing** — expose a generic `on_right_click: CallbackFn` on any element, independent of the context-menu registry | M7-14 |
-| M11-04 | **Double-click detection** — `mouse_button_double` event variant with configurable timing threshold (default 250 ms) | M1-02 |
-| M11-05 | **Keyboard shortcuts / accelerators** — register global key combinations (`Ctrl+S`, `Ctrl+Z`) that fire a `CallbackFn` regardless of focused element | M1-02 |
-| M11-06 | **Touch / trackpad gesture support** — swipe-to-scroll and pinch-to-zoom gesture events from GLFW touch callbacks | M1-02 |
+| ID | Feature | Depends on | Requirements |
+|---|---|---|---|
+| M11-01 | **Mouse cursor shapes** — change the OS cursor (arrow, text-beam, resize, hand, crosshair) based on hovered element; uses `glfwSetCursor` | M1-02 | [RB0](requirements/RB0_mouse_cursor_shapes.md) |
+| M11-02 | **Drag-and-drop (intra-window)** — register elements as drag sources or drop targets; deliver `drag_start`, `drag_move`, `drag_end`, `drop` events | M1-02 | [RB1](requirements/RB1_drag_drop_intrawindow.md) |
+| M11-03 | **Right-click event routing** — expose a generic `on_right_click: CallbackFn` on any element, independent of the context-menu registry | M7-14 | [RB2](requirements/RB2_right_click_routing.md) |
+| M11-04 | **Double-click detection** — `mouse_button_double` event variant with configurable timing threshold (default 250 ms) | M1-02 | [RB3](requirements/RB3_double_click_detection.md) |
+| M11-05 | **Keyboard shortcuts / accelerators** — register global key combinations (`Ctrl+S`, `Ctrl+Z`) that fire a `CallbackFn` regardless of focused element | M1-02 | [RB4](requirements/RB4_keyboard_shortcuts.md) |
+| M11-06 | **Touch / trackpad gesture support** — swipe-to-scroll and pinch-to-zoom gesture events from GLFW touch callbacks | M1-02 | [RB5](requirements/RB5_touch_trackpad_gestures.md) |
 
 ---
 

@@ -43,6 +43,58 @@ pub const BackendError = error{
 };
 
 // ---------------------------------------------------------------------------
+// Input event vocabulary (R11 + RB3 + RB5)
+// ---------------------------------------------------------------------------
+
+pub const MouseButton = enum { left, right, middle };
+pub const InputAction = enum { press, release };
+
+pub const InputEvent = union(enum) {
+    mouse_move:          struct { x: f32, y: f32 },
+    mouse_button:        struct { button: MouseButton, action: InputAction, x: f32, y: f32 },
+    /// RB3 — Synthesized by dispatchEvents; never pushed directly by GLFW callbacks.
+    mouse_button_double: struct { button: MouseButton, x: f32, y: f32 },
+    scroll:              struct { dx: f32, dy: f32 },
+    /// RB5 — Synthesized from trackpad fractional scroll input.
+    gesture_swipe:       struct { dx: f32, dy: f32 },
+    /// RB5 — Synthesized when |dy| > PINCH_THRESHOLD with dx==0. scale_delta > 1 = zoom in.
+    gesture_pinch:       struct { scale_delta: f32 },
+    key:                 struct { key: Key, action: InputAction, mods: Modifiers },
+    char:                struct { codepoint: u21 },
+};
+
+pub const Key = enum { enter, escape, tab, backspace, delete, left, right, up, down,
+    home, end, page_up, page_down, left_shift, right_shift, left_ctrl, right_ctrl,
+    left_alt, right_alt, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+    space, a, c, v, x, z, other };
+
+pub const Modifiers = packed struct {
+    shift: bool = false,
+    ctrl:  bool = false,
+    alt:   bool = false,
+    super: bool = false,
+};
+
+/// RB5 — Scale factor applied to trackpad swipe deltas to match scroll-wheel step sizes.
+pub const SWIPE_SCALE: f32 = 20;
+/// RB5 — |dy| threshold above which a scroll event is treated as a pinch gesture.
+pub const PINCH_THRESHOLD: f32 = 5.0;
+/// RB5 — Scaling factor mapping dy to pinch scale_delta (5% per unit).
+pub const PINCH_SCALE: f32 = 0.05;
+
+/// RB0 — OS cursor shapes available via glfwCreateStandardCursor.
+pub const CursorShape = enum {
+    arrow,       // GLFW_ARROW_CURSOR
+    text_beam,   // GLFW_IBEAM_CURSOR
+    crosshair,   // GLFW_CROSSHAIR_CURSOR
+    hand,        // GLFW_POINTING_HAND_CURSOR
+    resize_ew,   // GLFW_RESIZE_EW_CURSOR   (horizontal resize)
+    resize_ns,   // GLFW_RESIZE_NS_CURSOR   (vertical resize)
+    resize_all,  // GLFW_RESIZE_ALL_CURSOR  (move/drag)
+    not_allowed, // GLFW_NOT_ALLOWED_CURSOR
+};
+
+// ---------------------------------------------------------------------------
 // Platform — GLFW-backed window + Vulkan surface + input (INV-2.2)
 // ---------------------------------------------------------------------------
 
@@ -114,6 +166,15 @@ pub const Platform = struct {
     pub fn getClipboard(self: *Platform, allocator: std.mem.Allocator) ?[]u8 {
         _ = self;
         _ = allocator;
+        @compileError("not implemented — implement per spec.md; do not change this signature");
+    }
+
+    /// RB0 — Change the OS cursor displayed over the GLFW window.
+    /// Cursor objects are created on first use and cached for the window's lifetime.
+    /// Calling with the same shape as the current shape is a no-op at the OS level.
+    pub fn setCursor(self: *Platform, shape: CursorShape) void {
+        _ = self;
+        _ = shape;
         @compileError("not implemented — implement per spec.md; do not change this signature");
     }
 };
