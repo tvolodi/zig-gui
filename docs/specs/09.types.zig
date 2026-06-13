@@ -39,10 +39,18 @@ pub const text = text_mod;
 pub const FilledRect = platform.FilledRect;
 pub const BorderRect = platform.BorderRect;
 pub const GlyphCmd = platform.GlyphCmd;
+pub const CircleCmd = platform.CircleCmd; // M13-05 RD4
 pub const ScissorRect = platform.ScissorRect;
 pub const ImageCmd = platform.ImageCmd;
+pub const ClipRounded = platform.ClipRounded; // M13-02 RD1
 
 pub const DrawCommand = platform.DrawCommand;
+
+/// M13-01 RD0 — gradient direction enum.
+pub const GradientDirection = platform.GradientDirection;
+
+/// M13-01 RD0 — two-stop linear gradient fill.
+pub const GradientRect = platform.GradientRect;
 
 // ---------------------------------------------------------------------------
 // Serializer
@@ -58,6 +66,9 @@ pub fn buildDrawList(
     image_atlas: *const ImageAtlas,
     font: *text_mod.Font,
     tokens: Tokens,
+    subpixel_atlas: ?*SubpixelAtlas,
+    subpixel_text: bool,
+    sdf_atlas: ?*const anyopaque,
 ) error{OutOfMemory}![]DrawCommand {
     _ = alloc;
     _ = scene;
@@ -65,6 +76,9 @@ pub fn buildDrawList(
     _ = image_atlas;
     _ = font;
     _ = tokens;
+    _ = subpixel_atlas;
+    _ = subpixel_text;
+    _ = sdf_atlas;
     @compileError("buildDrawList: not implemented");
 }
 
@@ -193,6 +207,24 @@ pub const GpuImageAtlas = struct {
 
 /// GPU-side representation of a GlyphAtlas. Owns a VkImage, VkImageView, and VkSampler.
 /// All Vulkan handles are stored as *anyopaque to avoid importing vulkan headers here.
+
+/// M13-03 RD2 — CPU-side subpixel atlas (RGBA8 packing for subpixel glyphs).
+pub const SubpixelAtlas = struct {
+    width: u32 = 0,
+    height: u32 = 0,
+    generation: u32 = 0,
+    _impl: *anyopaque = undefined,
+
+    pub fn init(gpa: std.mem.Allocator, width: u32, height: u32) text_mod.AtlasError!SubpixelAtlas {
+        _ = gpa; _ = width; _ = height;
+        @compileError("SubpixelAtlas.init: not implemented");
+    }
+    pub fn deinit(self: *SubpixelAtlas) void { _ = self; @compileError("SubpixelAtlas.deinit: not implemented"); }
+    pub fn lookup(self: *SubpixelAtlas, key: text_mod.GlyphKey) ?text_mod.AtlasRect { _ = self; _ = key; @compileError("SubpixelAtlas.lookup: not implemented"); }
+    pub fn insert(self: *SubpixelAtlas, key: text_mod.GlyphKey, w: u32, h: u32, rgb_data: []const u8) text_mod.AtlasError!text_mod.AtlasRect { _ = self; _ = key; _ = w; _ = h; _ = rgb_data; @compileError("SubpixelAtlas.insert: not implemented"); }
+    pub fn pixels(self: *SubpixelAtlas) []const u8 { _ = self; @compileError("SubpixelAtlas.pixels: not implemented"); }
+};
+
 pub const GpuAtlas = struct {
     image: ?*anyopaque = null,       // VkImage
     image_view: ?*anyopaque = null,  // VkImageView

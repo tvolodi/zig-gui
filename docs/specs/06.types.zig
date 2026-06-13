@@ -537,6 +537,14 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
     } else if (std.mem.eql(u8, cls, "bg-transparent")) {
         r.style.background = theme.transparent;
 
+        // --- M13-01 RD0: Gradient direction classes ---
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-r")) {
+        r.style.gradient_direction = 1; // right
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-b")) {
+        r.style.gradient_direction = 2; // bottom
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-br")) {
+        r.style.gradient_direction = 3; // bottom_right
+
         // --- Text colors ---
     } else if (std.mem.eql(u8, cls, "text-body")) {
         r.style.text_color = tokens.text_body;

@@ -157,6 +157,17 @@ Use `scene.toggleAccordion(idx)` to open/close programmatically. `scene.isAccord
 | `aspect-video` | `aspect_ratio = 16/9` (widescreen) |
 | `aspect-auto` | `aspect_ratio = 0` (no constraint) |
 | `z-0` / `z-10` / `z-20` / `z-30` / `z-40` / `z-50` | `z_index = N` (draw order within siblings) |
+| `bg-gradient-to-r` | horizontal gradient (left→right, bg_canvas→bg_surface) |
+| `bg-gradient-to-b` | vertical gradient (top→bottom) |
+| `bg-gradient-to-br` | diagonal gradient (top-left→bottom-right) |
+| `rounded-xl` | border radius 12 px (plus rounded clipping when combined with `overflow-hidden`) |
+
+**M13 — SDF icon names:** Use `icon_name="..."` attribute on `<Icon>` elements:
+`chevron-down`, `chevron-right`, `chevron-up`, `chevron-left`, `check`, `cross`, `search`, `menu`, `more`, `plus`, `minus`
+
+**M13 — HiDPI:** `AppOptions` gains `dpi_scale: f32 = 1.0` (auto-detected from monitor at startup; multiplies all px values).
+
+**M13 — Subpixel text:** Set `AppOptions.subpixel_text = true` to enable subpixel glyph rendering for font sizes 12–14 px. Requires LCD display; off by default.
 
 **Attribute bindings:** `text="{bind some.path}"` records the path as a `bind` variant of
 `AttrValue`; it is NOT evaluated by the parser or scene — evaluation is the caller's job.

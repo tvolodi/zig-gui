@@ -62,7 +62,7 @@ test "buildDrawList: empty scene" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
     try testing.expectEqual(@as(usize, 0), cmds.len);
 }
@@ -75,13 +75,13 @@ test "buildDrawList: invisible row emits zero commands" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, tokens());
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 800, .max_w = 800, .min_h = 600, .max_h = 600 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 800, .max_w = 800, .min_h = 600, .max_h = 600 }, &scratch, 1.0);
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens());
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
     defer testing.allocator.free(cmds);
     try testing.expectEqual(@as(usize, 0), cmds.len);
 }
@@ -95,17 +95,17 @@ test "buildDrawList: button has background" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch, 1.0);
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     var found = false;
     for (cmds) |cmd| {
-        if (cmd == .filled_rect) found = true;
+        if (cmd == .filled_rect or cmd == .aa_filled_rect) found = true;
     }
     try testing.expect(found);
 }
@@ -394,7 +394,7 @@ test "buildDrawList: hovered button produces accent_hover background" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch, 1.0);
     // Set hover state on the button (idx 0).
     scene.setPseudo(0, .{ .hover = true });
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
@@ -402,18 +402,20 @@ test "buildDrawList: hovered button produces accent_hover background" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     // Find a filled_rect with the accent_hover color.
     const expected_color = t.accent_hover;
     var found = false;
     for (cmds) |cmd| {
-        if (cmd == .filled_rect) {
-            const col = cmd.filled_rect.color;
-            if (col.r == expected_color.r and col.g == expected_color.g and col.b == expected_color.b) {
-                found = true;
-                break;
-            }
+        const fr = switch (cmd) {
+            .filled_rect, .aa_filled_rect => |f| f,
+            else => continue,
+        };
+        const col = fr.color;
+        if (col.r == expected_color.r and col.g == expected_color.g and col.b == expected_color.b) {
+            found = true;
+            break;
         }
     }
     try testing.expect(found);
@@ -432,13 +434,13 @@ test "buildDrawList: scrollview emits set_scissor before children and restore_sc
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 400, .max_w = 400, .min_h = 300, .max_h = 300 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 400, .max_w = 400, .min_h = 300, .max_h = 300 }, &scratch, 1.0);
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     // Verify set_scissor appears before restore_scissor
     var set_idx: ?usize = null;
@@ -461,13 +463,13 @@ test "buildDrawList: scene without scrollview emits no scissor commands" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 50, .max_h = 50 }, &scratch, 1.0);
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     for (cmds) |cmd| {
         try testing.expect(cmd != .set_scissor);
@@ -487,13 +489,13 @@ test "buildDrawList: child outside scrollview bounds still appears in draw list"
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
     // Give the scroll view a very small container so the child "overflows".
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 10, .max_w = 10, .min_h = 10, .max_h = 10 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 10, .max_w = 10, .min_h = 10, .max_h = 10 }, &scratch, 1.0);
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     // There should be at least a set_scissor and restore_scissor plus the child's commands.
     var has_scissor = false;
@@ -575,7 +577,7 @@ test "buildDrawList: image element with image_id != 0 emits image_rect command" 
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 100, .max_w = 100, .min_h = 100, .max_h = 100 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 100, .max_w = 100, .min_h = 100, .max_h = 100 }, &scratch, 1.0);
     // Set up image atlas with a real image.
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
@@ -586,7 +588,7 @@ test "buildDrawList: image element with image_id != 0 emits image_rect command" 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     var found = false;
     for (cmds) |cmd| {
@@ -604,14 +606,14 @@ test "buildDrawList: image element with image_id == 0 emits no image_rect" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 100, .max_w = 100, .min_h = 100, .max_h = 100 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 100, .max_w = 100, .min_h = 100, .max_h = 100 }, &scratch, 1.0);
     // image_id defaults to 0 — do not call setImage.
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     for (cmds) |cmd| {
         try testing.expect(cmd != .image_rect);
@@ -632,13 +634,13 @@ test "buildDrawList: element with opacity=0.0 produces draw commands with a==0" 
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch, 1.0);
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     // Every color in the draw commands should have a == 0.
     for (cmds) |cmd| {
@@ -646,7 +648,7 @@ test "buildDrawList: element with opacity=0.0 produces draw commands with a==0" 
             .filled_rect => |fr| try testing.expectEqual(@as(u8, 0), fr.color.a),
             .border_rect => |br| try testing.expectEqual(@as(u8, 0), br.color.a),
             .glyph => |g| try testing.expectEqual(@as(u8, 0), g.color.a),
-            .set_scissor, .restore_scissor, .image_rect => {},
+            .set_scissor, .restore_scissor, .image_rect, .gradient_rect, .aa_filled_rect, .aa_filled_circle, .clip_rounded_begin, .clip_rounded_end, .sdf_icon => {},
         }
     }
 }
@@ -671,7 +673,7 @@ test "buildDrawList: scrollview child rect is offset by scroll_y" {
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
     // Layout: scrollview 400x300, button fills it.
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 400, .max_w = 400, .min_h = 300, .max_h = 300 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 400, .max_w = 400, .min_h = 300, .max_h = 300 }, &scratch, 1.0);
 
     // Manually set child layout y to 10 (simulate a positioned child).
     const s = scene.store();
@@ -692,7 +694,7 @@ test "buildDrawList: scrollview child rect is offset by scroll_y" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Find the filled_rect that belongs to the button child (after set_scissor).
@@ -706,8 +708,12 @@ test "buildDrawList: scrollview child rect is offset by scroll_y" {
         }
         // First filled_rect after the scrollview's own background and scrollbar rects
         // that is at y == -10 is our child.
-        if (set_scissor_seen and cmd == .filled_rect) {
-            const fy = cmd.filled_rect.rect.y;
+        if (set_scissor_seen) {
+            const fr = switch (cmd) {
+                .filled_rect, .aa_filled_rect => |f| f,
+                else => continue,
+            };
+            const fy = fr.rect.y;
             if (fy < 0) {
                 child_y = fy;
                 break;
@@ -751,7 +757,7 @@ test "buildDrawList: truncate=false, overflowing text skips glyphs beyond rect" 
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch, 1.0);
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
@@ -762,7 +768,7 @@ test "buildDrawList: truncate=false, overflowing text skips glyphs beyond rect" 
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, false);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Count glyph commands.
@@ -795,7 +801,7 @@ test "buildDrawList: truncate=true, overflowing text emits ellipsis" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch, 1.0);
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
@@ -807,7 +813,7 @@ test "buildDrawList: truncate=true, overflowing text emits ellipsis" {
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     var glyph_count: usize = 0;
@@ -831,7 +837,7 @@ test "buildDrawList: truncate=true, short text that fits emits all glyphs, no el
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 20, .max_h = 20 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 20, .max_h = 20 }, &scratch, 1.0);
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
@@ -843,7 +849,7 @@ test "buildDrawList: truncate=true, short text that fits emits all glyphs, no el
     try preInsertGlyphs(&atlas, "ABC", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Count glyphs. Exactly 3 should be emitted (A, B, C). No extra trailing ellipsis glyph.
@@ -866,7 +872,7 @@ test "buildDrawList: truncate=true, ellipsis glyph dst.x within element rect" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 32, .max_w = 32, .min_h = 20, .max_h = 20 }, &scratch, 1.0);
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 256, 256);
     defer atlas.deinit();
@@ -877,7 +883,7 @@ test "buildDrawList: truncate=true, ellipsis glyph dst.x within element rect" {
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     const rect_x: f32 = scene.store().layout.items[root.index].computed.x;
@@ -908,7 +914,7 @@ test "buildDrawList: opacity=0.5 element emits commands with halved alpha" {
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch, 1.0);
 
     // Override background to have a=200 so we can measure the alpha multiplication clearly.
     scene._style.items[0].background = .{ .r = 200, .g = 0, .b = 0, .a = 200 };
@@ -919,20 +925,22 @@ test "buildDrawList: opacity=0.5 element emits commands with halved alpha" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Find the first filled_rect (the card background).
     var found = false;
     for (cmds) |cmd| {
-        if (cmd == .filled_rect) {
-            // 200 * 0.5 = 100
-            const alpha = cmd.filled_rect.color.a;
-            const diff: i16 = @as(i16, alpha) - 100;
-            try testing.expect(diff >= -2 and diff <= 2);
-            found = true;
-            break;
-        }
+        const fr = switch (cmd) {
+            .filled_rect, .aa_filled_rect => |f| f,
+            else => continue,
+        };
+        // 200 * 0.5 = 100
+        const alpha = fr.color.a;
+        const diff: i16 = @as(i16, alpha) - 100;
+        try testing.expect(diff >= -2 and diff <= 2);
+        found = true;
+        break;
     }
     try testing.expect(found);
 }
@@ -1018,7 +1026,7 @@ test "buildDrawList: parent opacity=0.5, child opacity=0.5 produces effective 0.
 
     // Solve layout.
     var scratch: [4096]u8 = undefined;
-    layout_engine.solve(s, parent_id, .{ .min_w = 200, .max_w = 200, .min_h = 200, .max_h = 200 }, &scratch);
+    layout_engine.solve(s, parent_id, .{ .min_w = 200, .max_w = 200, .min_h = 200, .max_h = 200 }, &scratch, 1.0);
     _ = child_id;
 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
@@ -1027,7 +1035,7 @@ test "buildDrawList: parent opacity=0.5, child opacity=0.5 produces effective 0.
     defer img_atlas.deinit();
     var font = stubFont();
     const t = tokens();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
 
     // Collect filled_rect alpha values from the two card backgrounds.
@@ -1036,13 +1044,15 @@ test "buildDrawList: parent opacity=0.5, child opacity=0.5 produces effective 0.
     var outer_found = false;
     var inner_found = false;
     for (cmds) |cmd| {
-        if (cmd == .filled_rect) {
-            const a = cmd.filled_rect.color.a;
-            const diff_100: i16 = @as(i16, a) - 100;
-            const diff_50: i16 = @as(i16, a) - 50;
-            if (diff_100 >= -2 and diff_100 <= 2) outer_found = true;
-            if (diff_50 >= -2 and diff_50 <= 2) inner_found = true;
-        }
+        const fr = switch (cmd) {
+            .filled_rect, .aa_filled_rect => |f| f,
+            else => continue,
+        };
+        const a = fr.color.a;
+        const diff_100: i16 = @as(i16, a) - 100;
+        const diff_50: i16 = @as(i16, a) - 50;
+        if (diff_100 >= -2 and diff_100 <= 2) outer_found = true;
+        if (diff_50 >= -2 and diff_50 <= 2) inner_found = true;
     }
     try testing.expect(outer_found);
     try testing.expect(inner_found);
@@ -1057,13 +1067,13 @@ test "buildDrawList: element with shadow-md emits shadow rects before background
     defer scene.deinit();
     const root = try scene.instantiate(desc, t);
     var scratch: [4096]u8 = undefined;
-    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch);
+    @import("layout_engine").solve(scene.store(), root, .{ .min_w = 200, .max_w = 200, .min_h = 100, .max_h = 100 }, &scratch, 1.0);
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
     defer testing.allocator.free(cmds);
     // The first filled_rect commands should be the shadow rects (5 of them for shadow-md).
     // shadow-md sets shadow_blur=8 → 5 rects.

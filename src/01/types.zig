@@ -204,6 +204,28 @@ const VulkanImpl = struct {
     quad_vertex_mem: c.VkDeviceMemory = null,
     quad_pipeline_ready: bool = false,
     render_pass_active: bool = false,
+
+    // M13-03 RD2 — Subpixel atlas GPU handles (RGBA8 texture at binding=1).
+    subpixel_atlas_image: c.VkImage = null,
+    subpixel_atlas_view: c.VkImageView = null,
+    subpixel_atlas_sampler: c.VkSampler = null,
+    subpixel_atlas_mem: c.VkDeviceMemory = null,
+    /// 1x1 RGBA8 black dummy used for binding=1 when no subpixel atlas is active.
+    dummy_subpixel_image: c.VkImage = null,
+    dummy_subpixel_view: c.VkImageView = null,
+    dummy_subpixel_sampler: c.VkSampler = null,
+    dummy_subpixel_mem: c.VkDeviceMemory = null,
+
+    // M13-04 RD3 — SDF icon atlas GPU handles (R8_UNORM texture at binding=2).
+    sdf_atlas_image: c.VkImage = null,
+    sdf_atlas_view: c.VkImageView = null,
+    sdf_atlas_sampler: c.VkSampler = null,
+    sdf_atlas_mem: c.VkDeviceMemory = null,
+    /// 1x1 R8 black dummy used for binding=2 when no SDF atlas is active.
+    dummy_sdf_image: c.VkImage = null,
+    dummy_sdf_view: c.VkImageView = null,
+    dummy_sdf_sampler: c.VkSampler = null,
+    dummy_sdf_mem: c.VkDeviceMemory = null,
 };
 
 // ---------------------------------------------------------------------------
@@ -231,6 +253,8 @@ pub const GlyphCmd = struct {
     dst: Rect09,
     uv: Rect09,
     color: Color09,
+    /// M13-03 RD2 — shader mode: 1 = grayscale atlas, 3 = subpixel atlas.
+    mode: u32 = 1,
 };
 
 /// Integer pixel rect used for scissor (R42). Origin top-left, exclusive right/bottom.
@@ -248,6 +272,47 @@ pub const ImageCmd = struct {
     tint: Color09,
 };
 
+/// M13-01 RD0 — Gradient direction for gradient_rect draw commands.
+pub const GradientDirection = enum(u32) {
+    right = 0,
+    bottom = 1,
+    bottom_right = 2,
+};
+
+/// M13-01 RD0 — Two-stop linear gradient fill.
+pub const GradientRect = struct {
+    rect: Rect09,
+    color_a: Color09, // left/top color
+    color_b: Color09, // right/bottom color
+    direction: GradientDirection,
+};
+
+/// M13-05 RD4 — Anti-aliased filled circle draw command.
+pub const CircleCmd = struct {
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    color: Color09,
+};
+
+/// M13-04 RD3 — SDF icon draw command.
+/// Renders an icon from the SDF atlas at binding=2 using shader mode 4.
+pub const SdfIconCmd = struct {
+    dst: Rect09,    // screen-space destination rect
+    uv: Rect09,     // UV region in the SDF atlas texture (0-1 normalized)
+    color: Color09, // icon fill color
+};
+
+/// M13-02 RD1 — Rounded content clipping parameters.
+/// Screen-space pixel rect + four corner radii (tl, tr, br, bl).
+pub const ClipRounded = struct {
+    rect: Rect09,
+    radius_tl: f32,
+    radius_tr: f32,
+    radius_br: f32,
+    radius_bl: f32,
+};
+
 pub const DrawCommand = union(enum) {
     filled_rect: FilledRect,
     border_rect: BorderRect,
@@ -255,12 +320,19 @@ pub const DrawCommand = union(enum) {
     set_scissor: ScissorRect, // R42
     restore_scissor: void, // R42
     image_rect: ImageCmd, // R43
+    gradient_rect: GradientRect, // M13-01 RD0
+    aa_filled_rect: FilledRect, // M13-05 RD4 — anti-aliased filled rect (mode 5)
+    aa_filled_circle: CircleCmd, // M13-05 RD4 — anti-aliased filled circle (mode 6)
+    clip_rounded_begin: ClipRounded, // M13-02 RD1
+    clip_rounded_end: void, // M13-02 RD1
+    sdf_icon: SdfIconCmd, // M13-04 RD3
 };
 
-pub const QuadVertex = struct {
+pub const QuadVertex = extern struct {
     pos: [2]f32,
     uv: [2]f32,
     color: [4]u8,
+    color_b: [4]u8, // M13-01 RD0 — second gradient stop color
     mode: u32,
 };
 
@@ -275,6 +347,25 @@ pub const GpuAtlas = struct {
     height: u32 = 0,
 
     pub fn deinit(self: *GpuAtlas, device: *anyopaque) void {
+        const dev: c.VkDevice = @ptrCast(device);
+        if (self.sampler) |s| c.vkDestroySampler(dev, @ptrCast(s), null);
+        if (self.image_view) |v| c.vkDestroyImageView(dev, @ptrCast(v), null);
+        if (self.image) |img| c.vkDestroyImage(dev, @ptrCast(img), null);
+        if (self.memory) |mem| c.vkFreeMemory(dev, @ptrCast(mem), null);
+        self.* = .{};
+    }
+};
+
+/// M13-04 RD3 — GPU-side SDF icon atlas handle.
+pub const GpuSdfAtlas = struct {
+    image: ?*anyopaque = null,
+    image_view: ?*anyopaque = null,
+    sampler: ?*anyopaque = null,
+    memory: ?*anyopaque = null,
+    width: u32 = 0,
+    height: u32 = 0,
+
+    pub fn deinit(self: *GpuSdfAtlas, device: *anyopaque) void {
         const dev: c.VkDevice = @ptrCast(device);
         if (self.sampler) |s| c.vkDestroySampler(dev, @ptrCast(s), null);
         if (self.image_view) |v| c.vkDestroyImageView(dev, @ptrCast(v), null);
@@ -681,6 +772,20 @@ pub const Platform = struct {
             return null;
         }
         return result;
+    }
+
+    /// RD5: Query the primary monitor's content scale factor.
+    /// Returns 1.0 when no monitor is connected (headless / CI).
+    /// The app uses this value to multiply all logical px values so the UI
+    /// renders at the correct physical pixel density on HiDPI displays.
+    pub fn contentScale(self: *Platform) f32 {
+        _ = self;
+        const monitor = c.glfwGetPrimaryMonitor();
+        if (monitor == null) return 1.0;
+        var scale_x: f32 = 1.0;
+        var scale_y: f32 = 1.0;
+        c.glfwGetMonitorContentScale(monitor, &scale_x, &scale_y);
+        return @max(scale_x, scale_y);
     }
 };
 
@@ -1282,9 +1387,9 @@ pub const VulkanBackend = struct {
     // Module 09 extensions — quad pipeline (added alongside the triangle pipeline)
     // -----------------------------------------------------------------------
 
-    pub fn initQuadPipeline(self: *VulkanBackend, gpa: std.mem.Allocator) !void {
+    pub fn initQuadPipeline(self: *VulkanBackend) !void {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
-        try vkInitQuadPipeline(impl, gpa);
+        try vkInitQuadPipeline(impl);
     }
 
     pub fn deinitQuadPipeline(self: *VulkanBackend) void {
@@ -1298,6 +1403,39 @@ pub const VulkanBackend = struct {
         const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
         const h: *const GpuAtlas = @ptrCast(@alignCast(atlas));
         vkDrawFrame(impl, commands, h);
+    }
+
+    /// M13-03 RD2 — Upload/replace the subpixel atlas GPU texture at binding=1.
+    /// `atlas` is a *const GpuAtlas (or any struct with image/image_view/sampler/memory fields).
+    /// Destroys any previously set subpixel atlas.
+    pub fn updateSubpixelAtlas(self: *VulkanBackend, atlas: *const anyopaque) void {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const gpu_atlas: *const GpuAtlas = @ptrCast(@alignCast(atlas));
+        // Destroy previous subpixel atlas if present.
+        if (impl.subpixel_atlas_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+        if (impl.subpixel_atlas_view) |v| c.vkDestroyImageView(impl.device, v, null);
+        if (impl.subpixel_atlas_image) |img| c.vkDestroyImage(impl.device, img, null);
+        if (impl.subpixel_atlas_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
+        impl.subpixel_atlas_image = @ptrCast(gpu_atlas.image.?);
+        impl.subpixel_atlas_view = @ptrCast(gpu_atlas.image_view.?);
+        impl.subpixel_atlas_sampler = @ptrCast(gpu_atlas.sampler.?);
+        impl.subpixel_atlas_mem = @ptrCast(gpu_atlas.memory.?);
+    }
+
+    /// M13-04 RD3 — Upload/replace the SDF icon atlas GPU texture at binding=2.
+    /// `atlas` is a *const GpuSdfAtlas. Destroys any previously set SDF atlas.
+    pub fn updateSdfAtlas(self: *VulkanBackend, atlas: *const anyopaque) void {
+        const impl: *VulkanImpl = @ptrCast(@alignCast(self._impl));
+        const gpu_atlas: *const GpuSdfAtlas = @ptrCast(@alignCast(atlas));
+        // Destroy previous SDF atlas if present.
+        if (impl.sdf_atlas_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+        if (impl.sdf_atlas_view) |v| c.vkDestroyImageView(impl.device, v, null);
+        if (impl.sdf_atlas_image) |img| c.vkDestroyImage(impl.device, img, null);
+        if (impl.sdf_atlas_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
+        impl.sdf_atlas_image = @ptrCast(gpu_atlas.image.?);
+        impl.sdf_atlas_view = @ptrCast(gpu_atlas.image_view.?);
+        impl.sdf_atlas_sampler = @ptrCast(gpu_atlas.sampler.?);
+        impl.sdf_atlas_mem = @ptrCast(gpu_atlas.memory.?);
     }
 };
 
@@ -1952,32 +2090,496 @@ fn findMemoryType(impl: *VulkanImpl, type_filter: u32, props: c.VkMemoryProperty
     return error.NoSuitableMemoryType;
 }
 
-fn vkInitQuadPipeline(impl: *VulkanImpl, gpa: std.mem.Allocator) !void {
-    _ = gpa;
+/// M13-03 RD2 — Create a 1x1 RGBA8 black dummy texture for binding=1 (subpixel atlas fallback).
+/// Writes it directly to the descriptor set so binding=1 is always valid.
+fn createDummySubpixelAtlas(impl: *VulkanImpl) !void {
+    const dev = impl.device;
+    const phys = impl.physical_device;
+    const pool = impl.command_pool;
+    const q = impl.graphics_queue;
 
-    // --- Descriptor set layout: binding 0 = combined image sampler ---
-    var ds_binding = std.mem.zeroes(c.VkDescriptorSetLayoutBinding);
-    ds_binding.binding = 0;
-    ds_binding.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ds_binding.descriptorCount = 1;
-    ds_binding.stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Staging buffer: 4 bytes (1x1 RGBA8 = 4 bytes).
+    const img_size: c.VkDeviceSize = 4;
+    var stg_buf: c.VkBuffer = undefined;
+    var stg_buf_info = std.mem.zeroes(c.VkBufferCreateInfo);
+    stg_buf_info.sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stg_buf_info.size = img_size;
+    stg_buf_info.usage = c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stg_buf_info.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    if (c.vkCreateBuffer(dev, &stg_buf_info, null, &stg_buf) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkDestroyBuffer(dev, stg_buf, null);
+
+    var stg_req: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(dev, stg_buf, &stg_req);
+    const stg_type = findMemTypeLocal(phys, stg_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) orelse return error.ShaderLoadFailed;
+
+    var stg_ma = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    stg_ma.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    stg_ma.allocationSize = stg_req.size;
+    stg_ma.memoryTypeIndex = stg_type;
+    var stg_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &stg_ma, null, &stg_mem) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkFreeMemory(dev, stg_mem, null);
+    _ = c.vkBindBufferMemory(dev, stg_buf, stg_mem, 0);
+
+    var mapped: ?*anyopaque = null;
+    _ = c.vkMapMemory(dev, stg_mem, 0, img_size, 0, &mapped);
+    const black_rgba = [4]u8{ 0, 0, 0, 0 };
+    @memcpy(@as([*]u8, @ptrCast(mapped.?))[0..4], &black_rgba);
+    c.vkUnmapMemory(dev, stg_mem);
+
+    // Create 1x1 RGBA8 image.
+    var ii = std.mem.zeroes(c.VkImageCreateInfo);
+    ii.sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = c.VK_IMAGE_TYPE_2D;
+    ii.format = c.VK_FORMAT_R8G8B8A8_UNORM;
+    ii.extent = .{ .width = 1, .height = 1, .depth = 1 };
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = c.VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = c.VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    var img: c.VkImage = undefined;
+    if (c.vkCreateImage(dev, &ii, null, &img) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkDestroyImage(dev, img, null);
+
+    var ir: c.VkMemoryRequirements = undefined;
+    c.vkGetImageMemoryRequirements(dev, img, &ir);
+    const img_type = findMemTypeLocal(phys, ir.memoryTypeBits, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) orelse return error.ShaderLoadFailed;
+
+    var ima = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    ima.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ima.allocationSize = ir.size;
+    ima.memoryTypeIndex = img_type;
+    var img_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &ima, null, &img_mem) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkFreeMemory(dev, img_mem, null);
+    _ = c.vkBindImageMemory(dev, img, img_mem, 0);
+
+    // One-shot command buffer.
+    var cba = std.mem.zeroes(c.VkCommandBufferAllocateInfo);
+    cba.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cba.commandPool = pool;
+    cba.level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cba.commandBufferCount = 1;
+    var cb: c.VkCommandBuffer = undefined;
+    if (c.vkAllocateCommandBuffers(dev, &cba, &cb) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkFreeCommandBuffers(dev, pool, 1, &cb);
+
+    var bi = std.mem.zeroes(c.VkCommandBufferBeginInfo);
+    bi.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    _ = c.vkBeginCommandBuffer(cb, &bi);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_UNDEFINED, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    var cp = std.mem.zeroes(c.VkBufferImageCopy);
+    cp.imageSubresource.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    cp.imageSubresource.layerCount = 1;
+    cp.imageExtent = .{ .width = 1, .height = 1, .depth = 1 };
+    c.vkCmdCopyBufferToImage(cb, stg_buf, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    _ = c.vkEndCommandBuffer(cb);
+    var si = std.mem.zeroes(c.VkSubmitInfo);
+    si.sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    _ = c.vkQueueSubmit(q, 1, &si, null);
+    _ = c.vkQueueWaitIdle(q);
+
+    // Image view.
+    var ivi = std.mem.zeroes(c.VkImageViewCreateInfo);
+    ivi.sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ivi.image = img;
+    ivi.viewType = c.VK_IMAGE_VIEW_TYPE_2D;
+    ivi.format = c.VK_FORMAT_R8G8B8A8_UNORM;
+    ivi.subresourceRange.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    ivi.subresourceRange.levelCount = 1;
+    ivi.subresourceRange.layerCount = 1;
+    var iv: c.VkImageView = undefined;
+    if (c.vkCreateImageView(dev, &ivi, null, &iv) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkDestroyImageView(dev, iv, null);
+
+    // Sampler.
+    var spi = std.mem.zeroes(c.VkSamplerCreateInfo);
+    spi.sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    spi.magFilter = c.VK_FILTER_LINEAR;
+    spi.minFilter = c.VK_FILTER_LINEAR;
+    spi.addressModeU = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeV = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeW = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.borderColor = c.VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    var samp: c.VkSampler = undefined;
+    if (c.vkCreateSampler(dev, &spi, null, &samp) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+
+    // Write binding=1 descriptor.
+    var img_info = std.mem.zeroes(c.VkDescriptorImageInfo);
+    img_info.imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    img_info.imageView = iv;
+    img_info.sampler = samp;
+    var write = std.mem.zeroes(c.VkWriteDescriptorSet);
+    write.sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = impl.quad_desc_set;
+    write.dstBinding = 1;
+    write.descriptorCount = 1;
+    write.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &img_info;
+    c.vkUpdateDescriptorSets(impl.device, 1, &write, 0, null);
+
+    impl.dummy_subpixel_image = img;
+    impl.dummy_subpixel_view = iv;
+    impl.dummy_subpixel_sampler = samp;
+    impl.dummy_subpixel_mem = img_mem;
+}
+
+/// M13-04 RD3 — Create a 1x1 R8 black dummy texture for SDF atlas binding=2.
+fn createDummySdfAtlas(impl: *VulkanImpl) !void {
+    const dev = impl.device;
+    const phys = impl.physical_device;
+    const pool = impl.command_pool;
+    const q = impl.graphics_queue;
+
+    // Staging buffer: 1 byte (1x1 R8 = 1 byte).
+    const img_size: c.VkDeviceSize = 1;
+    var stg_buf: c.VkBuffer = undefined;
+    var stg_buf_info = std.mem.zeroes(c.VkBufferCreateInfo);
+    stg_buf_info.sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stg_buf_info.size = img_size;
+    stg_buf_info.usage = c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stg_buf_info.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    if (c.vkCreateBuffer(dev, &stg_buf_info, null, &stg_buf) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkDestroyBuffer(dev, stg_buf, null);
+
+    var stg_req: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(dev, stg_buf, &stg_req);
+    const stg_type = findMemTypeLocal(phys, stg_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) orelse return error.ShaderLoadFailed;
+
+    var stg_ma = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    stg_ma.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    stg_ma.allocationSize = stg_req.size;
+    stg_ma.memoryTypeIndex = stg_type;
+    var stg_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &stg_ma, null, &stg_mem) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkFreeMemory(dev, stg_mem, null);
+    _ = c.vkBindBufferMemory(dev, stg_buf, stg_mem, 0);
+
+    var mapped: ?*anyopaque = null;
+    _ = c.vkMapMemory(dev, stg_mem, 0, img_size, 0, &mapped);
+    const black = [1]u8{0};
+    @memcpy(@as([*]u8, @ptrCast(mapped.?))[0..1], &black);
+    c.vkUnmapMemory(dev, stg_mem);
+
+    // Create 1x1 R8 image.
+    var ii = std.mem.zeroes(c.VkImageCreateInfo);
+    ii.sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = c.VK_IMAGE_TYPE_2D;
+    ii.format = c.VK_FORMAT_R8_UNORM;
+    ii.extent = .{ .width = 1, .height = 1, .depth = 1 };
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = c.VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = c.VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    var img: c.VkImage = undefined;
+    if (c.vkCreateImage(dev, &ii, null, &img) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkDestroyImage(dev, img, null);
+
+    var ir: c.VkMemoryRequirements = undefined;
+    c.vkGetImageMemoryRequirements(dev, img, &ir);
+    const img_type = findMemTypeLocal(phys, ir.memoryTypeBits, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) orelse return error.ShaderLoadFailed;
+
+    var ima = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    ima.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ima.allocationSize = ir.size;
+    ima.memoryTypeIndex = img_type;
+    var img_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &ima, null, &img_mem) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkFreeMemory(dev, img_mem, null);
+    _ = c.vkBindImageMemory(dev, img, img_mem, 0);
+
+    // One-shot command buffer.
+    var cba = std.mem.zeroes(c.VkCommandBufferAllocateInfo);
+    cba.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cba.commandPool = pool;
+    cba.level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cba.commandBufferCount = 1;
+    var cb: c.VkCommandBuffer = undefined;
+    if (c.vkAllocateCommandBuffers(dev, &cba, &cb) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    defer c.vkFreeCommandBuffers(dev, pool, 1, &cb);
+
+    var bi = std.mem.zeroes(c.VkCommandBufferBeginInfo);
+    bi.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    _ = c.vkBeginCommandBuffer(cb, &bi);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_UNDEFINED, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    var cp = std.mem.zeroes(c.VkBufferImageCopy);
+    cp.imageSubresource.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    cp.imageSubresource.layerCount = 1;
+    cp.imageExtent = .{ .width = 1, .height = 1, .depth = 1 };
+    c.vkCmdCopyBufferToImage(cb, stg_buf, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    _ = c.vkEndCommandBuffer(cb);
+    var si = std.mem.zeroes(c.VkSubmitInfo);
+    si.sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    _ = c.vkQueueSubmit(q, 1, &si, null);
+    _ = c.vkQueueWaitIdle(q);
+
+    // Image view.
+    var ivi = std.mem.zeroes(c.VkImageViewCreateInfo);
+    ivi.sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ivi.image = img;
+    ivi.viewType = c.VK_IMAGE_VIEW_TYPE_2D;
+    ivi.format = c.VK_FORMAT_R8_UNORM;
+    ivi.subresourceRange.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    ivi.subresourceRange.levelCount = 1;
+    ivi.subresourceRange.layerCount = 1;
+    var iv: c.VkImageView = undefined;
+    if (c.vkCreateImageView(dev, &ivi, null, &iv) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+    errdefer c.vkDestroyImageView(dev, iv, null);
+
+    // Sampler (use LINEAR for SDF smooth interpolation).
+    var spi = std.mem.zeroes(c.VkSamplerCreateInfo);
+    spi.sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    spi.magFilter = c.VK_FILTER_LINEAR;
+    spi.minFilter = c.VK_FILTER_LINEAR;
+    spi.addressModeU = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeV = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeW = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.borderColor = c.VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    var samp: c.VkSampler = undefined;
+    if (c.vkCreateSampler(dev, &spi, null, &samp) != c.VK_SUCCESS)
+        return error.ShaderLoadFailed;
+
+    // Write binding=2 descriptor.
+    var img_info = std.mem.zeroes(c.VkDescriptorImageInfo);
+    img_info.imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    img_info.imageView = iv;
+    img_info.sampler = samp;
+    var write = std.mem.zeroes(c.VkWriteDescriptorSet);
+    write.sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = impl.quad_desc_set;
+    write.dstBinding = 2;
+    write.descriptorCount = 1;
+    write.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &img_info;
+    c.vkUpdateDescriptorSets(impl.device, 1, &write, 0, null);
+
+    impl.dummy_sdf_image = img;
+    impl.dummy_sdf_view = iv;
+    impl.dummy_sdf_sampler = samp;
+    impl.dummy_sdf_mem = img_mem;
+}
+
+/// M13-03 RD2 — Upload an RGBA8 bitmap to a VK_FORMAT_R8G8B8A8_UNORM GPU image.
+/// Returns GpuAtlas handles (image, view, sampler, memory).
+pub fn vkUploadAtlasRgba8(
+    device: *anyopaque,
+    phys_device: *anyopaque,
+    cmd_pool: *anyopaque,
+    queue: *anyopaque,
+    pixels: []const u8,
+    atlas_w: u32,
+    atlas_h: u32,
+) error{GpuUploadFailed}!GpuAtlas {
+    const dev: c.VkDevice = @ptrCast(device);
+    const phys: c.VkPhysicalDevice = @ptrCast(phys_device);
+    const pool: c.VkCommandPool = @ptrCast(cmd_pool);
+    const q: c.VkQueue = @ptrCast(queue);
+    const img_size: c.VkDeviceSize = @as(u64, atlas_w) * atlas_h * 4;
+
+    // Staging buffer
+    var stg_buf: c.VkBuffer = undefined;
+    var stg_buf_info = std.mem.zeroes(c.VkBufferCreateInfo);
+    stg_buf_info.sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stg_buf_info.size = img_size;
+    stg_buf_info.usage = c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stg_buf_info.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    if (c.vkCreateBuffer(dev, &stg_buf_info, null, &stg_buf) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    defer c.vkDestroyBuffer(dev, stg_buf, null);
+
+    var stg_req: c.VkMemoryRequirements = undefined;
+    c.vkGetBufferMemoryRequirements(dev, stg_buf, &stg_req);
+    const stg_type = findMemTypeLocal(phys, stg_req.memoryTypeBits, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) orelse return error.GpuUploadFailed;
+
+    var stg_ma = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    stg_ma.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    stg_ma.allocationSize = stg_req.size;
+    stg_ma.memoryTypeIndex = stg_type;
+    var stg_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &stg_ma, null, &stg_mem) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    defer c.vkFreeMemory(dev, stg_mem, null);
+    _ = c.vkBindBufferMemory(dev, stg_buf, stg_mem, 0);
+
+    var mapped: ?*anyopaque = null;
+    _ = c.vkMapMemory(dev, stg_mem, 0, img_size, 0, &mapped);
+    @memcpy(@as([*]u8, @ptrCast(mapped.?))[0..pixels.len], pixels);
+    c.vkUnmapMemory(dev, stg_mem);
+
+    // Create RGBA8 image
+    var ii = std.mem.zeroes(c.VkImageCreateInfo);
+    ii.sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.imageType = c.VK_IMAGE_TYPE_2D;
+    ii.format = c.VK_FORMAT_R8G8B8A8_UNORM;
+    ii.extent = .{ .width = atlas_w, .height = atlas_h, .depth = 1 };
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = c.VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = c.VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.sharingMode = c.VK_SHARING_MODE_EXCLUSIVE;
+    var img: c.VkImage = undefined;
+    if (c.vkCreateImage(dev, &ii, null, &img) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    errdefer c.vkDestroyImage(dev, img, null);
+
+    var ir: c.VkMemoryRequirements = undefined;
+    c.vkGetImageMemoryRequirements(dev, img, &ir);
+    const img_type = findMemTypeLocal(phys, ir.memoryTypeBits, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) orelse return error.GpuUploadFailed;
+
+    var ima = std.mem.zeroes(c.VkMemoryAllocateInfo);
+    ima.sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ima.allocationSize = ir.size;
+    ima.memoryTypeIndex = img_type;
+    var img_mem: c.VkDeviceMemory = undefined;
+    if (c.vkAllocateMemory(dev, &ima, null, &img_mem) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    errdefer c.vkFreeMemory(dev, img_mem, null);
+    _ = c.vkBindImageMemory(dev, img, img_mem, 0);
+
+    // One-shot command buffer
+    var cba = std.mem.zeroes(c.VkCommandBufferAllocateInfo);
+    cba.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cba.commandPool = pool;
+    cba.level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cba.commandBufferCount = 1;
+    var cb: c.VkCommandBuffer = undefined;
+    if (c.vkAllocateCommandBuffers(dev, &cba, &cb) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    defer c.vkFreeCommandBuffers(dev, pool, 1, &cb);
+
+    var bi = std.mem.zeroes(c.VkCommandBufferBeginInfo);
+    bi.sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    _ = c.vkBeginCommandBuffer(cb, &bi);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_UNDEFINED, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    var cp = std.mem.zeroes(c.VkBufferImageCopy);
+    cp.imageSubresource.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    cp.imageSubresource.layerCount = 1;
+    cp.imageExtent = .{ .width = atlas_w, .height = atlas_h, .depth = 1 };
+    c.vkCmdCopyBufferToImage(cb, stg_buf, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+
+    atlasTransition(cb, img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    _ = c.vkEndCommandBuffer(cb);
+    var si = std.mem.zeroes(c.VkSubmitInfo);
+    si.sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    _ = c.vkQueueSubmit(q, 1, &si, null);
+    _ = c.vkQueueWaitIdle(q);
+
+    // Image view
+    var ivi = std.mem.zeroes(c.VkImageViewCreateInfo);
+    ivi.sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ivi.image = img;
+    ivi.viewType = c.VK_IMAGE_VIEW_TYPE_2D;
+    ivi.format = c.VK_FORMAT_R8G8B8A8_UNORM;
+    ivi.subresourceRange.aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT;
+    ivi.subresourceRange.levelCount = 1;
+    ivi.subresourceRange.layerCount = 1;
+    var iv: c.VkImageView = undefined;
+    if (c.vkCreateImageView(dev, &ivi, null, &iv) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+    errdefer c.vkDestroyImageView(dev, iv, null);
+
+    // Sampler
+    var spi = std.mem.zeroes(c.VkSamplerCreateInfo);
+    spi.sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    spi.magFilter = c.VK_FILTER_LINEAR;
+    spi.minFilter = c.VK_FILTER_LINEAR;
+    spi.addressModeU = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeV = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.addressModeW = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    spi.borderColor = c.VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    var samp: c.VkSampler = undefined;
+    if (c.vkCreateSampler(dev, &spi, null, &samp) != c.VK_SUCCESS)
+        return error.GpuUploadFailed;
+
+    return GpuAtlas{
+        .image = @ptrCast(img.?),
+        .image_view = @ptrCast(iv.?),
+        .sampler = @ptrCast(samp.?),
+        .memory = @ptrCast(img_mem.?),
+    };
+}
+
+fn vkInitQuadPipeline(impl: *VulkanImpl) !void {
+
+    // --- Descriptor set layout: binding 0 = grayscale atlas, binding 1 = subpixel atlas, binding 2 = SDF atlas ---
+    var ds_bindings: [3]c.VkDescriptorSetLayoutBinding = undefined;
+    ds_bindings[0] = std.mem.zeroes(c.VkDescriptorSetLayoutBinding);
+    ds_bindings[0].binding = 0;
+    ds_bindings[0].descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ds_bindings[0].descriptorCount = 1;
+    ds_bindings[0].stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT;
+    ds_bindings[1] = std.mem.zeroes(c.VkDescriptorSetLayoutBinding);
+    ds_bindings[1].binding = 1;
+    ds_bindings[1].descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ds_bindings[1].descriptorCount = 1;
+    ds_bindings[1].stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT;
+    ds_bindings[2] = std.mem.zeroes(c.VkDescriptorSetLayoutBinding);
+    ds_bindings[2].binding = 2;
+    ds_bindings[2].descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ds_bindings[2].descriptorCount = 1;
+    ds_bindings[2].stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT;
 
     var dsl_info = std.mem.zeroes(c.VkDescriptorSetLayoutCreateInfo);
     dsl_info.sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dsl_info.bindingCount = 1;
-    dsl_info.pBindings = &ds_binding;
+    dsl_info.bindingCount = 3;
+    dsl_info.pBindings = &ds_bindings;
     if (c.vkCreateDescriptorSetLayout(impl.device, &dsl_info, null, &impl.quad_desc_set_layout) != c.VK_SUCCESS)
         return error.ShaderLoadFailed;
 
     // --- Descriptor pool ---
-    var pool_size = std.mem.zeroes(c.VkDescriptorPoolSize);
-    pool_size.type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = 1;
+    var pool_sizes: [1]c.VkDescriptorPoolSize = undefined;
+    pool_sizes[0] = std.mem.zeroes(c.VkDescriptorPoolSize);
+    pool_sizes[0].type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_sizes[0].descriptorCount = 3;
     var pool_info = std.mem.zeroes(c.VkDescriptorPoolCreateInfo);
     pool_info.sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.maxSets = 1;
     pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
+    pool_info.pPoolSizes = &pool_sizes;
     if (c.vkCreateDescriptorPool(impl.device, &pool_info, null, &impl.quad_desc_pool) != c.VK_SUCCESS)
         return error.ShaderLoadFailed;
 
@@ -1990,18 +2592,25 @@ fn vkInitQuadPipeline(impl: *VulkanImpl, gpa: std.mem.Allocator) !void {
     if (c.vkAllocateDescriptorSets(impl.device, &ds_alloc, &impl.quad_desc_set) != c.VK_SUCCESS)
         return error.ShaderLoadFailed;
 
-    // --- Push constants: mat4 ortho (16 floats = 64 bytes) ---
-    var push_range = std.mem.zeroes(c.VkPushConstantRange);
-    push_range.stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT;
-    push_range.offset = 0;
-    push_range.size = 64;
+    // --- Create dummy 1x1 RGBA8 black texture for subpixel atlas binding=1 ---
+    try createDummySubpixelAtlas(impl);
+
+    // M13-04 RD3: Create dummy 1x1 R8 black texture for SDF atlas binding=2 ---
+    try createDummySdfAtlas(impl);
+
+    // --- Push constants: mat4 ortho (64 bytes) + clip data (36 bytes) = 100 bytes total ---
+    // RD1: clipRect (16 bytes @ 64), clipRadii (16 bytes @ 80), clipEnabled (4 bytes @ 96).
+    // Both stages share the full range so the GLSL push_constant block is fully contained
+    // per VUID-VkGraphicsPipelineCreateInfo-layout-10069.
+    var push_ranges: [1]c.VkPushConstantRange = undefined;
+    push_ranges[0] = .{ .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 100 };
 
     var pl_info = std.mem.zeroes(c.VkPipelineLayoutCreateInfo);
     pl_info.sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pl_info.setLayoutCount = 1;
     pl_info.pSetLayouts = &impl.quad_desc_set_layout;
     pl_info.pushConstantRangeCount = 1;
-    pl_info.pPushConstantRanges = &push_range;
+    pl_info.pPushConstantRanges = &push_ranges;
     if (c.vkCreatePipelineLayout(impl.device, &pl_info, null, &impl.quad_pipeline_layout) != c.VK_SUCCESS)
         return error.ShaderLoadFailed;
 
@@ -2031,17 +2640,18 @@ fn vkInitQuadPipeline(impl: *VulkanImpl, gpa: std.mem.Allocator) !void {
     vib.stride = @sizeOf(QuadVertex);
     vib.inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX;
 
-    var attr_descs: [4]c.VkVertexInputAttributeDescription = undefined;
+    var attr_descs: [5]c.VkVertexInputAttributeDescription = undefined;
     attr_descs[0] = .{ .location = 0, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(QuadVertex, "pos") };
     attr_descs[1] = .{ .location = 1, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(QuadVertex, "uv") };
     attr_descs[2] = .{ .location = 2, .binding = 0, .format = c.VK_FORMAT_R8G8B8A8_UNORM, .offset = @offsetOf(QuadVertex, "color") };
-    attr_descs[3] = .{ .location = 3, .binding = 0, .format = c.VK_FORMAT_R32_UINT, .offset = @offsetOf(QuadVertex, "mode") };
+    attr_descs[3] = .{ .location = 3, .binding = 0, .format = c.VK_FORMAT_R8G8B8A8_UNORM, .offset = @offsetOf(QuadVertex, "color_b") };
+    attr_descs[4] = .{ .location = 4, .binding = 0, .format = c.VK_FORMAT_R32_UINT, .offset = @offsetOf(QuadVertex, "mode") };
 
     var vi = std.mem.zeroes(c.VkPipelineVertexInputStateCreateInfo);
     vi.sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &vib;
-    vi.vertexAttributeDescriptionCount = 4;
+    vi.vertexAttributeDescriptionCount = 5;
     vi.pVertexAttributeDescriptions = &attr_descs;
 
     var ia = std.mem.zeroes(c.VkPipelineInputAssemblyStateCreateInfo);
@@ -2138,6 +2748,26 @@ fn vkDeinitQuadPipeline(impl: *VulkanImpl) void {
     c.vkDestroyPipelineLayout(impl.device, impl.quad_pipeline_layout, null);
     c.vkDestroyDescriptorPool(impl.device, impl.quad_desc_pool, null);
     c.vkDestroyDescriptorSetLayout(impl.device, impl.quad_desc_set_layout, null);
+    // M13-03 RD2: destroy dummy subpixel atlas
+    if (impl.dummy_subpixel_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+    if (impl.dummy_subpixel_view) |v| c.vkDestroyImageView(impl.device, v, null);
+    if (impl.dummy_subpixel_image) |img| c.vkDestroyImage(impl.device, img, null);
+    if (impl.dummy_subpixel_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
+    // Destroy real subpixel atlas if present.
+    if (impl.subpixel_atlas_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+    if (impl.subpixel_atlas_view) |v| c.vkDestroyImageView(impl.device, v, null);
+    if (impl.subpixel_atlas_image) |img| c.vkDestroyImage(impl.device, img, null);
+    if (impl.subpixel_atlas_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
+    // M13-04 RD3: destroy dummy SDF atlas
+    if (impl.dummy_sdf_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+    if (impl.dummy_sdf_view) |v| c.vkDestroyImageView(impl.device, v, null);
+    if (impl.dummy_sdf_image) |img| c.vkDestroyImage(impl.device, img, null);
+    if (impl.dummy_sdf_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
+    // Destroy real SDF atlas if present.
+    if (impl.sdf_atlas_sampler) |s| c.vkDestroySampler(impl.device, s, null);
+    if (impl.sdf_atlas_view) |v| c.vkDestroyImageView(impl.device, v, null);
+    if (impl.sdf_atlas_image) |img| c.vkDestroyImage(impl.device, img, null);
+    if (impl.sdf_atlas_mem) |mem| c.vkFreeMemory(impl.device, mem, null);
     impl.quad_pipeline_ready = false;
     impl.quad_pipeline = null;
     impl.quad_pipeline_layout = null;
@@ -2145,8 +2775,7 @@ fn vkDeinitQuadPipeline(impl: *VulkanImpl) void {
     impl.quad_desc_set_layout = null;
     impl.quad_desc_set = null;
     impl.quad_vertex_buf = null;
-    impl.quad_vertex_mem = null;
-}
+    impl.quad_vertex_mem = null;}
 
 fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const GpuAtlas) void {
     if (!impl.quad_pipeline_ready) return;
@@ -2168,7 +2797,7 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
         impl.render_pass_active = true;
     }
 
-    // Update descriptor set to point at the current atlas image/sampler.
+    // Update descriptor set to point at the current atlas image/sampler (binding 0).
     if (atlas.image_view != null and atlas.sampler != null) {
         var img_info = std.mem.zeroes(c.VkDescriptorImageInfo);
         img_info.imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2182,6 +2811,44 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
         write.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write.pImageInfo = &img_info;
         c.vkUpdateDescriptorSets(impl.device, 1, &write, 0, null);
+
+        // M13-03 RD2: Update binding 1 — subpixel atlas or dummy fallback.
+        var sp_img_info = std.mem.zeroes(c.VkDescriptorImageInfo);
+        sp_img_info.imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (impl.subpixel_atlas_view != null and impl.subpixel_atlas_sampler != null) {
+            sp_img_info.imageView = impl.subpixel_atlas_view.?;
+            sp_img_info.sampler = impl.subpixel_atlas_sampler.?;
+        } else {
+            sp_img_info.imageView = impl.dummy_subpixel_view.?;
+            sp_img_info.sampler = impl.dummy_subpixel_sampler.?;
+        }
+        var sp_write = std.mem.zeroes(c.VkWriteDescriptorSet);
+        sp_write.sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        sp_write.dstSet = impl.quad_desc_set;
+        sp_write.dstBinding = 1;
+        sp_write.descriptorCount = 1;
+        sp_write.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sp_write.pImageInfo = &sp_img_info;
+        c.vkUpdateDescriptorSets(impl.device, 1, &sp_write, 0, null);
+
+        // M13-04 RD3: Update binding 2 — SDF atlas or dummy fallback.
+        var sdf_img_info = std.mem.zeroes(c.VkDescriptorImageInfo);
+        sdf_img_info.imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (impl.sdf_atlas_view != null and impl.sdf_atlas_sampler != null) {
+            sdf_img_info.imageView = impl.sdf_atlas_view.?;
+            sdf_img_info.sampler = impl.sdf_atlas_sampler.?;
+        } else {
+            sdf_img_info.imageView = impl.dummy_sdf_view.?;
+            sdf_img_info.sampler = impl.dummy_sdf_sampler.?;
+        }
+        var sdf_write = std.mem.zeroes(c.VkWriteDescriptorSet);
+        sdf_write.sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        sdf_write.dstSet = impl.quad_desc_set;
+        sdf_write.dstBinding = 2;
+        sdf_write.descriptorCount = 1;
+        sdf_write.descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sdf_write.pImageInfo = &sdf_img_info;
+        c.vkUpdateDescriptorSets(impl.device, 1, &sdf_write, 0, null);
     }
 
     // Build vertex data: expand each DrawCommand into 6 vertices.
@@ -2197,8 +2864,8 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     const W = @as(f32, @floatFromInt(impl.swapchain_extent.width));
     const H = @as(f32, @floatFromInt(impl.swapchain_extent.height));
 
-    // Scissor draw-range tracking (R42).
-    const ScissorRange = struct { scissor: c.VkRect2D, first_vert: u32 };
+    // Scissor draw-range tracking (R42), extended with clip_rounded state (RD1).
+    const ScissorRange = struct { scissor: c.VkRect2D, first_vert: u32, clip_rounded: ?ClipRounded = null };
     var scissor_ranges: [64]ScissorRange = undefined;
     var scissor_range_count: u32 = 0;
 
@@ -2207,8 +2874,11 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     var scissor_depth: u8 = 0;
     var current_scissor = c.VkRect2D{ .offset = .{ .x = 0, .y = 0 }, .extent = impl.swapchain_extent };
 
+    // RD1: Current rounded clip state (carried into new scissor ranges).
+    var current_clip: ?ClipRounded = null;
+
     // Start with the full-viewport scissor range.
-    scissor_ranges[0] = .{ .scissor = current_scissor, .first_vert = 0 };
+    scissor_ranges[0] = .{ .scissor = current_scissor, .first_vert = 0, .clip_rounded = null };
     scissor_range_count = 1;
 
     for (commands) |cmd| {
@@ -2237,9 +2907,9 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     .offset = .{ .x = @intCast(ix0), .y = @intCast(iy0) },
                     .extent = .{ .width = iw, .height = ih },
                 };
-                // Start a new draw-range for the new scissor.
+                // Start a new draw-range for the new scissor (carry forward clip state).
                 if (scissor_range_count < 64) {
-                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count };
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
                     scissor_range_count += 1;
                 }
             },
@@ -2248,30 +2918,79 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     scissor_depth -= 1;
                     current_scissor = scissor_stack[scissor_depth];
                 }
-                // Start a new draw-range for the restored scissor.
+                // Start a new draw-range for the restored scissor (carry forward clip state).
                 if (scissor_range_count < 64) {
-                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count };
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                    scissor_range_count += 1;
+                }
+            },
+            .clip_rounded_begin => |cr| {
+                // RD1: Start new range with rounded clip enabled.
+                if (scissor_range_count < 64) {
+                    current_clip = cr;
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                    scissor_range_count += 1;
+                }
+            },
+            .clip_rounded_end => {
+                // RD1: Start new range with rounded clip disabled.
+                if (scissor_range_count < 64) {
+                    current_clip = null;
+                    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = null };
                     scissor_range_count += 1;
                 }
             },
             .filled_rect => |r| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, 0);
+                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
                 }
             },
             .border_rect => |br| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, br.rect, .{}, br.color, 0);
+                    emitQuad(verts, &vert_count, br.rect, .{}, br.color, .{ 0, 0, 0, 0 }, 0);
                 }
             },
             .glyph => |g| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, g.dst, g.uv, g.color, 1);
+                    emitQuad(verts, &vert_count, g.dst, g.uv, g.color, .{ 0, 0, 0, 0 }, g.mode);
                 }
             },
             .image_rect => |img| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, img.dst, img.uv, img.tint, 0);
+                    emitQuad(verts, &vert_count, img.dst, img.uv, img.tint, .{ 0, 0, 0, 0 }, 0);
+                }
+            },
+            .sdf_icon => |si| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, si.dst, si.uv, si.color, .{ 0, 0, 0, 0 }, 4);
+                }
+            },
+            .gradient_rect => |gr| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    const col_b = [4]u8{ gr.color_b.r, gr.color_b.g, gr.color_b.b, gr.color_b.a };
+                    const uv = switch (gr.direction) {
+                        .right => Rect09{ .x = 0, .y = 0, .w = 1, .h = 0 },
+                        .bottom => Rect09{ .x = 0, .y = 0, .w = 0, .h = 1 },
+                        .bottom_right => Rect09{ .x = 0, .y = 0, .w = 1, .h = 1 },
+                    };
+                    emitQuad(verts, &vert_count, gr.rect, uv, gr.color_a, col_b, 2);
+                }
+            },
+            .aa_filled_rect => |r| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 5);
+                }
+            },
+            .aa_filled_circle => |circ| {
+                if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                    const sq_rect = Rect09{
+                        .x = circ.center_x - circ.radius,
+                        .y = circ.center_y - circ.radius,
+                        .w = circ.radius * 2,
+                        .h = circ.radius * 2,
+                    };
+                    const sq_uv = Rect09{ .x = 0, .y = 0, .w = 1, .h = 1 };
+                    emitQuad(verts, &vert_count, sq_rect, sq_uv, circ.color, .{ 0, 0, 0, 0 }, 6);
                 }
             },
         }
@@ -2293,19 +3012,33 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
         0,       0,       1, 0,
         -1,      -1,      0, 1,
     };
-    c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &ortho);
+    c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64, &ortho);
     c.vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, impl.quad_pipeline_layout, 0, 1, &impl.quad_desc_set, 0, null);
 
     const vb_offset: c.VkDeviceSize = 0;
     c.vkCmdBindVertexBuffers(cb, 0, 1, &impl.quad_vertex_buf, &vb_offset);
 
-    // Issue one draw call per scissor range (R42).
+    // Issue one draw call per scissor range (R42), with per-range clip push constants (RD1).
     var ri: u32 = 0;
     while (ri < scissor_range_count) : (ri += 1) {
         const first = scissor_ranges[ri].first_vert;
         const last = if (ri + 1 < scissor_range_count) scissor_ranges[ri + 1].first_vert else vert_count;
         if (last <= first) continue;
         c.vkCmdSetScissor(cb, 0, 1, &scissor_ranges[ri].scissor);
+
+        // RD1: Push clip constants for this range.
+        if (scissor_ranges[ri].clip_rounded) |cr| {
+            const clip_rect = [4]f32{ cr.rect.x, cr.rect.y, cr.rect.w, cr.rect.h };
+            const clip_radii = [4]f32{ cr.radius_tl, cr.radius_tr, cr.radius_br, cr.radius_bl };
+            const clip_enabled: u32 = 1;
+            c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, 64, 16, &clip_rect);
+            c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, 80, 16, &clip_radii);
+            c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, 96, 4, &clip_enabled);
+        } else {
+            const clip_disabled: u32 = 0;
+            c.vkCmdPushConstants(cb, impl.quad_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT, 96, 4, &clip_disabled);
+        }
+
         c.vkCmdDraw(cb, last - first, 1, first, 0);
     }
 }
@@ -2316,6 +3049,7 @@ fn emitQuad(
     rect: Rect09,
     uv: Rect09,
     color: Color09,
+    color_b: [4]u8,
     mode: u32,
 ) void {
     const px0 = rect.x;
@@ -2327,16 +3061,16 @@ fn emitQuad(
     const ux1 = uv.x + uv.w;
     const vy1 = uv.y + uv.h;
     const col = [4]u8{ color.r, color.g, color.b, color.a };
-    verts[count.*] = .{ .pos = .{ px0, py0 }, .uv = .{ ux0, vy0 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px0, py0 }, .uv = .{ ux0, vy0 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
-    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px1, py0 }, .uv = .{ ux1, vy0 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
-    verts[count.*] = .{ .pos = .{ px1, py1 }, .uv = .{ ux1, vy1 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px1, py1 }, .uv = .{ ux1, vy1 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
-    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .mode = mode };
+    verts[count.*] = .{ .pos = .{ px0, py1 }, .uv = .{ ux0, vy1 }, .color = col, .color_b = color_b, .mode = mode };
     count.* += 1;
 }

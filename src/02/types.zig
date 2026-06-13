@@ -321,6 +321,14 @@ pub const GlyphRender = struct {
     bitmap: []const u8,
 };
 
+/// M13-03 RD2 — Subpixel glyph bitmap with RGB-packed subpixel coverage.
+pub const SubpixelBitmap = struct {
+    width: u32,
+    height: u32,
+    /// RGBRGBRGB... packed bytes. width * height * 3 bytes.
+    rgb: []u8,
+};
+
 pub const FontError = error{ InvalidFont, OutOfMemory, GlyphNotFound };
 
 const FontImpl = struct {
@@ -425,6 +433,54 @@ pub const Font = struct {
             .width = @intCast(w),
             .height = @intCast(h),
             .bitmap = bitmap,
+        };
+    }
+
+    /// M13-03 RD2 — Rasterize a glyph at 3× horizontal resolution for subpixel rendering.
+    /// Returns the RGB-packed bitmap where each output pixel's R,G,B channels contain
+    /// the subpixel coverage from the 3× wider rasterization.
+    /// Caller owns the returned `SubpixelBitmap.rgb` (allocated with `gpa`).
+    pub fn rasterizeSubpixel(self: *Font, gpa: std.mem.Allocator, codepoint: u21, px: f32) FontError!SubpixelBitmap {
+        const impl: *FontImpl = @ptrCast(@alignCast(self._impl));
+        const scale = c.stbtt_ScaleForPixelHeight(&impl.info, px);
+        // Rasterize at 3× horizontal resolution using subpixel-aware bitmap function.
+        const scale_x = scale * 3.0;
+        const scale_y = scale;
+        const glyph_index = c.stbtt_FindGlyphIndex(&impl.info, @intCast(codepoint));
+        if (glyph_index == 0) return FontError.GlyphNotFound;
+
+        var raw_w: c_int = 0;
+        var raw_h: c_int = 0;
+        var raw_xoff: c_int = 0;
+        var raw_yoff: c_int = 0;
+        const raw = c.stbtt_GetGlyphBitmapSubpixel(&impl.info, scale_x, scale_y, 0, 0, glyph_index, &raw_w, &raw_h, &raw_xoff, &raw_yoff);
+        if (raw == null) return FontError.GlyphNotFound;
+        defer c.stbtt_FreeBitmap(raw, null);
+
+        // The rasterized bitmap is 3× wider than the normal glyph.
+        // Pack every 3 adjacent pixels into one RGB triplet.
+        const out_w: u32 = @intCast(@divTrunc(raw_w + 2, 3)); // ceiling division
+        const out_h: u32 = @intCast(raw_h);
+        const out_len: usize = @as(usize, out_w) * out_h * 3;
+        const rgb = try gpa.alloc(u8, out_len);
+
+        var y: u32 = 0;
+        while (y < out_h) : (y += 1) {
+            var x: u32 = 0;
+            while (x < out_w) : (x += 1) {
+                const src_idx: usize = @as(usize, y) * @as(usize, @intCast(raw_w)) + @as(usize, x) * 3;
+                const dst_idx: usize = (@as(usize, y) * out_w + x) * 3;
+                // R = pixel[3*x+0], G = pixel[3*x+1], B = pixel[3*x+2]
+                rgb[dst_idx + 0] = if (x * 3 + 0 < @as(u32, @intCast(raw_w))) raw[src_idx + 0] else 0;
+                rgb[dst_idx + 1] = if (x * 3 + 1 < @as(u32, @intCast(raw_w))) raw[src_idx + 1] else 0;
+                rgb[dst_idx + 2] = if (x * 3 + 2 < @as(u32, @intCast(raw_w))) raw[src_idx + 2] else 0;
+            }
+        }
+
+        return SubpixelBitmap{
+            .width = out_w,
+            .height = out_h,
+            .rgb = rgb,
         };
     }
 

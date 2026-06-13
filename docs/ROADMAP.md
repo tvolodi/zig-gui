@@ -210,18 +210,18 @@ Unlocks common layout patterns that are awkward or impossible today.
 
 ---
 
-## Milestone 13 — Rendering quality `planned`
+## Milestone 13 — Rendering quality `done`
 
 Closes the gap between functional and polished.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M13-01 | **Gradient fills** — `bg-gradient-to-{r,b,br}` with two token-sourced stop colors; emitted as a texture tile | 09, 05 |
-| M13-02 | **Rounded content clipping** — clip element content (images, children) to the rounded-corner boundary of its container | 09 |
-| M13-03 | **Subpixel glyph rendering** — RGB-subpixel atlas channels + ClearType-style fragment shader for crisp text at 12–14 px | 02, 09 |
-| M13-04 | **Vector icons via SDF** — `SdfAtlas` for single-color SVG-path icons that scale without re-rasterization | 09 |
-| M13-05 | **Anti-aliased filled shapes** — 1 px feather at rect and circle edges via coverage mask in the fragment shader | 09 |
-| M13-06 | **HiDPI / display-scale awareness** — read monitor content scale from `glfwGetMonitorContentScale` and multiply all px values; expose `dpi_scale` on `AppInner` | M1-01 |
+| ID | Feature | Depends on | Requirements |
+|---|---|---|---|---|
+| M13-01 | **Gradient fills** — `bg-gradient-to-{r,b,br}` with two token-sourced stop colors; emitted as a texture tile | 09, 05 | [RD0](requirements/RD0_gradient_fills.md) |
+| M13-02 | **Rounded content clipping** — clip element content (images, children) to the rounded-corner boundary of its container | 09 | [RD1](requirements/RD1_rounded_content_clipping.md) |
+| M13-03 | **Subpixel glyph rendering** — RGB-subpixel atlas channels + ClearType-style fragment shader for crisp text at 12–14 px | 02, 09 | [RD2](requirements/RD2_subpixel_glyph_rendering.md) |
+| M13-04 | **Vector icons via SDF** — `SdfAtlas` for single-color SVG-path icons that scale without re-rasterization | 09 | [RD3](requirements/RD3_vector_icons_sdf.md) |
+| M13-05 | **Anti-aliased filled shapes** — 1 px feather at rect and circle edges via coverage mask in the fragment shader | 09 | [RD4](requirements/RD4_antialiased_filled_shapes.md) |
+| M13-06 | **HiDPI / display-scale awareness** — read monitor content scale from `glfwGetMonitorContentScale` and multiply all px values; expose `dpi_scale` on `AppInner` | M1-01 | [RD5](requirements/RD5_hidpi_display_scale.md) |
 
 ---
 

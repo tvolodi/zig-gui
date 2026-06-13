@@ -39,7 +39,7 @@ test "justify center" {
     const a = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 40 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 40 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // free space = 300 - 50 - 50 = 200; center offset = 100
     try expectRect(&s, a, 100, 0, 50, 40);
     try expectRect(&s, b, 150, 0, 50, 40);
@@ -64,7 +64,7 @@ test "justify end" {
     const a = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 40 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 40 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // free space = 200; offset = 200 → children at 200 and 250
     try expectRect(&s, a, 200, 0, 50, 40);
     try expectRect(&s, b, 250, 0, 50, 40);
@@ -91,7 +91,7 @@ test "justify space around" {
     const b = try s.addChild(root, .{ .width = .{ .px = 40 }, .height = .{ .px = 40 } });
     const c = try s.addChild(root, .{ .width = .{ .px = 40 }, .height = .{ .px = 40 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // free = 100; per_item = 100/3; start = per_item/2
     const per_item: f32 = 100.0 / 3.0;
     const start = per_item / 2.0;
@@ -122,7 +122,7 @@ test "align items start" {
     const a = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 30 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 50 }, .height = .{ .px = 30 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // align start → cross_pos = 0 (top of container content box)
     try expectRect(&s, a, 0, 0, 50, 30);
     try expectRect(&s, b, 50, 0, 50, 30);
@@ -147,7 +147,7 @@ test "align items center" {
     const a = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 30 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 30 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // cross = 100, child cross = 30 → offset = (100-30)/2 = 35
     try expectRect(&s, a, 0, 35, 60, 30);
     try expectRect(&s, b, 60, 35, 60, 30);
@@ -172,7 +172,7 @@ test "align items end" {
     const a = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 40 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 40 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // cross = 100, child cross = 40 → cross_pos = 100 - 40 = 60
     try expectRect(&s, a, 0, 60, 60, 40);
     try expectRect(&s, b, 60, 60, 60, 40);
@@ -197,7 +197,7 @@ test "flex shrink proportional" {
     const a = try s.addChild(root, .{ .width = .{ .px = 150 }, .flex_shrink = 1 });
     const b = try s.addChild(root, .{ .width = .{ .px = 150 }, .flex_shrink = 1 });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // weighted shrink: each weight = 1 * 150 = 150; total = 300
     // each shrinks by (150/300)*100 = 50 → final = 100
     try expectRect(&s, a, 0, 0, 100, 40);
@@ -224,7 +224,7 @@ test "flex shrink unequal factors" {
     const a = try s.addChild(root, .{ .width = .{ .px = 150 }, .flex_shrink = 1 });
     const b = try s.addChild(root, .{ .width = .{ .px = 150 }, .flex_shrink = 2 });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // overflow = 100; wA = 1*150=150, wB = 2*150=300, total = 450
     // A shrinks by 150/450*100 ≈ 33.33 → 116.67; B shrinks by 300/450*100 ≈ 66.67 → 83.33
     const ra = s.get(a).computed;
@@ -255,7 +255,7 @@ test "column flex with gap" {
     const a = try s.addChild(root, .{ .height = .{ .px = 80 } });
     const b = try s.addChild(root, .{ .height = .{ .px = 80 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     try expectRect(&s, a, 0, 0, 100, 80);
     try expectRect(&s, b, 0, 90, 100, 80);
 }
@@ -281,7 +281,7 @@ test "percent dimension width" {
         .height = .{ .px = 60 },
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     try expectRect(&s, child, 0, 0, 100, 60);
 }
 
@@ -312,7 +312,7 @@ test "grid col span 2" {
     // Second child spans 1 column (placed in col 2, row 0)
     const b = try s.addChild(root, .{ .col_span = 1 });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // a: col 0 + 1 → x=0, w = 100+100+10 = 210, y=0, h=40
     try expectRect(&s, a, 0, 0, 210, 40);
     // b: col 2 → x=220, w=100, y=0, h=40
@@ -341,7 +341,7 @@ test "grid row span 2" {
     });
     const a = try s.addChild(root, .{ .row_span = 2 });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // a: row 0 + 1 → y=0, h = 100+100+10 = 210, x=0, w=100
     try expectRect(&s, a, 0, 0, 100, 210);
 }
@@ -370,7 +370,7 @@ test "grid auto track is zero width" {
     const b = try s.addChild(root, .{});
     const c = try s.addChild(root, .{});
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // col starts: a=0 (w=100), b=105 (w=0), c=110 (w=200-100-0-2*5=90)
     try expectRect(&s, a, 0, 0, 100, 40);
     try expectRect(&s, b, 105, 0, 0, 40);
@@ -400,7 +400,7 @@ test "fixed child in flex row no grow exact position" {
     });
     const filler = try s.addChild(root, .{ .flex_grow = 1, .flex_basis = .{ .px = 0 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // fixed child: x=0, w=80
     try expectRect(&s, fixed, 0, 0, 80, 50);
     // filler gets remaining 320
@@ -438,7 +438,7 @@ test "nested flex containers" {
     const leaf_a = try s.addChild(inner, .{ .height = .{ .px = 40 } });
     const leaf_b = try s.addChild(inner, .{ .height = .{ .px = 40 } });
 
-    L.solve(&s, outer, full, &scratch);
+    L.solve(&s, outer, full, &scratch, 1.0);
     // outer children
     try expectRect(&s, inner, 0, 0, 200, 100);
     try expectRect(&s, second_col, 200, 0, 200, 100);
@@ -466,7 +466,7 @@ test "block layout height sum of children" {
     const b = try s.addChild(root, .{ .width = .{ .px = 100 }, .height = .{ .px = 30 } });
     const c = try s.addChild(root, .{ .width = .{ .px = 100 }, .height = .{ .px = 30 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // children stacked at y=0, 30, 60
     try expectRect(&s, a, 0, 0, 100, 30);
     try expectRect(&s, b, 0, 30, 100, 30);
@@ -496,7 +496,7 @@ test "block layout with padding" {
     const a = try s.addChild(root, .{ .width = .{ .px = 180 }, .height = .{ .px = 50 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 180 }, .height = .{ .px = 50 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // a: x=10, y=10, w=180, h=50; b: x=10, y=60, w=180, h=50
     try expectRect(&s, a, 10, 10, 180, 50);
     try expectRect(&s, b, 10, 60, 180, 50);
@@ -523,7 +523,7 @@ test "flex shrink zero no shrink" {
     const a = try s.addChild(root, .{ .width = .{ .px = 160 }, .flex_shrink = 0 });
     const b = try s.addChild(root, .{ .width = .{ .px = 160 }, .flex_shrink = 0 });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // No shrink; children keep their 160px width
     try expectRect(&s, a, 0, 0, 160, 40);
     try expectRect(&s, b, 160, 0, 160, 40);
@@ -548,7 +548,7 @@ test "column flex align items center cross axis" {
     });
     const child = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 50 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // cross = width = 200; child cross = 60 → offset = (200-60)/2 = 70
     try expectRect(&s, child, 70, 0, 60, 50);
 }
@@ -580,7 +580,7 @@ test "R51: display none produces zero computed size" {
         .height = .{ .px = 40 },
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // visible child gets its declared size
     const rv = s.get(visible).computed;
     try testing.expectApproxEqAbs(@as(f32, 50.0), rv.w, 0.5);
@@ -603,7 +603,7 @@ test "R51: display none root node has zero computed rect" {
         .height = .{ .px = 100 },
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     const r = s.get(root).computed;
     try testing.expectApproxEqAbs(@as(f32, 0.0), r.w, 0.5);
     try testing.expectApproxEqAbs(@as(f32, 0.0), r.h, 0.5);
@@ -641,7 +641,7 @@ test "R51: mx-auto on block child does not crash and places child" {
         },
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     const rc = s.get(child).computed;
     // auto width in a block container: fills content_w = 400.
     // auto+auto margins: offset = (400 - 400) / 2 = 0 → x = 0.
@@ -680,7 +680,7 @@ test "R51: align_self center overrides parent align_items start" {
         .align_self = .auto,
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     // child_a: centered → y = (100 - 40) / 2 = 30
     try expectRect(&s, child_a, 0, 30, 60, 40);
     // child_b: start → y = 0
@@ -712,7 +712,7 @@ test "R51: fixed pixel margin top shifts child y position" {
         },
     });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     const rc = s.get(child).computed;
     // y should include the margin-top of 20
     try testing.expectApproxEqAbs(@as(f32, 20.0), rc.y, 0.5);
@@ -739,7 +739,7 @@ test "justify start with explicit gap" {
     const a = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 40 } });
     const b = try s.addChild(root, .{ .width = .{ .px = 60 }, .height = .{ .px = 40 } });
 
-    L.solve(&s, root, full, &scratch);
+    L.solve(&s, root, full, &scratch, 1.0);
     try expectRect(&s, a, 0, 0, 60, 40);
     try expectRect(&s, b, 80, 0, 60, 40);
 }

@@ -493,6 +493,9 @@ pub const Scene = struct {
     // R43 — Image state parallel array
     _image_state: std.ArrayListUnmanaged(ImageState) = .empty,
 
+    // M13-04 RD3 — SDF icon name parallel array
+    _icon_name: std.ArrayListUnmanaged(?[]const u8) = .empty,
+
     // R52 — Hidden state parallel arrays
     _hidden: std.ArrayListUnmanaged(bool) = .empty,
     _saved_display: std.ArrayListUnmanaged(store_mod.Display) = .empty,
@@ -572,6 +575,11 @@ pub const Scene = struct {
     /// Acceptance tests leave this null — they pass a single *Font.
     font_family: ?*font_family_mod.FontFamily = null,
 
+    /// RD5: HiDPI display scale factor. Default 1.0 = standard DPI. Set by app.zig
+    /// at startup from the primary monitor's content scale. Multiplied into font_size
+    /// during measurePass and layout values during solve().
+    dpi_scale: f32 = 1.0,
+
     gpa: std.mem.Allocator,
 
     pub fn init(gpa: std.mem.Allocator) Scene {
@@ -598,6 +606,7 @@ pub const Scene = struct {
         self._scroll_state.deinit(self.gpa);
         self._pseudo.deinit(self.gpa);
         self._image_state.deinit(self.gpa);
+        self._icon_name.deinit(self.gpa);
         self._hidden.deinit(self.gpa);
         self._saved_display.deinit(self.gpa);
         self._selection.deinit(self.gpa);
@@ -643,6 +652,7 @@ pub const Scene = struct {
         self._scroll_state.clearRetainingCapacity();
         self._pseudo.clearRetainingCapacity();
         self._image_state.clearRetainingCapacity();
+        self._icon_name.clearRetainingCapacity();
         self._hidden.clearRetainingCapacity();
         self._saved_display.clearRetainingCapacity();
         self._selection.clearRetainingCapacity();
@@ -709,14 +719,16 @@ pub const Scene = struct {
     /// Measure every text-bearing element and fill its LayoutNode.measured.    /// `font` is the fallback face used when self.font_family is null (acceptance test path).
     /// When self.font_family is set (app path, R60), per-element bold/italic face is selected.
     pub fn measurePass(self: *Scene, font: *text.Font, atlas: *text.GlyphAtlas) text.FontError!void {
+        const dpi_scale = self.dpi_scale;
         for (self._text.items, 0..) |maybe_str, i| {
             const str = maybe_str orelse continue;
             const style = self._style.items[i];
+            const scaled_font_size = @round(style.font_size * dpi_scale);
             const effective_font = if (self.font_family) |fam|
                 fam.face(style.font_bold, style.font_italic)
             else
                 font;
-            const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, str, style.font_size, 1e6, self.font_family);
+            const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, str, scaled_font_size, 1e6, self.font_family);
             defer self.gpa.free(para.glyphs);
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
         }
@@ -726,11 +738,11 @@ pub const Scene = struct {
         // hover/redraw to trigger late rasterization.
         {
             const digits = "0123456789";
-            // Collect unique font sizes (scene rarely has more than ~8 distinct sizes).
+            // Collect unique scaled font sizes (scene rarely has more than ~8 distinct sizes).
             var sizes: [16]f32 = undefined;
             var size_count: usize = 0;
             for (self._style.items) |style| {
-                const sz = style.font_size;
+                const sz = @round(style.font_size * dpi_scale);
                 if (sz <= 0) continue;
                 var found = false;
                 for (sizes[0..size_count]) |s| { if (s == sz) { found = true; break; } }
@@ -752,24 +764,26 @@ pub const Scene = struct {
             if (i >= self._kind.items.len) break;
             if (self._kind.items[i] != .data_table) continue;
             const tbl_font = font;
-            // Column headers (bold, 13px)
+            // Column headers (bold, 13px — scaled by dpi_scale)
+            const header_font_size = @round(13.0 * dpi_scale);
             for (ts.columns[0..ts.col_count]) |*col| {
                 const hdr = col.headerSlice();
                 if (hdr.len == 0) continue;
-                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, hdr, 13.0, 1e6, self.font_family);
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, hdr, header_font_size, 1e6, self.font_family);
                 defer self.gpa.free(para.glyphs);
             }
-            // Warm the full printable ASCII range at 13px so all cell text renders
+            // Warm the full printable ASCII range at scaled 13px so all cell text renders
             // immediately without waiting multiple frames for glyph rasterization.
             {
                 const ascii_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,_-()/%+";
-                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, ascii_chars, 13.0, 1e6, self.font_family);
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, ascii_chars, header_font_size, 1e6, self.font_family);
                 defer self.gpa.free(para.glyphs);
             }
-            // Warm sort indicator glyphs ▲▼ at 10px.
+            // Warm sort indicator glyphs ▲▼ at scaled 10px.
             {
                 const indicators = "\xe2\x96\xb2\xe2\x96\xbc";
-                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, indicators, 10.0, 1e6, self.font_family);
+                const indicator_font_size = @round(10.0 * dpi_scale);
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, indicators, indicator_font_size, 1e6, self.font_family);
                 defer self.gpa.free(para.glyphs);
             }
         }
@@ -780,13 +794,14 @@ pub const Scene = struct {
             if (dd.options.items.len == 0) continue;
             if (i >= self._style.items.len) break;
             const style = self._style.items[i];
+            const dd_font_size = @round(style.font_size * dpi_scale);
             const effective_font = if (self.font_family) |fam|
                 fam.face(style.font_bold, style.font_italic)
             else
                 font;
             for (dd.options.items) |opt| {
                 if (opt.label.len == 0) continue;
-                const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, opt.label, style.font_size, 1e6, self.font_family);
+                const para = try text.layoutParagraphEx(self.gpa, effective_font, atlas, opt.label, dd_font_size, 1e6, self.font_family);
                 defer self.gpa.free(para.glyphs);
                 // Side-effect only: rasterize glyphs into atlas. Measured size not needed here.
             }
@@ -821,6 +836,17 @@ pub const Scene = struct {
     /// current signal values into the Scene's text array before measurePass.
     pub fn setText(self: *Scene, idx: u32, text_val: []const u8) void {
         self._text.items[idx] = text_val;
+    }
+
+    /// M13-04 RD3 — Get the SDF icon name for element at idx, if set.
+    pub fn iconNameOf(self: *Scene, idx: u32) ?[]const u8 {
+        if (idx >= self._icon_name.items.len) return null;
+        return self._icon_name.items[idx];
+    }
+
+    /// M13-04 RD3 — Set the SDF icon name for element at idx.
+    pub fn setIconName(self: *Scene, idx: u32, name: []const u8) void {
+        self._icon_name.items[idx] = name;
     }
 
     pub fn count(self: *Scene) u32 {
@@ -1690,6 +1716,9 @@ pub const Scene = struct {
             final_style.truncate = resolved.style.truncate;
         if (resolved.style.opacity != empty.style.opacity)
             final_style.opacity = resolved.style.opacity;
+        // M13-01 RD0 — gradient direction
+        if (resolved.style.gradient_direction != empty.style.gradient_direction)
+            final_style.gradient_direction = resolved.style.gradient_direction;
         if (resolved.style.shadow_blur != empty.style.shadow_blur)
             final_style.shadow_blur = resolved.style.shadow_blur;
         if (resolved.style.shadow_offset_x != empty.style.shadow_offset_x)
@@ -1804,6 +1833,8 @@ pub const Scene = struct {
         var text_val: ?[]const u8 = null;
         // R52: check for if= attribute (start hidden until signal resolves)
         var start_hidden: bool = false;
+        // M13-04 RD3: SDF icon name for Icon widgets
+        var icon_name_val: ?[]const u8 = null;
         for (desc.attrs) |attr| {
             if (std.mem.eql(u8, attr.name, "text")) {
                 text_val = switch (attr.value) {
@@ -1840,6 +1871,11 @@ pub const Scene = struct {
                         start_hidden = true;
                     },
                 }
+            } else if (kind == .icon and std.mem.eql(u8, attr.name, "icon_name")) {
+                icon_name_val = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => |s| s,
+                };
             }
         }
 
@@ -1911,6 +1947,15 @@ pub const Scene = struct {
             self._image_state.items.len = needed;
         }
         self._image_state.items[id.index] = .{};
+
+        try self._icon_name.ensureTotalCapacity(self.gpa, needed);
+        if (self._icon_name.items.len <= id.index) {
+            self._icon_name.items.len = needed;
+        }
+        // M13-04 RD3: store SDF icon name for Icon widgets
+        if (icon_name_val) |name| {
+            self._icon_name.items[id.index] = name;
+        }
 
         // R52: hidden state arrays
         try self._hidden.ensureTotalCapacity(self.gpa, needed);

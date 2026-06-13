@@ -129,7 +129,7 @@ test "RC0: layout — absolute child is not counted in parent flex sizing" {
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 200 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 200 }, &scratch, 1.0);
 
     // Parent width = 200 (declared). Parent height should come from the one static child only = 40.
     const parent = store.get(parent_id);
@@ -156,7 +156,7 @@ test "RC0: layout — absolute child placed at inset offset from parent" {
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const parent = store.get(parent_id);
     const child = store.get(child_id);
@@ -184,7 +184,7 @@ test "RC0: layout — absolute child with both horizontal insets stretches width
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const child = store.get(child_id);
     try testing.expectApproxEqAbs(@as(f32, 180), child.computed.w, 0.5);
@@ -246,7 +246,7 @@ test "RC1: layout — sticky element participates in normal flow (parent height 
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 600 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 600 }, &scratch, 1.0);
 
     const parent = store.get(parent_id);
     // Sticky element contributes to normal flow — parent height >= 40.
@@ -304,7 +304,7 @@ test "RC2: layout — wrapping row: three 80px children in 200px container wrap 
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch, 1.0);
 
     const p = store.get(parent_id);
     const ch0 = store.get(c0);
@@ -349,7 +349,7 @@ test "RC2: layout — no-wrap row: three 80px children overflow but stay on one 
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch, 1.0);
 
     const ch0 = store.get(c0);
     const ch1 = store.get(c1);
@@ -383,7 +383,7 @@ test "RC2: layout — wrapping row: single wide child (no crash)" {
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch);
+    layout_mod.solve(&store, parent_id, .{ .min_w = 0, .max_w = 200, .min_h = 0, .max_h = 1000 }, &scratch, 1.0);
 
     const ch0 = store.get(c0);
     // Single child on its own line; overflow is not clipped by layout.
@@ -430,7 +430,7 @@ test "RC3: layout — width=200, height=auto, aspect_ratio=2.0 → computed.h = 
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const node = store.get(node_id);
     try testing.expectApproxEqAbs(@as(f32, 100), node.computed.h, 0.5);
@@ -448,7 +448,7 @@ test "RC3: layout — width=100, height=auto, aspect_ratio=1.0 → computed.h = 
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const node = store.get(node_id);
     try testing.expectApproxEqAbs(@as(f32, 100), node.computed.h, 0.5);
@@ -466,7 +466,7 @@ test "RC3: layout — width=160, height=auto, aspect_ratio=16/9 → computed.h �
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const node = store.get(node_id);
     // 160 / (16/9) = 90 exactly
@@ -486,7 +486,7 @@ test "RC3: layout — explicit height and aspect_ratio: height unchanged" {
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const node = store.get(node_id);
     try testing.expectApproxEqAbs(@as(f32, 50), node.computed.h, 0.5);
@@ -505,7 +505,7 @@ test "RC3: layout — aspect_ratio=0 leaves behavior unchanged" {
     });
 
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch);
+    layout_mod.solve(&store, node_id, .{ .min_w = 0, .max_w = 400, .min_h = 0, .max_h = 400 }, &scratch, 1.0);
 
     const node = store.get(node_id);
     // No children and no measured → height should be 0 (same as before this feature).
@@ -596,10 +596,12 @@ fn buildZIndexScene(
 /// computed x of element `target_idx` within ±1 px. Returns null if not found.
 fn firstFilledRectIndexFor(cmds: []const renderer_mod.DrawCommand, target_x: f32) ?usize {
     for (cmds, 0..) |cmd, i| {
-        if (cmd == .filled_rect) {
-            if (@abs(cmd.filled_rect.rect.x - target_x) < 1.5) {
-                return i;
-            }
+        const fr = switch (cmd) {
+            .filled_rect, .aa_filled_rect => |f| f,
+            else => continue,
+        };
+        if (@abs(fr.rect.x - target_x) < 1.5) {
+            return i;
         }
     }
     return null;
@@ -615,7 +617,7 @@ test "RC4: draw order — sibling A(z=0) drawn before B(z=10)" {
     // Solve layout.
     var scratch: [4096]u8 = undefined;
     layout_mod.solve(result.scene.store(), result.root_id,
-        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch);
+        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch, 1.0);
 
     // Build draw list.
     var atlas = try renderer_mod.GlyphAtlas.init(testing.allocator, 64, 64);
@@ -626,6 +628,7 @@ test "RC4: draw order — sibling A(z=0) drawn before B(z=10)" {
 
     const cmds = try renderer_mod.buildDrawList(
         testing.allocator, &result.scene, &atlas, &img_atlas, &font, testTokens(),
+        null, false, null,
     );
     defer testing.allocator.free(cmds);
 
@@ -651,7 +654,7 @@ test "RC4: draw order — sibling A(z=20) drawn after B(z=10)" {
 
     var scratch: [4096]u8 = undefined;
     layout_mod.solve(result.scene.store(), result.root_id,
-        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch);
+        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch, 1.0);
 
     var atlas = try renderer_mod.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
@@ -661,6 +664,7 @@ test "RC4: draw order — sibling A(z=20) drawn after B(z=10)" {
 
     const cmds = try renderer_mod.buildDrawList(
         testing.allocator, &result.scene, &atlas, &img_atlas, &font, testTokens(),
+        null, false, null,
     );
     defer testing.allocator.free(cmds);
 
@@ -705,7 +709,7 @@ test "RC4: draw order — three siblings [z=0, z=10, z=5] drawn in order [z=0, z
 
     var scratch: [4096]u8 = undefined;
     layout_mod.solve(scene.store(), root_id,
-        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch);
+        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 600 }, &scratch, 1.0);
 
     var atlas = try renderer_mod.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
@@ -715,6 +719,7 @@ test "RC4: draw order — three siblings [z=0, z=10, z=5] drawn in order [z=0, z
 
     const cmds = try renderer_mod.buildDrawList(
         testing.allocator, &scene, &atlas, &img_atlas, &font, tok,
+        null, false, null,
     );
     defer testing.allocator.free(cmds);
 
@@ -768,7 +773,7 @@ test "RC4: draw order — container with > 256 children: sort skipped, no crash"
 
     var scratch: [4096]u8 = undefined;
     layout_mod.solve(scene.store(), root_id,
-        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 4000 }, &scratch);
+        .{ .min_w = 0, .max_w = 800, .min_h = 0, .max_h = 4000 }, &scratch, 1.0);
 
     var atlas = try renderer_mod.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
@@ -779,6 +784,7 @@ test "RC4: draw order — container with > 256 children: sort skipped, no crash"
     // Must not crash or return an error.
     const cmds = try renderer_mod.buildDrawList(
         testing.allocator, &scene, &atlas, &img_atlas, &font, tok,
+        null, false, null,
     );
     defer testing.allocator.free(cmds);
 

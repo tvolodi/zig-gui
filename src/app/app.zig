@@ -247,6 +247,10 @@ pub const AppOptions = struct {
     /// Output path for the screenshot PNG (only used when screenshot_frames > 0).
     screenshot_out: []const u8 = "testdata/screenshot_actual.png",
 
+    // M13-03 RD2 — Subpixel glyph rendering.
+    /// Enable subpixel text rendering for font sizes 12–14 px.
+    subpixel_text: bool = false,
+
     // RA4 — Window state persistence.
     /// Enable automatic window state persistence.
     /// When true, AppInner.init restores the saved window state (if any) from
@@ -328,6 +332,16 @@ pub const AppInner = struct {
     font_family: FontFamily,
     atlas_cpu: GlyphAtlas,
     atlas_gpu: GpuAtlas,
+    /// M13-03 RD2 — Subpixel atlas (CPU-side RGBA8, GPU-side handle).
+    subpixel_atlas_cpu: mod09.SubpixelAtlas,
+    subpixel_atlas_gpu: GpuAtlas,
+    subpixel_atlas_generation_seen: u32,
+    subpixel_text: bool,
+
+    /// M13-04 RD3 — SDF icon atlas (CPU-side, GPU-side).
+    sdf_atlas_cpu: mod09.SdfAtlas,
+    sdf_atlas_gpu: mod09.GpuSdfAtlas,
+
     scene: Scene,
 
     // Pre-allocated draw-list (no per-frame heap alloc for the buffer itself).
@@ -420,6 +434,11 @@ pub const AppInner = struct {
     // R94 — Current font scale factor (1.0 = default).
     _font_scale: f32 = 1.0,
 
+    /// RD5: HiDPI display scale factor. Default 1.0 = standard DPI.
+    /// Read once at startup from the primary monitor's content scale via GLFW.
+    /// Passed to the layout engine and renderer each frame to multiply logical px values.
+    dpi_scale: f32 = 1.0,
+
     // RA2 — File logger (null when opts.log_path == null).
     file_logger: ?file_logger_mod.FileLogger = null,
 
@@ -460,7 +479,7 @@ pub const AppInner = struct {
         errdefer backend.deinit();
 
         // Step 3: initQuadPipeline.
-        try backend.initQuadPipeline(gpa);
+        try backend.initQuadPipeline();
         errdefer backend.deinitQuadPipeline();
 
         // Step 4: Load font bytes.
@@ -501,6 +520,38 @@ pub const AppInner = struct {
         );
         errdefer atlas_gpu.deinit(vk.device);
 
+        // Step 7b: M13-03 RD2 — Subpixel atlas (CPU-side RGBA8, initially 512×512).
+        var subpixel_atlas_cpu = try mod09.SubpixelAtlas.init(gpa, 512, 512);
+        errdefer subpixel_atlas_cpu.deinit();
+
+        // Upload initial empty subpixel atlas to GPU.
+        const subpixel_atlas_gpu_init = try GpuAtlas.uploadRgba8(
+            vk.device,
+            vk.phys_device,
+            vk.cmd_pool,
+            vk.graphics_queue,
+            subpixel_atlas_cpu.pixels(),
+            subpixel_atlas_cpu.width,
+            subpixel_atlas_cpu.height,
+        );
+        backend.updateSubpixelAtlas(&subpixel_atlas_gpu_init);
+
+        // Step 7c: M13-04 RD3 — SDF icon atlas (generate from built-in paths, upload to GPU).
+        var sdf_atlas_cpu = try mod09.SdfAtlas.init(gpa);
+        errdefer sdf_atlas_cpu.deinit(gpa);
+
+        const sdf_atlas_gpu_init = try mod09.GpuSdfAtlas.upload(
+            vk.device,
+            vk.phys_device,
+            vk.cmd_pool,
+            vk.graphics_queue,
+            &sdf_atlas_cpu,
+        );
+        {
+            const handles = sdf_atlas_gpu_init.asHandles();
+            backend.updateSdfAtlas(&handles);
+        }
+
         // Step 8: Scene.init.
         var scene = Scene.init(gpa);
         errdefer scene.deinit();
@@ -535,6 +586,12 @@ pub const AppInner = struct {
             .font_family = font_family,
             .atlas_cpu = atlas_cpu,
             .atlas_gpu = atlas_gpu,
+            .subpixel_atlas_cpu = subpixel_atlas_cpu,
+            .subpixel_atlas_gpu = subpixel_atlas_gpu_init,
+            .subpixel_atlas_generation_seen = subpixel_atlas_cpu.generation,
+            .subpixel_text = opts.subpixel_text,
+            .sdf_atlas_cpu = sdf_atlas_cpu,
+            .sdf_atlas_gpu = sdf_atlas_gpu_init,
             .scene = scene,
             .draw_list = draw_list,
             .viewport_constraints = viewport_constraints,
@@ -555,6 +612,9 @@ pub const AppInner = struct {
             ._current_palette = mod05.Palette.default(),
             ._current_mode = .light,
         };
+
+        // RD5: Read display content scale from the primary monitor.
+        self._readDpiScale();
 
         // Register GLFW event queue (R11).
         // setEventQueue stores the push function pointer so module 01 callbacks can call it
@@ -614,6 +674,14 @@ pub const AppInner = struct {
         self.double_click_threshold_ms = opts.double_click_threshold_ms;
 
         return self;
+    }
+
+    // -----------------------------------------------------------------------
+    // RD5 — Read display scale from the primary monitor
+    // -----------------------------------------------------------------------
+
+    fn _readDpiScale(self: *AppInner) void {
+        self.dpi_scale = self.platform.contentScale();
     }
 
     // -----------------------------------------------------------------------
@@ -698,6 +766,7 @@ pub const AppInner = struct {
 
             // Measure text (module 07).
             self.scene.font_family = &self.font_family;
+            self.scene.dpi_scale = self.dpi_scale;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
             // Re-upload GPU atlas if the CPU atlas changed (R10).
@@ -722,6 +791,31 @@ pub const AppInner = struct {
                 self.atlas_generation_seen = self.atlas_cpu.generation;
             }
 
+            // M13-03 RD2: Re-upload subpixel atlas if CPU atlas changed.
+            if (self.subpixel_text and self.subpixel_atlas_cpu.generation != self.subpixel_atlas_generation_seen) {
+                const vk = self.backend._impl_vulkan() catch {
+                    self.backend.endFrame();
+                    continue;
+                };
+                // Destroy old GPU subpixel atlas handles.
+                self.subpixel_atlas_gpu.deinit(vk.device);
+                const new_sp_gpu = GpuAtlas.uploadRgba8(
+                    vk.device,
+                    vk.phys_device,
+                    vk.cmd_pool,
+                    vk.graphics_queue,
+                    self.subpixel_atlas_cpu.pixels(),
+                    self.subpixel_atlas_cpu.width,
+                    self.subpixel_atlas_cpu.height,
+                ) catch {
+                    self.backend.endFrame();
+                    continue;
+                };
+                self.subpixel_atlas_gpu = new_sp_gpu;
+                self.backend.updateSubpixelAtlas(&self.subpixel_atlas_gpu);
+                self.subpixel_atlas_generation_seen = self.subpixel_atlas_cpu.generation;
+            }
+
             // Layout solve (module 04).
             const s = self.scene.store();
             if (s.live > 0) {
@@ -731,7 +825,7 @@ pub const AppInner = struct {
                     const id = mod04.ElementId{ .index = idx, .gen = s.gen.items[idx] };
                     if (!s.isValid(id)) continue;
                     if (s.parentOf(id) == null) {
-                        mod04.solve(s, id, self.viewport_constraints, self.scratch);
+                        mod04.solve(s, id, self.viewport_constraints, self.scratch, self.dpi_scale);
                         break;
                     }
                 }
@@ -757,6 +851,9 @@ pub const AppInner = struct {
                 &self.image_atlas,
                 self.font_family.face(false, false),
                 self.tokens,
+                &self.subpixel_atlas_cpu,
+                self.subpixel_text,
+                &self.sdf_atlas_cpu,
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
@@ -939,6 +1036,7 @@ pub const AppInner = struct {
             self.scene.frame_time_ms = self.frame_time_ms;
 
             self.scene.font_family = &self.font_family;
+            self.scene.dpi_scale = self.dpi_scale;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
             if (self.atlas_cpu.generation != self.atlas_generation_seen) {
@@ -961,6 +1059,30 @@ pub const AppInner = struct {
                 self.atlas_generation_seen = self.atlas_cpu.generation;
             }
 
+            // M13-03 RD2: Re-upload subpixel atlas if CPU atlas changed.
+            if (self.subpixel_text and self.subpixel_atlas_cpu.generation != self.subpixel_atlas_generation_seen) {
+                const vk = self.backend._impl_vulkan() catch {
+                    self.backend.endFrame();
+                    continue;
+                };
+                self.subpixel_atlas_gpu.deinit(vk.device);
+                const new_sp_gpu = GpuAtlas.uploadRgba8(
+                    vk.device,
+                    vk.phys_device,
+                    vk.cmd_pool,
+                    vk.graphics_queue,
+                    self.subpixel_atlas_cpu.pixels(),
+                    self.subpixel_atlas_cpu.width,
+                    self.subpixel_atlas_cpu.height,
+                ) catch {
+                    self.backend.endFrame();
+                    continue;
+                };
+                self.subpixel_atlas_gpu = new_sp_gpu;
+                self.backend.updateSubpixelAtlas(&self.subpixel_atlas_gpu);
+                self.subpixel_atlas_generation_seen = self.subpixel_atlas_cpu.generation;
+            }
+
             const s = self.scene.store();
             if (s.live > 0) {
                 var idx: u32 = 0;
@@ -968,7 +1090,7 @@ pub const AppInner = struct {
                     const id = mod04.ElementId{ .index = idx, .gen = s.gen.items[idx] };
                     if (!s.isValid(id)) continue;
                     if (s.parentOf(id) == null) {
-                        mod04.solve(s, id, self.viewport_constraints, self.scratch);
+                        mod04.solve(s, id, self.viewport_constraints, self.scratch, self.dpi_scale);
                         break;
                     }
                 }
@@ -991,6 +1113,9 @@ pub const AppInner = struct {
                 &self.image_atlas,
                 self.font_family.face(false, false),
                 self.tokens,
+                &self.subpixel_atlas_cpu,
+                self.subpixel_text,
+                &self.sdf_atlas_cpu,
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
@@ -1129,6 +1254,10 @@ pub const AppInner = struct {
         }
         // 3. atlas_cpu
         self.atlas_cpu.deinit();
+        // 3b. M13-03 RD2: subpixel atlas CPU (GPU handles owned by VulkanImpl → deinitQuadPipeline).
+        self.subpixel_atlas_cpu.deinit();
+        // 3c. M13-04 RD3: SDF atlas CPU (GPU handles owned by VulkanImpl → deinitQuadPipeline).
+        self.sdf_atlas_cpu.deinit(self.gpa);
         // 4. font_family (R60)
         self.font_family.deinit();
         // 5. scratch
@@ -1297,6 +1426,7 @@ pub const AppInner = struct {
 
         // 5. Re-run measure pass.
         self.scene.font_family = &self.font_family;
+        self.scene.dpi_scale = self.dpi_scale;
         self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
         // 6. Mark all elements dirty so the next frame paints the new tree.

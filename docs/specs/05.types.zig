@@ -321,6 +321,8 @@ pub const ComputedStyle = struct {
     /// R60 — bold/italic font variant flags.
     font_bold: bool = false,
     font_italic: bool = false,
+    /// M13-01 RD0 — gradient direction (0=none, 1=right, 2=bottom, 3=bottom_right).
+    gradient_direction: u32 = 0,
 };
 
 // ---------------------------------------------------------------------------

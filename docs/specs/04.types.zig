@@ -41,15 +41,21 @@ pub const Position = store.Position;
 /// `scratch` is a caller-owned reusable buffer (typically arena-backed). solve() must NOT
 /// allocate per-node; it may only use `scratch`. See spec.md "Performance intent".
 ///
+/// `dpi_scale` is the HiDPI display scale factor from the primary monitor (default 1.0).
+/// All explicit px values (width, height, padding, margin, gap, insets) are multiplied by
+/// `dpi_scale` and rounded to the nearest integer pixel so the layout engine operates in
+/// physical pixels.
+///
 /// Children are resolved via `store.childrenOf(id)` (module 03).
 pub fn solve(
     s: *ElementStore,
     root: ElementId,
     available: Constraints,
     scratch: []u8,
+    dpi_scale: f32,
 ) void {
     _ = scratch; // scratch is available if needed for iterative traversal
-    _ = solveNode(s, root, available, 0.0, 0.0);
+    _ = solveNode(s, root, available, 0.0, 0.0, dpi_scale);
 }
 
 // ---------------------------------------------------------------------------
@@ -59,9 +65,9 @@ pub fn solve(
 /// Resolve a Dimension value to a concrete pixel size.
 /// parent_size is the available parent content-box size on this axis.
 /// constraint_min / constraint_max clamp the result.
-fn resolveDimension(dim: Dimension, parent_size: f32, constraint_min: f32, constraint_max: f32) f32 {
+fn resolveDimension(dim: Dimension, parent_size: f32, constraint_min: f32, constraint_max: f32, dpi_scale: f32) f32 {
     const raw: f32 = switch (dim) {
-        .px => |v| v,
+        .px => |v| @round(v * dpi_scale),
         .percent => |v| parent_size * (v / 100.0),
         .auto => 0.0,
     };
@@ -69,14 +75,14 @@ fn resolveDimension(dim: Dimension, parent_size: f32, constraint_min: f32, const
 }
 
 /// Resolve a node's own width given available constraints and parent content width.
-fn resolveWidth(node: *const LayoutNode, avail: Constraints, parent_w: f32) f32 {
-    const v = resolveDimension(node.width, parent_w, avail.min_w, avail.max_w);
+fn resolveWidth(node: *const LayoutNode, avail: Constraints, parent_w: f32, dpi_scale: f32) f32 {
+    const v = resolveDimension(node.width, parent_w, avail.min_w, avail.max_w, dpi_scale);
     return std.math.clamp(v, node.min_size.w, node.max_size.w);
 }
 
 /// Resolve a node's own height given available constraints and parent content height.
-fn resolveHeight(node: *const LayoutNode, avail: Constraints, parent_h: f32) f32 {
-    const v = resolveDimension(node.height, parent_h, avail.min_h, avail.max_h);
+fn resolveHeight(node: *const LayoutNode, avail: Constraints, parent_h: f32, dpi_scale: f32) f32 {
+    const v = resolveDimension(node.height, parent_h, avail.min_h, avail.max_h, dpi_scale);
     return std.math.clamp(v, node.min_size.h, node.max_size.h);
 }
 
@@ -92,6 +98,7 @@ fn solveNode(
     avail: Constraints,
     origin_x: f32,
     origin_y: f32,
+    dpi_scale: f32,
 ) Size {
     // R51: display = .none → zero rect, skip children entirely.
     if (s.get(id).display == .none) {
@@ -100,8 +107,8 @@ fn solveNode(
     }
 
     // Resolve node's own size
-    const node_w = resolveWidth(s.get(id), avail, avail.max_w);
-    const node_h_raw = resolveHeight(s.get(id), avail, avail.max_h);
+    const node_w = resolveWidth(s.get(id), avail, avail.max_w, dpi_scale);
+    const node_h_raw = resolveHeight(s.get(id), avail, avail.max_h, dpi_scale);
     // For block elements with height=auto (resolves to 0), use measured height as
     // the intrinsic size so Text/Button nodes get their natural content height.
     const node_h_pre_ar = blk: {
@@ -127,9 +134,9 @@ fn solveNode(
     // Determine display type and lay out children
     const disp = s.get(id).display;
     const result: Size = switch (disp) {
-        .block => solveBlock(s, id, w, h, origin_x, origin_y, avail),
-        .flex => solveFlex(s, id, w, h, origin_x, origin_y, avail),
-        .grid => solveGrid(s, id, w, h, origin_x, origin_y, avail),
+        .block => solveBlock(s, id, w, h, origin_x, origin_y, avail, dpi_scale),
+        .flex => solveFlex(s, id, w, h, origin_x, origin_y, avail, dpi_scale),
+        .grid => solveGrid(s, id, w, h, origin_x, origin_y, avail, dpi_scale),
         .none => unreachable, // handled above
     };
 
@@ -149,10 +156,10 @@ fn solveNode(
 // ---------------------------------------------------------------------------
 
 /// Resolve a MarginValue to a concrete pixel amount (auto → 0 here; auto is handled specially).
-fn resolveMarginPx(mv: MarginValue) f32 {
+fn resolveMarginPx(mv: MarginValue, dpi_scale: f32) f32 {
     return switch (mv) {
         .zero => 0.0,
-        .px => |v| v,
+        .px => |v| @round(v * dpi_scale),
         .auto => 0.0,
     };
 }
@@ -165,9 +172,16 @@ fn solveBlock(
     origin_x: f32,
     origin_y: f32,
     avail: Constraints,
+    dpi_scale: f32,
 ) Size {
     _ = avail;
-    const padding = s.get(id).padding;
+    const padding_raw = s.get(id).padding;
+    const padding = Insets{
+        .top = @round(padding_raw.top * dpi_scale),
+        .right = @round(padding_raw.right * dpi_scale),
+        .bottom = @round(padding_raw.bottom * dpi_scale),
+        .left = @round(padding_raw.left * dpi_scale),
+    };
     const content_w = @max(0.0, container_w - padding.left - padding.right);
 
     var cursor_y: f32 = origin_y + padding.top;
@@ -184,10 +198,10 @@ fn solveBlock(
         const child_margin = child.margin;
 
         // R51: margin.px — subtract from available width
-        const margin_left_px = resolveMarginPx(child_margin.left);
-        const margin_right_px = resolveMarginPx(child_margin.right);
-        const margin_top_px = resolveMarginPx(child_margin.top);
-        const margin_bottom_px = resolveMarginPx(child_margin.bottom);
+        const margin_left_px = resolveMarginPx(child_margin.left, dpi_scale);
+        const margin_right_px = resolveMarginPx(child_margin.right, dpi_scale);
+        const margin_top_px = resolveMarginPx(child_margin.top, dpi_scale);
+        const margin_bottom_px = resolveMarginPx(child_margin.bottom, dpi_scale);
 
         // Available width for the child after its own margins
         const child_content_w = @max(0.0, content_w - margin_left_px - margin_right_px);
@@ -206,7 +220,7 @@ fn solveBlock(
         const child_offset_x = blk: {
             if (child_margin.left == .auto and child_margin.right == .auto) {
                 // mx-auto: resolve child width first without placing
-                const cw = resolveWidth(s.get(child_id), child_avail, child_content_w);
+                const cw = resolveWidth(s.get(child_id), child_avail, child_content_w, dpi_scale);
                 break :blk (content_w - cw) / 2.0;
             } else {
                 break :blk margin_left_px;
@@ -217,6 +231,7 @@ fn solveBlock(
             s, child_id, child_avail,
             origin_x + padding.left + child_offset_x,
             cursor_y + margin_top_px,
+            dpi_scale,
         );
         cursor_y += child_size.h + margin_top_px + margin_bottom_px;
         total_content_h += child_size.h + margin_top_px + margin_bottom_px;
@@ -229,7 +244,7 @@ fn solveBlock(
     s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = container_w, .h = actual_h };
 
     // M12 RC0: Second pass — place absolutely-positioned children.
-    placeAbsoluteChildren(s, id, origin_x, origin_y, container_w, actual_h);
+    placeAbsoluteChildren(s, id, origin_x, origin_y, container_w, actual_h, dpi_scale);
 
     return Size{ .w = container_w, .h = actual_h };
 }
@@ -243,6 +258,7 @@ fn placeAbsoluteChildren(
     cb_y: f32,
     cb_w: f32,
     cb_h: f32,
+    dpi_scale: f32,
 ) void {
     var it = s.childrenOf(id);
     while (it.next()) |child_id| {
@@ -250,11 +266,11 @@ fn placeAbsoluteChildren(
 
         const child = s.get(child_id);
 
-        // Resolve insets (.auto → 0 as unset).
-        const inset_left:   f32 = switch (child.inset_left)   { .px => |v| v, else => 0 };
-        const inset_right:  f32 = switch (child.inset_right)  { .px => |v| v, else => 0 };
-        const inset_top:    f32 = switch (child.inset_top)    { .px => |v| v, else => 0 };
-        const inset_bottom: f32 = switch (child.inset_bottom) { .px => |v| v, else => 0 };
+        // Resolve insets (.auto → 0 as unset).  Multiply px values by dpi_scale.
+        const inset_left:   f32 = switch (child.inset_left)   { .px => |v| @round(v * dpi_scale), else => 0 };
+        const inset_right:  f32 = switch (child.inset_right)  { .px => |v| @round(v * dpi_scale), else => 0 };
+        const inset_top:    f32 = switch (child.inset_top)    { .px => |v| @round(v * dpi_scale), else => 0 };
+        const inset_bottom: f32 = switch (child.inset_bottom) { .px => |v| @round(v * dpi_scale), else => 0 };
 
         const left_set  = child.inset_left  != .auto;
         const right_set = child.inset_right != .auto;
@@ -263,7 +279,7 @@ fn placeAbsoluteChildren(
 
         // Resolve width
         const child_w: f32 = switch (child.width) {
-            .px => |v| v,
+            .px => |v| @round(v * dpi_scale),
             .percent => |v| cb_w * (v / 100.0),
             .auto => if (left_set and right_set)
                 @max(0.0, cb_w - inset_left - inset_right)
@@ -273,7 +289,7 @@ fn placeAbsoluteChildren(
 
         // Resolve height
         const child_h: f32 = switch (child.height) {
-            .px => |v| v,
+            .px => |v| @round(v * dpi_scale),
             .percent => |v| cb_h * (v / 100.0),
             .auto => if (top_set and bottom_set)
                 @max(0.0, cb_h - inset_top - inset_bottom)
@@ -303,7 +319,7 @@ fn placeAbsoluteChildren(
             .max_h = child_h,
         };
 
-        _ = solveNode(s, child_id, child_avail, child_x, child_y);
+        _ = solveNode(s, child_id, child_avail, child_x, child_y, dpi_scale);
     }
 }
 
@@ -330,12 +346,19 @@ fn solveFlex(
     origin_x: f32,
     origin_y: f32,
     avail: Constraints,
+    dpi_scale: f32,
 ) Size {
     _ = avail;
     const node = s.get(id);
-    const padding = node.padding;
+    const padding_raw = node.padding;
+    const padding = Insets{
+        .top = @round(padding_raw.top * dpi_scale),
+        .right = @round(padding_raw.right * dpi_scale),
+        .bottom = @round(padding_raw.bottom * dpi_scale),
+        .left = @round(padding_raw.left * dpi_scale),
+    };
     const direction = node.direction;
-    const gap = node.gap;
+    const gap = @round(node.gap * dpi_scale);
     const justify = node.justify_content;
     const align_items_val = node.align_items;
     const do_wrap = node.flex_wrap and direction == .row; // RC2: wrap only for row direction
@@ -364,20 +387,20 @@ fn solveFlex(
 
             // Resolve flex_basis on main axis
             var base: f32 = switch (flex_basis) {
-                .px => |v| v,
+                .px => |v| @round(v * dpi_scale),
                 .percent => |v| main_size * (v / 100.0),
                 .auto => blk: {
                     // Fall back to declared width (row) or height (column).
                     // When the declared dimension is also auto, use measured intrinsic size.
                     const dim = if (direction == .row) child.width else child.height;
                     break :blk switch (dim) {
-                        .px => |v| v,
+                        .px => |v| @round(v * dpi_scale),
                         .percent => |v| main_size * (v / 100.0),
                         .auto => if (child.measured) |m|
                             if (direction == .row)
-                                m.w + child.padding.left + child.padding.right
+                                m.w + @round(child.padding.left * dpi_scale) + @round(child.padding.right * dpi_scale)
                             else
-                                m.h + child.padding.top + child.padding.bottom
+                                m.h + @round(child.padding.top * dpi_scale) + @round(child.padding.bottom * dpi_scale)
                         else
                             0.0,
                     };
@@ -393,14 +416,14 @@ fn solveFlex(
             var cross: f32 = if (direction == .row) blk: {
                 // For row, cross is height
                 break :blk switch (child.height) {
-                    .px => |v| v,
+                    .px => |v| @round(v * dpi_scale),
                     .percent => |v| cross_size * (v / 100.0),
                     .auto => if (child.measured) |m| m.h else 0.0,
                 };
             } else blk: {
                 // For column, cross is width
                 break :blk switch (child.width) {
-                    .px => |v| v,
+                    .px => |v| @round(v * dpi_scale),
                     .percent => |v| cross_size * (v / 100.0),
                     .auto => if (child.measured) |m| m.w else 0.0,
                 };
@@ -492,10 +515,10 @@ fn solveFlex(
 
     // M12 RC2: flex-wrap path (row direction only).
     if (do_wrap) {
-        const actual_size = solveFlexWrap(s, id, children, n, container_w, container_h, origin_x, origin_y, padding, gap, align_items_val, justify, main_size, cross_size);
+        const actual_size = solveFlexWrap(s, id, children, n, container_w, container_h, origin_x, origin_y, padding, gap, align_items_val, justify, main_size, cross_size, dpi_scale);
         // Write container rect before absolute second pass.
         s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = actual_size.w, .h = actual_size.h };
-        placeAbsoluteChildren(s, id, origin_x, origin_y, actual_size.w, actual_size.h);
+        placeAbsoluteChildren(s, id, origin_x, origin_y, actual_size.w, actual_size.h, dpi_scale);
         return actual_size;
     }
 
@@ -601,7 +624,7 @@ fn solveFlex(
             };
 
         // Recurse into child (lay out its subtree)
-        const child_size = solveNode(s, c.id, child_avail, child_x, child_y);
+        const child_size = solveNode(s, c.id, child_avail, child_x, child_y, dpi_scale);
 
         // Track actual cross-axis extent for auto-sized containers.
         const child_cross_actual = if (direction == .row) child_size.h else child_size.w;
@@ -637,7 +660,7 @@ fn solveFlex(
 
     // Write container rect before absolute second pass.
     s.get(id).computed = Rect{ .x = origin_x, .y = origin_y, .w = actual_w, .h = actual_h };
-    placeAbsoluteChildren(s, id, origin_x, origin_y, actual_w, actual_h);
+    placeAbsoluteChildren(s, id, origin_x, origin_y, actual_w, actual_h, dpi_scale);
 
     return Size{ .w = actual_w, .h = actual_h };
 }
@@ -666,6 +689,7 @@ fn solveFlexWrap(
     justify: JustifyContent,
     main_size: f32,
     cross_size: f32,
+    dpi_scale: f32,
 ) Size {
     _ = id;         // container id not needed; children addressed by their own ids
     _ = cross_size; // row wrap: cross is height; handled via lines
@@ -759,7 +783,7 @@ fn solveFlexWrap(
                 .min_h = if (effective_align == .stretch) child_cross_sz else 0.0,
                 .max_h = if (effective_align == .stretch) child_cross_sz else std.math.inf(f32),
             };
-            _ = solveNode(s, c.id, child_avail, cursor_x, cursor_y + child_y_offset);
+            _ = solveNode(s, c.id, child_avail, cursor_x, cursor_y + child_y_offset, dpi_scale);
             cursor_x += c.final_size + gap;
         }
 
@@ -790,11 +814,18 @@ fn solveGrid(
     origin_x: f32,
     origin_y: f32,
     avail: Constraints,
+    dpi_scale: f32,
 ) Size {
     _ = avail;
     const node = s.get(id);
-    const padding = node.padding;
-    const gap = node.gap;
+    const padding_raw = node.padding;
+    const padding = Insets{
+        .top = @round(padding_raw.top * dpi_scale),
+        .right = @round(padding_raw.right * dpi_scale),
+        .bottom = @round(padding_raw.bottom * dpi_scale),
+        .left = @round(padding_raw.left * dpi_scale),
+    };
+    const gap = @round(node.gap * dpi_scale);
     const cols = node.grid_template_columns;
     const rows = node.grid_template_rows;
 
@@ -815,10 +846,10 @@ fn solveGrid(
     const nc = @min(n_cols, MAX_TRACKS);
     const nr = @min(n_rows, MAX_TRACKS);
 
-    resolveTrackSizes(cols[0..nc], content_w, gap, col_widths_buf[0..nc]);
+    resolveTrackSizes(cols[0..nc], content_w, gap, col_widths_buf[0..nc], dpi_scale);
     resolveTrackStarts(col_widths_buf[0..nc], gap, col_starts_buf[0..nc]);
 
-    resolveTrackSizes(rows[0..nr], content_h, gap, row_heights_buf[0..nr]);
+    resolveTrackSizes(rows[0..nr], content_h, gap, row_heights_buf[0..nr], dpi_scale);
     resolveTrackStarts(row_heights_buf[0..nr], gap, row_starts_buf[0..nr]);
 
     // --- Auto-place children row-major ---
@@ -878,7 +909,7 @@ fn solveGrid(
             .max_h = child_h,
         };
 
-        _ = solveNode(s, child_id, child_avail, child_x, child_y);
+        _ = solveNode(s, child_id, child_avail, child_x, child_y, dpi_scale);
 
         // Advance column cursor
         col_cursor += col_span;
@@ -893,7 +924,7 @@ fn solveGrid(
 
 /// Resolve track sizes (px, fr, auto) into concrete pixel widths.
 /// Uses cumulative rounding for fr tracks to avoid drift.
-fn resolveTrackSizes(tracks: []const TrackSize, available: f32, gap: f32, out: []f32) void {
+fn resolveTrackSizes(tracks: []const TrackSize, available: f32, gap: f32, out: []f32, dpi_scale: f32) void {
     const n = tracks.len;
     if (n == 0) return;
 
@@ -902,7 +933,7 @@ fn resolveTrackSizes(tracks: []const TrackSize, available: f32, gap: f32, out: [
     var fr_total: f32 = 0.0;
     for (tracks) |t| {
         switch (t) {
-            .px => |v| px_sum += v,
+            .px => |v| px_sum += @round(v * dpi_scale),
             .fr => |v| fr_total += v,
             .auto => {},
         }
@@ -914,7 +945,7 @@ fn resolveTrackSizes(tracks: []const TrackSize, available: f32, gap: f32, out: [
     // First pass: assign px and auto tracks
     for (tracks, 0..) |t, i| {
         out[i] = switch (t) {
-            .px => |v| v,
+            .px => |v| @round(v * dpi_scale),
             .fr => 0.0, // placeholder
             .auto => 0.0,
         };
