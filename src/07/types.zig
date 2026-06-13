@@ -649,6 +649,31 @@ pub const Scene = struct {
             self.elements.layout.items[i].measured = .{ .w = para.extent.w, .h = para.extent.h };
         }
 
+        // Pre-warm digits 0–9 at every font size present in the scene so that text nodes
+        // updated via setText (e.g. counters) render immediately without waiting for a
+        // hover/redraw to trigger late rasterization.
+        {
+            const digits = "0123456789";
+            // Collect unique font sizes (scene rarely has more than ~8 distinct sizes).
+            var sizes: [16]f32 = undefined;
+            var size_count: usize = 0;
+            for (self._style.items) |style| {
+                const sz = style.font_size;
+                if (sz <= 0) continue;
+                var found = false;
+                for (sizes[0..size_count]) |s| { if (s == sz) { found = true; break; } }
+                if (!found and size_count < sizes.len) {
+                    sizes[size_count] = sz;
+                    size_count += 1;
+                }
+            }
+            for (sizes[0..size_count]) |sz| {
+                const f = if (self.font_family) |fam| fam.face(false, false) else font;
+                const para = try text.layoutParagraphEx(self.gpa, f, atlas, digits, sz, 1e6, self.font_family);
+                defer self.gpa.free(para.glyphs);
+            }
+        }
+
         // Rasterize data_table column headers and first-row cell text so their glyphs
         // are in the atlas before buildDrawList calls emitGlyphs on them directly.
         for (self._table_state.items, 0..) |*ts, i| {
