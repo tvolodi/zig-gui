@@ -8,6 +8,7 @@ const Scene = mod07.Scene;
 const Tokens = mod05.Tokens;
 const NodeDesc = mod06.NodeDesc;
 const Attr = mod06.Attr;
+const CallbackFn = mod07.CallbackFn;
 
 const shared = @import("../shared/types.zig");
 const sidebar = @import("../shared/sidebar.zig");
@@ -15,6 +16,28 @@ const sidebar = @import("../shared/sidebar.zig");
 pub const LayoutCtx = struct {
     global: *shared.GlobalState,
 };
+
+// ---------------------------------------------------------------------------
+// flex-1 toggle callbacks for section 7b
+// ---------------------------------------------------------------------------
+
+const FlexCb = struct {
+    scene:       *Scene,
+    checkbox_idx: u32,
+    card_idx:    u32,
+
+    pub fn onChange(ptr: *anyopaque) void {
+        const self: *FlexCb = @ptrCast(@alignCast(ptr));
+        const checked = self.scene.isCheckboxChecked(self.checkbox_idx);
+        self.scene.elements.layout.items[self.card_idx].flex_grow = if (checked) 1 else 0;
+        if (self.card_idx < self.scene.elements.dirty.bit_length)
+            self.scene.elements.dirty.set(self.card_idx);
+    }
+};
+
+var _cb_flex1: FlexCb = undefined;
+var _cb_flex2: FlexCb = undefined;
+var _cb_flex3: FlexCb = undefined;
 
 pub fn build(
     scene: *Scene,
@@ -51,17 +74,29 @@ pub fn build(
     const flex_sect = NodeDesc{ .tag = "Column", .classes = "gap-2", .children = &flex_sect_children };
 
     // -----------------------------------------------------------------------
-    // 7b. Flex column with middle grow
+    // 7b. Flex column with middle grow — checkboxes toggle flex-1 per row
     // -----------------------------------------------------------------------
-    const grow_h_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "flex-1 \xe2\x80\x94 middle box fills remaining height" } }};
+    const grow_h_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "flex-1 \xe2\x80\x94 toggle flex-1 per row" } }};
     const grow_h = NodeDesc{ .tag = "Text", .classes = "font-bold", .attrs = &grow_h_attrs };
-    const gi1_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Fixed" } }};
-    const gi2_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "flex-1 (grows)" } }};
-    const gi3_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Fixed" } }};
-    const gi1 = NodeDesc{ .tag = "Card", .classes = "p-2 bg-raised",        .attrs = &gi1_attrs };
-    const gi2 = NodeDesc{ .tag = "Card", .classes = "flex-1 p-2 bg-raised", .attrs = &gi2_attrs };
-    const gi3 = NodeDesc{ .tag = "Card", .classes = "p-2 bg-raised",        .attrs = &gi3_attrs };
-    const grow_col_children = [3]NodeDesc{ gi1, gi2, gi3 };
+    const gi1_attrs  = [1]Attr{.{ .name = "text",  .value = .{ .literal = "Fixed" } }};
+    const gi2_attrs  = [1]Attr{.{ .name = "text",  .value = .{ .literal = "flex-1 (grows)" } }};
+    const gi3_attrs  = [1]Attr{.{ .name = "text",  .value = .{ .literal = "Fixed" } }};
+    const gcb1_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
+    const gcb2_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
+    const gcb3_attrs = [1]Attr{.{ .name = "label", .value = .{ .literal = "flex-1" } }};
+    const gi1  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi1_attrs  };
+    const gcb1 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb1_attrs };
+    const gi2  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi2_attrs  };
+    const gcb2 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb2_attrs };
+    const gi3  = NodeDesc{ .tag = "Card",     .classes = "flex-1 p-2 bg-raised", .attrs = &gi3_attrs  };
+    const gcb3 = NodeDesc{ .tag = "Checkbox", .classes = "self-center",          .attrs = &gcb3_attrs };
+    const grow_row1_children = [2]NodeDesc{ gi1,  gcb1 };
+    const grow_row2_children = [2]NodeDesc{ gi2,  gcb2 };
+    const grow_row3_children = [2]NodeDesc{ gi3,  gcb3 };
+    const grow_row1 = NodeDesc{ .tag = "Row", .classes = "gap-2 items-stretch", .children = &grow_row1_children };
+    const grow_row2 = NodeDesc{ .tag = "Row", .classes = "gap-2 items-stretch", .children = &grow_row2_children };
+    const grow_row3 = NodeDesc{ .tag = "Row", .classes = "gap-2 items-stretch", .children = &grow_row3_children };
+    const grow_col_children = [3]NodeDesc{ grow_row1, grow_row2, grow_row3 };
     const grow_col = NodeDesc{ .tag = "Column", .classes = "gap-2 h-32", .children = &grow_col_children };
     const grow_sect_children = [2]NodeDesc{ grow_h, grow_col };
     const grow_sect = NodeDesc{ .tag = "Column", .classes = "gap-2", .children = &grow_sect_children };
@@ -170,4 +205,30 @@ pub fn build(
 
     _ = try scene.instantiate(root, tokens);
     try shared.wireSidebarCallbacks(scene, c.global, tokens, 8); // 8 = Layout button
+
+    // DFS: 0=root, 1=sidebar, 2-9=sidebar btns, 10=content, 11=heading, 12=sep, 13=scroll,
+    //   14=inner-col, 15=body, 16=flex_sect, 17=flex_h, 18=flex_row, 19-23=A-E,
+    //   24=Separator, 25=grow_sect, 26=grow_h, 27=grow_col,
+    //   28=grow_row1, 29=gi1, 30=gcb1,
+    //   31=grow_row2, 32=gi2, 33=gcb2,
+    //   34=grow_row3, 35=gi3, 36=gcb3
+    const gi1_idx:  u32 = 29;
+    const gcb1_idx: u32 = 30;
+    const gi2_idx:  u32 = 32;
+    const gcb2_idx: u32 = 33;
+    const gi3_idx:  u32 = 35;
+    const gcb3_idx: u32 = 36;
+
+    // Start: only middle row has flex-1; clear grow on rows 1 and 3.
+    scene.elements.layout.items[gi1_idx].flex_grow = 0;
+    scene.elements.layout.items[gi3_idx].flex_grow = 0;
+    scene.setCheckboxChecked(gcb2_idx, true);
+
+    _cb_flex1 = FlexCb{ .scene = scene, .checkbox_idx = gcb1_idx, .card_idx = gi1_idx };
+    _cb_flex2 = FlexCb{ .scene = scene, .checkbox_idx = gcb2_idx, .card_idx = gi2_idx };
+    _cb_flex3 = FlexCb{ .scene = scene, .checkbox_idx = gcb3_idx, .card_idx = gi3_idx };
+
+    try scene.setCheckboxCallback(gcb1_idx, CallbackFn{ .ptr = &_cb_flex1, .call = FlexCb.onChange });
+    try scene.setCheckboxCallback(gcb2_idx, CallbackFn{ .ptr = &_cb_flex2, .call = FlexCb.onChange });
+    try scene.setCheckboxCallback(gcb3_idx, CallbackFn{ .ptr = &_cb_flex3, .call = FlexCb.onChange });
 }

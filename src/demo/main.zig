@@ -28,6 +28,41 @@ fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
     theme_screen.tick(scene);
 }
 
+// Module-level toast manager pointer — set in main() so the per-frame tick can reach it.
+var _g_toasts: ?*ToastManager = null;
+
+/// Per-frame app-level tick: update toast expiry, tooltip visibility, and rebuild overlay slots.
+fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
+    const fb = ai.platform.framebufferSize();
+    const w = @as(f32, @floatFromInt(fb.width));
+    const h = @as(f32, @floatFromInt(fb.height));
+
+    if (_g_toasts) |tm| {
+        tm.tick(
+            ai.frame_time_ms,
+            w,
+            h,
+            ai.tokens,
+            ai.font_family.face(false, false),
+            &ai.atlas_cpu,
+            &ai.overlay,
+            ai.gpa,
+        ) catch {};
+    }
+
+    ai.tooltip_manager.tick(
+        ai.frame_time_ms,
+        ai.last_cursor_x,
+        ai.last_cursor_y,
+        w,
+        ai.tokens,
+        ai.font_family.face(false, false),
+        &ai.atlas_cpu,
+        &ai.overlay,
+        ai.gpa,
+    ) catch {};
+}
+
 pub fn main(init: std.process.Init) !void {
     var gpa_impl = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa_impl.deinit();
@@ -69,10 +104,16 @@ pub fn main(init: std.process.Init) !void {
 
     // ToastManager needs the overlay layer from AppInner.
     var toasts = ToastManager.init(&app._inner.overlay);
+    defer toasts.deinit(gpa);
 
     // Per-frame tick: update slider readouts on forms and theme screens.
     // Each tick function guards against wrong-screen via kindOfIdx checks.
     app._inner.per_frame_fn = combinedTick;
+
+    // Wire toast expiry/render tick. Runs every frame before overlay flatten.
+    _g_toasts = &toasts;
+    app._inner.per_frame_app_fn = toastAppTick;
+    defer { _g_toasts = null; app._inner.per_frame_app_fn = null; }
 
     var nav = Navigator.init(gpa);
     defer nav.deinit();

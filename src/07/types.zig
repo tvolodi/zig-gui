@@ -669,6 +669,12 @@ pub const Scene = struct {
                 const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, ascii_chars, 13.0, 1e6, self.font_family);
                 defer self.gpa.free(para.glyphs);
             }
+            // Warm sort indicator glyphs ▲▼ at 10px.
+            {
+                const indicators = "\xe2\x96\xb2\xe2\x96\xbc";
+                const para = try text.layoutParagraphEx(self.gpa, tbl_font, atlas, indicators, 10.0, 1e6, self.font_family);
+                defer self.gpa.free(para.glyphs);
+            }
         }
 
         // Rasterize dropdown option labels so their glyphs are in the atlas before

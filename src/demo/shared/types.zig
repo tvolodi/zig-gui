@@ -101,12 +101,15 @@ pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens,
             .ptr = p.cb,
             .call = SidebarCb.onClick,
         });
+        // Inactive buttons: transparent background with muted text so active stands out.
+        if (p.idx != active_btn_idx and p.idx < scene._style.items.len) {
+            scene._style.items[p.idx].background = tokens.bg_surface;
+            scene._style.items[p.idx].text_color = tokens.text_body;
+        }
     }
-    // Bug 4 fix: highlight the active sidebar button with accent colors.
+    // Active button: accent background + accent text.
     if (active_btn_idx >= 2 and active_btn_idx <= 9 and active_btn_idx < scene._style.items.len) {
-        var active_style = scene._style.items[active_btn_idx];
-        active_style.background = tokens.accent;
-        active_style.text_color = tokens.accent_text;
-        scene._style.items[active_btn_idx] = active_style;
+        scene._style.items[active_btn_idx].background = tokens.accent;
+        scene._style.items[active_btn_idx].text_color = tokens.accent_text;
     }
 }

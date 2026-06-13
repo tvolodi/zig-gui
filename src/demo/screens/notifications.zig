@@ -1,5 +1,6 @@
 //! notifications.zig — Toast, dialog, and tooltip showcase screen (Screen 6).
 
+const std = @import("std");
 const mod07 = @import("../07/types.zig");
 const mod05 = @import("../05/types.zig");
 const mod06 = @import("../06/types.zig");
@@ -56,6 +57,59 @@ const FloodCb = struct {
     }
 };
 var _cb_flood_all: FloodCb = undefined;
+
+// ---------------------------------------------------------------------------
+// Inline feedback widget callbacks
+// ---------------------------------------------------------------------------
+
+// Progress steps: 0.0 → 0.25 → 0.50 → 0.75 → 1.0 → indeterminate → 0.0
+var _pb_step: u32 = 0;
+var _pb_lbl_buf: [32]u8 = undefined;
+
+const ProgressCb = struct {
+    scene:   *Scene,
+    pb_idx:  u32,
+    lbl_idx: u32,
+
+    pub fn onClick(ptr: *anyopaque) void {
+        const self: *ProgressCb = @ptrCast(@alignCast(ptr));
+        _pb_step = (_pb_step + 1) % 6;
+        const ps = self.scene.progressStateOf(self.pb_idx);
+        if (_pb_step == 5) {
+            ps.indeterminate = true;
+            self.scene.setText(self.lbl_idx, "ProgressBar (indeterminate):");
+        } else {
+            ps.indeterminate = false;
+            const v: f32 = @as(f32, @floatFromInt(_pb_step)) * 0.25;
+            self.scene.setProgress(self.pb_idx, v);
+            const pct: u32 = @intFromFloat(v * 100.0);
+            const s = std.fmt.bufPrint(&_pb_lbl_buf, "ProgressBar ({d}%):", .{pct}) catch return;
+            self.scene.setText(self.lbl_idx, s);
+        }
+        if (self.lbl_idx < self.scene.elements.dirty.bit_length)
+            self.scene.elements.dirty.set(self.lbl_idx);
+    }
+};
+var _cb_progress: ProgressCb = undefined;
+
+var _badge_count: u32 = 42;
+var _badge_buf: [8]u8 = undefined;
+
+const BadgeCb = struct {
+    scene:     *Scene,
+    badge_idx: u32,
+
+    pub fn onClick(ptr: *anyopaque) void {
+        const self: *BadgeCb = @ptrCast(@alignCast(ptr));
+        _badge_count += 1;
+        if (_badge_count > 99) _badge_count = 0;
+        const s = std.fmt.bufPrint(&_badge_buf, "{d}", .{_badge_count}) catch return;
+        self.scene.setText(self.badge_idx, s);
+        if (self.badge_idx < self.scene.elements.dirty.bit_length)
+            self.scene.elements.dirty.set(self.badge_idx);
+    }
+};
+var _cb_badge: BadgeCb = undefined;
 
 // ---------------------------------------------------------------------------
 // build
@@ -148,11 +202,15 @@ pub fn build(
     const misc_h_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Inline feedback widgets" } }};
     const misc_h = NodeDesc{ .tag = "Text", .classes = "font-bold", .attrs = &misc_h_attrs };
 
-    const pb_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "ProgressBar (65%):" } }};
+    const pb_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "ProgressBar (0%):" } }};
     const pb_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &pb_lbl_attrs };
-    const pb_attrs = [1]Attr{.{ .name = "value", .value = .{ .literal = "0.65" } }};
+    const pb_attrs = [1]Attr{.{ .name = "value", .value = .{ .literal = "0.0" } }};
     const pb = NodeDesc{ .tag = "ProgressBar", .attrs = &pb_attrs };
-    const pb_group_children = [2]NodeDesc{ pb_lbl, pb };
+    const pb_sim_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Step" } }};
+    const btn_simulate = NodeDesc{ .tag = "Button", .classes = "text-sm", .attrs = &pb_sim_attrs };
+    const pb_row_children = [2]NodeDesc{ pb, btn_simulate };
+    const pb_row = NodeDesc{ .tag = "Row", .classes = "gap-2 items-center", .children = &pb_row_children };
+    const pb_group_children = [2]NodeDesc{ pb_lbl, pb_row };
     const pb_group = NodeDesc{ .tag = "Column", .classes = "gap-1", .children = &pb_group_children };
 
     const sp_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Spinner:" } }};
@@ -165,7 +223,9 @@ pub fn build(
     const badge_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &badge_lbl_attrs };
     const badge_val_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "42" } }};
     const badge = NodeDesc{ .tag = "Badge", .attrs = &badge_val_attrs };
-    const badge_group_children = [2]NodeDesc{ badge_lbl, badge };
+    const badge_inc_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "+" } }};
+    const btn_badge_inc = NodeDesc{ .tag = "Button", .classes = "w-8 h-8", .attrs = &badge_inc_attrs };
+    const badge_group_children = [3]NodeDesc{ badge_lbl, badge, btn_badge_inc };
     const badge_group = NodeDesc{ .tag = "Row", .classes = "gap-3 items-center", .children = &badge_group_children };
 
     const misc_children = [4]NodeDesc{ misc_h, pb_group, sp_group, badge_group };
@@ -197,10 +257,24 @@ pub fn build(
 
     // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=scroll,
     //   14=inner-col,15=body,16=toast_sect,17=toast_h,18=toast_btns,
-    //   19=btn_info,20=btn_success,21=btn_warning,22=btn_error,23=btn_flood
+    //   19=btn_info,20=btn_success,21=btn_warning,22=btn_error,23=btn_flood,
+    //   24=Separator,25=tooltip_sect,26=tooltip_h,27=tip_row,28-32=tips,
+    //   33=Separator,34=misc_sect,35=misc_h,
+    //   36=pb_group,37=pb_lbl,38=pb_row,39=pb,40=btn_simulate,
+    //   41=sp_group,42=sp_lbl,43=spinner,
+    //   44=badge_group,45=badge_lbl,46=badge,47=btn_badge_inc
     try scene.setButtonCallback(19, CallbackFn{ .ptr = &_cb_info,    .call = ToastCb.onClick });
     try scene.setButtonCallback(20, CallbackFn{ .ptr = &_cb_success, .call = ToastCb.onClick });
     try scene.setButtonCallback(21, CallbackFn{ .ptr = &_cb_warning, .call = ToastCb.onClick });
     try scene.setButtonCallback(22, CallbackFn{ .ptr = &_cb_error,   .call = ToastCb.onClick });
     try scene.setButtonCallback(23, CallbackFn{ .ptr = &_cb_flood_all, .call = FloodCb.onClick });
+
+    _pb_step = 0;
+    scene.setProgress(39, 0.0);
+    _cb_progress = ProgressCb{ .scene = scene, .pb_idx = 39, .lbl_idx = 37 };
+    try scene.setButtonCallback(40, CallbackFn{ .ptr = &_cb_progress, .call = ProgressCb.onClick });
+
+    _badge_count = 42;
+    _cb_badge = BadgeCb{ .scene = scene, .badge_idx = 46 };
+    try scene.setButtonCallback(47, CallbackFn{ .ptr = &_cb_badge, .call = BadgeCb.onClick });
 }

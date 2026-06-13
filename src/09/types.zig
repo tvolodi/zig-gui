@@ -1137,16 +1137,29 @@ pub fn buildDrawList(
 
                 // Draw column headers.
                 var col_x = computed.x;
-                for (ts.columns[0..ts.col_count]) |*col| {
+                for (ts.columns[0..ts.col_count], 0..) |*col, ci| {
                     const header_label = col.headerSlice();
+                    const is_sorted = (ts.sort_dir != .none and ts.sort_col == @as(u8, @intCast(ci)));
+                    const hdr_style = theme_mod.ComputedStyle{
+                        .text_color = if (is_sorted) tokens.accent else tokens.text_body,
+                        .font_size = 13.0,
+                        .font_bold = true,
+                    };
                     if (header_label.len > 0) {
-                        const hdr_style = theme_mod.ComputedStyle{
-                            .text_color = tokens.text_body,
-                            .font_size = 13.0,
-                            .font_bold = true,
-                        };
                         const hdr_rect = store_mod.Rect{ .x = col_x + 4.0, .y = computed.y, .w = col.width_px - 8.0, .h = header_h };
                         try emitGlyphs(&list, alloc, id, header_label, hdr_rect, &hdr_style, atlas, font, effective_alpha);
+                    }
+                    // Sort indicator: ▲ (asc) or ▼ (desc) after header text.
+                    if (is_sorted) {
+                        const indicator: []const u8 = if (ts.sort_dir == .asc) "\xe2\x96\xb2" else "\xe2\x96\xbc";
+                        const ind_rect = store_mod.Rect{ .x = col_x + 4.0, .y = computed.y, .w = col.width_px - 8.0, .h = header_h };
+                        const ind_style = theme_mod.ComputedStyle{ .text_color = tokens.accent, .font_size = 10.0 };
+                        // Offset x past header text — approximate by using text-align end via a wide rect
+                        _ = ind_rect;
+                        // Emit indicator aligned to right side of column header
+                        const ind_x = col_x + col.width_px - 16.0;
+                        const ind_rect2 = store_mod.Rect{ .x = ind_x, .y = computed.y + 2.0, .w = 14.0, .h = header_h - 4.0 };
+                        try emitGlyphs(&list, alloc, id, indicator, ind_rect2, &ind_style, atlas, font, effective_alpha);
                     }
                     // Column divider.
                     try list.append(alloc, .{ .filled_rect = .{

@@ -121,8 +121,6 @@ pub fn build(
     // Bug 8 fix — Font scale section.
     const fs_h_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Font scale" } }};
     const fs_h = NodeDesc{ .tag = "Text", .classes = "font-bold", .attrs = &fs_h_attrs };
-    const fs_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Font scale:" } }};
-    const fs_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm", .attrs = &fs_lbl_attrs };
     const fs_slider_attrs = [4]Attr{
         .{ .name = "min",   .value = .{ .literal = "0.5" } },
         .{ .name = "max",   .value = .{ .literal = "4.0" } },
@@ -131,8 +129,8 @@ pub fn build(
     };
     const fs_slider = NodeDesc{ .tag = "Slider", .classes = "flex-1", .attrs = &fs_slider_attrs };
     const fs_val_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "1.0\xc3\x97" } }};
-    const fs_val = NodeDesc{ .tag = "Text", .classes = "w-8", .attrs = &fs_val_attrs };
-    const fs_row_children = [3]NodeDesc{ fs_lbl, fs_slider, fs_val };
+    const fs_val = NodeDesc{ .tag = "Text", .attrs = &fs_val_attrs };
+    const fs_row_children = [2]NodeDesc{ fs_slider, fs_val };
     const fs_row = NodeDesc{ .tag = "Row", .classes = "gap-3 items-center", .children = &fs_row_children };
     const fs_group_children = [2]NodeDesc{ fs_h, fs_row };
     const fs_group = NodeDesc{ .tag = "Column", .classes = "gap-2", .children = &fs_group_children };
@@ -202,15 +200,15 @@ pub fn build(
     // DFS: 0=root,1=sidebar,2-9=btns,10=content,11=heading,12=sep,13=cols,
     //   14=left_panel,
     //   15=scheme_col, 16=ctrl_h, 17=btn_light, 18=btn_dark, 19=btn_hc,
-    //   20=fs_group, 21=fs_h, 22=fs_row, 23=fs_lbl, 24=fs_slider, 25=fs_val,
-    //   26=sep2, 27=hint,
-    //   28=right_panel,...
+    //   20=fs_group, 21=fs_h, 22=fs_row, 23=fs_slider, 24=fs_val,
+    //   25=sep2, 26=hint,
+    //   27=right_panel,...
     try scene.setButtonCallback(17, CallbackFn{ .ptr = &_cb_light, .call = ThemeCb.onClick });
     try scene.setButtonCallback(18, CallbackFn{ .ptr = &_cb_dark,  .call = ThemeCb.onClick });
     try scene.setButtonCallback(19, CallbackFn{ .ptr = &_cb_hc,    .call = ThemeCb.onClick });
 
     // Bug 8 fix: record slider/readout indices and app_inner for per-frame tick.
-    _fs_slider_idx = 24;
-    _fs_val_idx    = 25;
+    _fs_slider_idx = 23;
+    _fs_val_idx    = 24;
     _fs_app_inner  = app_inner;
 }

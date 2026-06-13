@@ -19,6 +19,12 @@ pub const Font = mod02.Font;
 pub const GlyphAtlas = mod02.GlyphAtlas;
 pub const FontFamily = @import("font_family.zig").FontFamily;
 
+const Color = mod05.Color;
+
+fn toColor09(c: Color) mod01.Color09 {
+    return .{ .r = c.r, .g = c.g, .b = c.b, .a = c.a };
+}
+
 const HOVER_DELAY_MS: f32 = 500.0;
 const NONE: u32 = std.math.maxInt(u32);
 
@@ -136,11 +142,11 @@ pub const TooltipManager = struct {
 
         // Layout the text to find dimensions.
         const max_tooltip_w: f32 = @min(window_w - 16.0, 280.0);
-        var para = try mod02.layoutParagraph(gpa, font, atlas, text, font_size, max_tooltip_w);
-        defer para.deinit(gpa);
+        const para = try mod02.layoutParagraph(gpa, font, atlas, text, font_size, max_tooltip_w);
+        defer gpa.free(para.glyphs);
 
-        const text_w = para.width;
-        const text_h = para.height;
+        const text_w = para.extent.w;
+        const text_h = para.extent.h;
         const box_w = text_w + pad * 2.0;
         const box_h = text_h + pad * 2.0;
 
@@ -156,33 +162,32 @@ pub const TooltipManager = struct {
         var cmds: std.ArrayList(DrawCommand) = .empty;
         errdefer cmds.deinit(gpa);
 
-        // Background quad.
-        cmds.append(gpa, .{ .quad = .{
-            .x = tx,
-            .y = ty,
-            .w = box_w,
-            .h = box_h,
-            .color = tokens.bg_raised,
-            .radius = radius,
-            .border_width = 1.0,
-            .border_color = tokens.border_default,
-        } }) catch {};
+        // Background filled rect + border rect.
+        const bg = toColor09(tokens.bg_raised);
+        const border = toColor09(tokens.border_default);
+        const text_col = toColor09(tokens.text_body);
+        const box_rect = mod01.Rect09{ .x = tx, .y = ty, .w = box_w, .h = box_h };
+        try cmds.append(gpa, .{ .filled_rect = .{ .rect = box_rect, .color = bg, .radius = radius } });
+        try cmds.append(gpa, .{ .border_rect = .{ .rect = box_rect, .color = border, .width = 1.0, .radius = radius } });
 
         // Glyph commands.
-        const gx = tx + pad;
-        const gy = ty + pad;
-        for (para.glyphs) |g| {
-            cmds.append(gpa, .{ .glyph = .{
-                .x = gx + g.x,
-                .y = gy + g.y,
-                .w = g.w,
-                .h = g.h,
-                .uv_x = g.uv_x,
-                .uv_y = g.uv_y,
-                .uv_w = g.uv_w,
-                .uv_h = g.uv_h,
-                .color = tokens.text_body,
-            } }) catch {};
+        const atlas_w = @as(f32, @floatFromInt(atlas.width));
+        const atlas_h = @as(f32, @floatFromInt(atlas.height));
+        if (atlas_w > 0 and atlas_h > 0) {
+            const gx = tx + pad;
+            const gy = ty + pad;
+            for (para.glyphs) |g| {
+                if (g.dest_w == 0 or g.dest_h == 0) continue;
+                const uv_x = @as(f32, @floatFromInt(g.uv.x)) / atlas_w;
+                const uv_y = @as(f32, @floatFromInt(g.uv.y)) / atlas_h;
+                const uv_w = g.dest_w / atlas_w;
+                const uv_h = g.dest_h / atlas_h;
+                try cmds.append(gpa, .{ .glyph = .{
+                    .dst = .{ .x = gx + g.dest_x, .y = gy + g.dest_y, .w = g.dest_w, .h = g.dest_h },
+                    .uv  = .{ .x = uv_x, .y = uv_y, .w = uv_w, .h = uv_h },
+                    .color = text_col,
+                } });
+            }
         }
 
         self.current_cmds = try cmds.toOwnedSlice(gpa);

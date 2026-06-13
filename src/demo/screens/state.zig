@@ -33,6 +33,9 @@ var _counter: i32 = 0;
 // The text node at a fixed scene index is mutated via scene.setText.
 // We store a scene pointer across callbacks via the callback context struct.
 
+// Persistent buffer for counter value text — lives for the duration of the screen.
+var _counter_buf: [16]u8 = undefined;
+
 const CounterCb = struct {
     scene:     *Scene,
     delta:     i32,
@@ -44,14 +47,17 @@ const CounterCb = struct {
         _counter += self.delta;
         if (_counter < 0) _counter = 0;
 
-        // Update counter value text
-        var buf: [16]u8 = undefined;
-        const s = std.fmt.bufPrint(&buf, "{d}", .{_counter}) catch return;
+        // Update counter value text — use module-level buffer so the slice stays valid.
+        const s = std.fmt.bufPrint(&_counter_buf, "{d}", .{_counter}) catch return;
         self.scene.setText(self.value_idx, s);
+        if (self.value_idx < self.scene.elements.dirty.bit_length)
+            self.scene.elements.dirty.set(self.value_idx);
 
         // Update Even/Odd label
         const parity: []const u8 = if (@mod(_counter, 2) == 0) "Even" else "Odd";
         self.scene.setText(self.label_idx, parity);
+        if (self.label_idx < self.scene.elements.dirty.bit_length)
+            self.scene.elements.dirty.set(self.label_idx);
     }
 };
 
@@ -104,9 +110,9 @@ pub fn build(
     const inc_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "+" } }};
     const val_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "0" } }};
 
-    const btn_dec  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10 text-xl", .attrs = &dec_attrs };
-    const ctr_val  = NodeDesc{ .tag = "Text",   .classes = "text-xl w-10", .attrs = &val_attrs };
-    const btn_inc  = NodeDesc{ .tag = "Button", .classes = "w-10 h-10 text-xl", .attrs = &inc_attrs };
+    const btn_dec  = NodeDesc{ .tag = "Button", .classes = "w-12 h-12 text-xl", .attrs = &dec_attrs };
+    const ctr_val  = NodeDesc{ .tag = "Text",   .classes = "text-xl w-16", .attrs = &val_attrs };
+    const btn_inc  = NodeDesc{ .tag = "Button", .classes = "w-12 h-12 text-xl", .attrs = &inc_attrs };
 
     const ctr_row_children = [3]NodeDesc{ btn_dec, ctr_val, btn_inc };
     const ctr_row = NodeDesc{ .tag = "Row", .classes = "gap-4 items-center", .children = &ctr_row_children };
