@@ -1590,6 +1590,58 @@ pub fn build(b: *std.Build) void {
     run_demo_step.dependOn(&run_demo_cmd.step);
 
     // -----------------------------------------------------------------------
+    // M19-05: App installer / packaging
+    //   zig build package -- --version 1.0.1
+    //
+    // Creates a distributable archive (.zip on Windows, .tar.gz on Linux)
+    // containing the binary, fonts, and optional manifest.
+    // -----------------------------------------------------------------------
+    const package_mod = b.createModule(.{
+        .root_source_file = b.path("src/tools/package.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const package_exe = b.addExecutable(.{
+        .name = "package",
+        .root_module = package_mod,
+    });
+    const run_package_cmd = b.addRunArtifact(package_exe);
+    // Pass through all arguments from the build command
+    run_package_cmd.addArg("--binary-path");
+    // Use the installed binary path (add .exe on Windows)
+    const showcase_binary_name = if (target.result.os.tag == .windows) "showcase.exe" else "showcase";
+    const showcase_path = b.fmt("zig-out/bin/{s}", .{showcase_binary_name});
+    run_package_cmd.addArg(showcase_path);
+    run_package_cmd.addArg("--output");
+    run_package_cmd.addArg("dist");
+    run_package_cmd.addArg("--fonts-dir");
+    run_package_cmd.addArg("testdata");
+
+    const package_step = b.step("package", "Bundle binary + fonts + manifest into distributable archive");
+    package_step.dependOn(&demo_exe.step); // Ensure binary is built first
+    package_step.dependOn(&run_package_cmd.step);
+
+    // -----------------------------------------------------------------------
+    // generate-manifest — helper tool for creating update manifests
+    //   zig build run-generate-manifest -- path/to/app.zip https://example.com/app.zip
+    //
+    // Computes SHA256 of a binary and outputs manifest.json
+    // -----------------------------------------------------------------------
+    const manifest_mod = b.createModule(.{
+        .root_source_file = b.path("src/tools/generate_manifest.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const manifest_exe = b.addExecutable(.{
+        .name = "generate_manifest",
+        .root_module = manifest_mod,
+    });
+    const run_manifest_cmd = b.addRunArtifact(manifest_exe);
+
+    const manifest_step = b.step("run-generate-manifest", "Generate update manifest for a package");
+    manifest_step.dependOn(&run_manifest_cmd.step);
+
+    // -----------------------------------------------------------------------
     // visual-check — render 3 frames, write PNG, verify it is not blank.
     //   zig build visual-check
     //

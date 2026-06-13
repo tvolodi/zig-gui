@@ -644,6 +644,16 @@ fn dimensionEq(a: store_mod.Dimension, b: store_mod.Dimension) bool {
 }
 
 // ---------------------------------------------------------------------------
+// RH6 — Array field state (M18-06)
+// ---------------------------------------------------------------------------
+
+pub const ArrayFieldState = struct {
+    item_count: u32 = 0,
+    min_items: u32 = 0,
+    max_items: u32 = std.math.maxInt(u32),
+};
+
+// ---------------------------------------------------------------------------
 // Scene — owns the ElementStore + parallel presentation arrays
 // ---------------------------------------------------------------------------
 
@@ -760,6 +770,10 @@ pub const Scene = struct {
     // Populated during instantiate(); kept in sync with element tree.
     // Owned by the Scene arena.
     _access_nodes: std.ArrayListUnmanaged(AccessNode) = .empty,
+
+    // RH6 — Array field state parallel array (M18-06).
+    // Tracks item count and bounds for array-type form fields.
+    _array_field_state: std.ArrayListUnmanaged(ArrayFieldState) = .empty,
 
     // R73 — Frame counter and timestamp for animation (updated each frame by app).
     frame_count: u64 = 0,
@@ -883,6 +897,8 @@ pub const Scene = struct {
         self._enter_exit_state.items.len = 0;
         // RG1 — Accessibility tree
         self._access_nodes.clearRetainingCapacity();
+        // RH6 — Array field state (M18-06)
+        self._array_field_state.clearRetainingCapacity();
         self.focused_idx = std.math.maxInt(u32);
         self.elements.reset();
     }
@@ -1807,6 +1823,33 @@ pub const Scene = struct {
     }
 
     // -----------------------------------------------------------------------
+    // Array field state (RH6 — M18-06)
+    // -----------------------------------------------------------------------
+
+    /// Return a pointer to the array field state for element `idx`.
+    pub fn arrayFieldStateOf(self: *Scene, idx: u32) *ArrayFieldState {
+        return &self._array_field_state.items[idx];
+    }
+
+    /// Add an item to array-type field at element `idx` and mark it dirty.
+    pub fn addArrayItem(self: *Scene, idx: u32) void {
+        if (idx < self._array_field_state.items.len) {
+            self._array_field_state.items[idx].item_count += 1;
+            if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+        }
+    }
+
+    /// Remove an item from array-type field at element `idx` and mark it dirty.
+    pub fn removeArrayItem(self: *Scene, idx: u32, _: u32) void {
+        if (idx < self._array_field_state.items.len) {
+            if (self._array_field_state.items[idx].item_count > 0) {
+                self._array_field_state.items[idx].item_count -= 1;
+            }
+            if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Children management (R53)
     // -----------------------------------------------------------------------
 
@@ -2419,6 +2462,13 @@ pub const Scene = struct {
             access_node.description = desc.aria_description;
         }
         self._access_nodes.items[id.index] = access_node;
+
+        // RH6: array field state (M18-06)
+        try self._array_field_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._array_field_state.items.len <= id.index) {
+            self._array_field_state.items.len = needed;
+        }
+        self._array_field_state.items[id.index] = .{};
 
         // RB0: parse cursor= attribute
         for (desc.attrs) |attr| {

@@ -1309,3 +1309,153 @@ readers should announce but sighted users should not see. Variants like `focus:n
 make the element visible on focus (skip links).
 
 See: M17-05 (RG5), `src/06/types.zig` resolveClasses.
+
+---
+
+## PatternValidator
+
+A JSON Schema keyword validator (M18-01) that matches a string value against a regex pattern.
+Added in RH1. The pattern is compiled into bytecode and matched against the full input string
+(anchored to the entire string, not just a substring). Requires a regex engine implementation
+(decision pending in INV-5.6).
+
+See: M18-01 (RH1), `src/08/regex.zig`, `src/08/validator.zig`.
+
+---
+
+## AllOfValidator
+
+A constraint (M18-03) that requires a value to be valid against every sub-schema in an
+`allOf` array. All sub-schemas must pass validation (intersection/conjunction logic).
+
+See: M18-03 (RH3), `src/08/validator.zig`.
+
+---
+
+## AnyOfValidator
+
+A constraint (M18-03) that requires a value to be valid against at least one sub-schema
+in an `anyOf` array. At least one sub-schema must pass validation (union/disjunction logic).
+
+See: M18-03 (RH3), `src/08/validator.zig`.
+
+---
+
+## OneOfValidator
+
+A constraint (M18-03) that requires a value to be valid against exactly one sub-schema
+in a `oneOf` array. Neither zero nor multiple sub-schemas should validate (exclusive union).
+
+See: M18-03 (RH3), `src/08/validator.zig`.
+
+---
+
+## dependentRequired
+
+A JSON Schema keyword (M18-04) that conditionally requires certain properties to be present
+based on the presence of other properties. Maps a "trigger" property name to a list of
+required properties. If the trigger property exists in an object, all required properties
+in the list must also exist.
+
+Example: `dependentRequired: { "credit_card": ["cvv", "name"] }` means "If credit_card is
+present, cvv and name must also be present."
+
+See: M18-04 (RH4), `src/08/validator.zig`.
+
+---
+
+## ConditionalSchema
+
+A JSON Schema using `if`/`then`/`else` keywords (M18-05) to apply different validation
+schemas based on a condition. The `if` schema is tested; if it validates successfully, the
+`then` schema is applied; if it fails and `else` is present, the `else` schema is applied
+instead. Neither `then` nor `else` is required.
+
+See: M18-05 (RH5), `src/08/validator.zig`.
+
+---
+
+## ArrayFieldState
+
+Per-element state stored in `Scene._array_field_state` (M18-06) tracking the current item count
+and min/max bounds for an array-type form field. Updated by `Scene.addArrayItem()` and
+`Scene.removeArrayItem()`. Accessed via `Scene.arrayFieldStateOf(idx)`.
+
+See: M18-06 (RH6), `src/07/types.zig`.
+
+---
+
+## UpdateManifest
+
+A JSON-serialized struct (M19-01) containing version information and download metadata:
+- `version: string` — semantic version (e.g., "1.0.1")
+- `download_url: string` — URL to download the binary package or delta
+- `checksum_sha256: string` — hex-encoded SHA256 of the new binary
+- `release_notes?: string` — optional human-readable changelog
+
+Fetched by `UpdateManager` from a configured manifest URL. Used by RI1 (update detection)
+and passed to RI2 (delta download), RI3 (staging), and RI4 (UI).
+
+See: M19-01 (RI1), `src/app/update_manager.zig`.
+
+---
+
+## UpdateManager
+
+A struct (M19-01, `src/app/update_manager.zig`) that coordinates the entire auto-update
+pipeline. Owns: current version string, manifest URL, latest fetched manifest, delta patch,
+reconstructed binary, staging info, and error state. Key methods: `startFetch()` (fetch
+manifest), `tick()` (poll for completion), `isUpdateAvailable()` (version comparison),
+`startDeltaDownload()` (fetch patch), `applyDelta()` (reconstruct binary), `stageUpdate()`
+(prepare for installation), `isStagedUpdatePending()` (check boot-time flag).
+
+See: M19-01 (RI1), M19-02 (RI2), M19-03 (RI3), `src/app/update_manager.zig`.
+
+---
+
+## BinaryDelta
+
+A bsdiff patch (M19-02) containing the compressed differences between two binary versions.
+Stored in `UpdateManager.current_delta`. When applied to the old binary via `applyDelta()`,
+produces the new binary stored in `new_binary_data`. The delta format is typically 10–20%
+of the full binary size, reducing download time.
+
+See: M19-02 (RI2), `src/app/update_manager.zig`.
+
+---
+
+## StagedUpdate
+
+A struct (M19-03) holding metadata about an update that has been downloaded and patched
+but not yet installed. Owns: current exe path, staged binary path, backup path, SHA256 hash,
+size, and staging timestamp. Persisted via a marker file on disk so the staged update
+survives application crashes. Installed atomically on the next app launch before any
+modules are initialized.
+
+See: M19-03 (RI3), `src/app/update_manager.zig`.
+
+---
+
+## UpdateUiManager
+
+A struct (M19-04, `src/app/update_ui_manager.zig`) that manages all user-facing notifications
+and progress indicators for the update pipeline. Integrates with the existing `ToastManager`
+(M7-05) to show update-available, update-staged, and error toasts. Shows a download-progress
+modal while RI2 is downloading. Reads progress from `UpdateManager` each frame and updates
+the UI.
+
+See: M19-04 (RI4), `src/app/update_ui_manager.zig`.
+
+---
+
+## auto-update pipeline
+
+The end-to-end process of detecting, downloading, verifying, staging, and installing
+application updates (M19-01 through M19-04):
+1. RI1: Fetch manifest, detect newer version, notify user.
+2. RI2: Download binary delta, apply patch, reconstruct new binary.
+3. RI3: Write binary to temp, verify checksum, stage for atomic install.
+4. RI4: Show progress bar and status toasts throughout the process.
+5. Boot-time swap: On next app launch, rename staged binary into place before any modules run.
+
+See: M19 (auto-update / delivery), RI1–RI4, `src/app/update_manager.zig`, `src/app/update_ui_manager.zig`.

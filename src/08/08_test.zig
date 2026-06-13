@@ -368,3 +368,213 @@ test "Form.validate passes after all required fields are set" {
         try testing.expect(!std.mem.eql(u8, e.path, "name"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// M18-01 RH1: Pattern validation
+// ---------------------------------------------------------------------------
+
+test "pattern validation with valid input" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const schema = F.Schema{
+        .type = .object,
+        .properties = &.{
+            .{ .name = "username", .schema = .{
+                .type = .string,
+                .pattern = "^[A-Za-z]+$",
+            } },
+        },
+    };
+
+    var form = try F.Form.init(arena.allocator(), schema);
+    defer form.deinit();
+
+    try form.setValue("username", .{ .string = "admin" });
+    const errs = try form.validate(arena.allocator());
+
+    // Should pass — "admin" matches pattern
+    for (errs) |e| {
+        try testing.expect(e.kind != .pattern_mismatch);
+    }
+}
+
+test "pattern validation with invalid input" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const schema = F.Schema{
+        .type = .object,
+        .properties = &.{
+            .{ .name = "code", .schema = .{
+                .type = .string,
+                .pattern = "^[0-9]+$",
+            } },
+        },
+    };
+
+    var form = try F.Form.init(arena.allocator(), schema);
+    defer form.deinit();
+
+    try form.setValue("code", .{ .string = "abc123" });
+    const errs = try form.validate(arena.allocator());
+
+    // Should fail — "abc123" contains non-digits
+    var pattern_error_found = false;
+    for (errs) |e| {
+        if (e.kind == .pattern_mismatch) {
+            pattern_error_found = true;
+        }
+    }
+    try testing.expect(pattern_error_found);
+}
+
+// ---------------------------------------------------------------------------
+// M18-03 RH3: Combinators (anyOf, oneOf, allOf)
+// ---------------------------------------------------------------------------
+
+test "anyOf validation — at least one passes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const sub1 = F.Schema{ .type = .string };
+    const sub2 = F.Schema{ .type = .integer };
+
+    const schema = F.Schema{
+        .type = .object,
+        .any_of = &.{ sub1, sub2 },
+    };
+
+    var value = F.Value{ .string = "hello" };
+    const errs = try F.validate(arena.allocator(), schema, &value);
+
+    // Should pass — string matches first sub-schema
+    try testing.expectEqual(@as(usize, 0), errs.len);
+}
+
+test "oneOf validation — exactly one passes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const sub1 = F.Schema{ .type = .string };
+    const sub2 = F.Schema{ .type = .integer };
+
+    const schema = F.Schema{
+        .type = .object,
+        .one_of = &.{ sub1, sub2 },
+    };
+
+    var value = F.Value{ .string = "hello" };
+    const errs = try F.validate(arena.allocator(), schema, &value);
+
+    // Should pass — exactly one (string) matches
+    try testing.expectEqual(@as(usize, 0), errs.len);
+}
+
+// ---------------------------------------------------------------------------
+// M18-04 RH4: dependentRequired
+// ---------------------------------------------------------------------------
+
+test "dependentRequired when trigger key is present" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var deps = std.StringHashMap([]const []const u8){};
+    try deps.put(arena.allocator(), "credit_card", &.{ "cvv", "name" });
+
+    const schema = F.Schema{
+        .type = .object,
+        .dependent_required = deps,
+    };
+
+    // Object with credit_card but missing cvv
+    var value = F.Value{ .object = &.{
+        .{ .key = "credit_card", .value = .{ .string = "1234" } },
+        .{ .key = "name", .value = .{ .string = "John" } },
+    } };
+
+    const errs = try F.validate(arena.allocator(), schema, &value);
+
+    // Should have error — missing cvv
+    var found_dependent_error = false;
+    for (errs) |e| {
+        if (e.kind == .dependent_required_missing) {
+            found_dependent_error = true;
+        }
+    }
+    try testing.expect(found_dependent_error);
+}
+
+test "dependentRequired when trigger key is absent" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var deps = std.StringHashMap([]const []const u8){};
+    try deps.put(arena.allocator(), "credit_card", &.{ "cvv", "name" });
+
+    const schema = F.Schema{
+        .type = .object,
+        .dependent_required = deps,
+    };
+
+    // Object without credit_card — dependencies should not apply
+    var value = F.Value{ .object = &.{
+        .{ .key = "name", .value = .{ .string = "John" } },
+    } };
+
+    const errs = try F.validate(arena.allocator(), schema, &value);
+
+    // Should pass — no trigger key present
+    try testing.expectEqual(@as(usize, 0), errs.len);
+}
+
+// ---------------------------------------------------------------------------
+// M18-06 RH6: Array fields
+// ---------------------------------------------------------------------------
+
+test "array field buildForm creates is_array field" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const items_schema = F.Schema{ .type = .string };
+    const schema = F.Schema{
+        .type = .object,
+        .properties = &.{
+            .{ .name = "emails", .schema = .{
+                .type = .array,
+                .items = &items_schema,
+                .title = "Email Addresses",
+            } },
+        },
+    };
+
+    const fields = try F.buildForm(arena.allocator(), schema);
+    try testing.expectEqual(@as(usize, 1), fields.len);
+    try testing.expect(fields[0].is_array);
+    try testing.expectEqualStrings("emails", fields[0].path);
+}
+
+test "array validation with minItems constraint" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const schema = F.Schema{
+        .type = .object,
+        .properties = &.{
+            .{ .name = "tags", .schema = .{
+                .type = .array,
+                .items = &.{ .type = .string },
+                .min_items = 1,
+            } },
+        },
+    };
+
+    // Array with 0 items — should fail minItems check
+    const items = try arena.allocator().alloc(F.Value, 0);
+    var value = F.Value{ .object = &.{
+        .{ .key = "tags", .value = .{ .array = items } },
+    } };
+
+    const errs = try F.validate(arena.allocator(), schema, &value);
+    try testing.expect(errs.len > 0);
+}

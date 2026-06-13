@@ -154,11 +154,24 @@ not act on the disagreement.
   M17 approved on 2026-06-13). Approved build-time tools: glslc (from the Vulkan SDK, for
   GLSL→SPIR-V compilation). Do NOT add a package, vendored library, or build-time tool
   without an explicit human decision recorded here. (Taffy is being *ported*, i.e.
-  reimplemented in Zig, not added as a dependency — see `specs/04_layout_engine/`.)
+  reimplemented in Zig, not added as a dependency — see `specs/04_layout_engine/`.
+  NOTE (2026-06-13): Pure-Zig vendored regex engine approved for M18-01 pattern validation
+  (RH1). No external C library; implementation shall use only Zig std.)
 
 ---
 
-## 6. Build order (dependency chain)
+## 6. M19 Scope Decision (2026-06-13)
+
+**NOTE:** M19-01 through M19-04 (auto-update pipeline) deferred to post-v1 pending approval of
+HTTP client and bsdiff library. Only M19-05 (app installer/packaging) implemented in v1.
+
+Reason: Auto-update requires external network stack (HTTP) + complex binary patching (bsdiff),
+neither approved (INV-5.6). Vendoring both would delay v1 release. App packaging (RI5) is
+independent, uses only Zig std, and ships with zero new dependencies.
+
+---
+
+## 7. Build order (dependency chain)
 
 Modules are numbered by build order. A module may depend only on lower-numbered modules.
 Do NOT introduce a dependency from a lower number onto a higher one.

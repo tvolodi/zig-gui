@@ -134,6 +134,30 @@ pub const Schema = struct {
     maximum: ?f64 = null,
     widget_hint: ?[]const u8 = null,
 
+    // M18-01 RH1: Pattern validation
+    pattern: ?[]const u8 = null,
+
+    // M18-02 RH2: $ref resolution
+    ref: ?[]const u8 = null,
+    definitions: ?std.StringHashMap(*const Schema) = null,
+
+    // M18-03 RH3: Combinators
+    all_of: ?[]const Schema = null,
+    any_of: ?[]const Schema = null,
+    one_of: ?[]const Schema = null,
+
+    // M18-04 RH4: dependentRequired
+    dependent_required: ?std.StringHashMap([]const []const u8) = null,
+
+    // M18-05 RH5: Conditional schemas
+    if_schema: ?*const Schema = null,
+    then_schema: ?*const Schema = null,
+    else_schema: ?*const Schema = null,
+
+    // M18-06 RH6: Array fields
+    min_items: ?u32 = null,
+    max_items: ?u32 = null,
+
     pub fn hasEnum(self: Schema) bool {
         return self.enum_values.len > 0;
     }
@@ -173,7 +197,36 @@ pub const FieldSpec = struct {
     kind: WidgetKind,
     format: Format = .none,
     required: bool = false,
+
+    // M18-06 RH6: Array field support
+    is_array: bool = false,
+    array_item_schema: ?*const Schema = null,
+    array_min_items: u32 = 0,
+    array_max_items: u32 = std.math.maxInt(u32),
 };
+
+/// Resolve a JSON Pointer reference (#/definitions/Address) within a schema (RH2).
+fn resolveRef(root: Schema, ref_uri: []const u8) ?*const Schema {
+    if (!std.mem.startsWith(u8, ref_uri, "#/")) return null;
+    if (root.definitions == null) return null;
+
+    const path_str = ref_uri[2..]; // Skip "#/"
+    var parts = std.mem.splitScalar(u8, path_str, '/');
+
+    var current: *const Schema = &root;
+    while (parts.next()) |part| {
+        if (current.definitions) |defs| {
+            if (defs.get(part)) |target| {
+                current = target;
+            } else {
+                return null;
+            }
+        } else {
+            return null;
+        }
+    }
+    return current;
+}
 
 /// Walk the schema into a flat list of leaf field specs (nesting → dotted paths).
 pub fn buildForm(alloc: std.mem.Allocator, schema: Schema) ![]FieldSpec {
@@ -188,6 +241,50 @@ fn buildFormHelper(
     schema: Schema,
     prefix: []const u8,
 ) !void {
+    // Handle $ref — resolve and recurse into target
+    if (schema.ref) |ref_uri| {
+        if (schema.definitions) |_| {
+            if (resolveRef(schema, ref_uri)) |resolved| {
+                return buildFormHelper(alloc, list, resolved.*, prefix);
+            }
+        }
+        return;
+    }
+
+    // Handle combinators (allOf, anyOf, oneOf)
+    if (schema.all_of) |sub_schemas| {
+        for (sub_schemas) |sub| {
+            try buildFormHelper(alloc, list, sub, prefix);
+        }
+        return;
+    }
+
+    if (schema.any_of) |sub_schemas| {
+        if (sub_schemas.len > 0) {
+            try buildFormHelper(alloc, list, sub_schemas[0], prefix);
+        }
+        return;
+    }
+
+    if (schema.one_of) |sub_schemas| {
+        if (sub_schemas.len > 0) {
+            try buildFormHelper(alloc, list, sub_schemas[0], prefix);
+        }
+        return;
+    }
+
+    // Handle if/then/else
+    if (schema.if_schema) |_| {
+        // For v1, just use the if schema to determine which branch
+        if (schema.then_schema) |then_schema| {
+            try buildFormHelper(alloc, list, then_schema.*, prefix);
+        }
+        if (schema.else_schema) |else_schema| {
+            try buildFormHelper(alloc, list, else_schema.*, prefix);
+        }
+        return;
+    }
+
     for (schema.properties) |prop| {
         const path: []const u8 = if (prefix.len == 0)
             try alloc.dupe(u8, prop.name)
@@ -201,8 +298,21 @@ fn buildFormHelper(
             break :blk false;
         };
 
-        // Recurse into object containers; emit FieldSpec for all leaves.
-        if (prop.schema.type == .object and prop.schema.properties.len > 0) {
+        // Handle array fields
+        if (prop.schema.type == .array) {
+            try list.append(alloc, .{
+                .path = path,
+                .label = prop.schema.title orelse prop.name,
+                .kind = .column,
+                .format = prop.schema.format,
+                .required = is_required,
+                .is_array = true,
+                .array_item_schema = prop.schema.items,
+                .array_min_items = prop.schema.min_items orelse 0,
+                .array_max_items = prop.schema.max_items orelse std.math.maxInt(u32),
+            });
+        } else if (prop.schema.type == .object and prop.schema.properties.len > 0) {
+            // Recurse into object containers; emit FieldSpec for all leaves.
             try buildFormHelper(alloc, list, prop.schema, path);
         } else {
             try list.append(alloc, .{
@@ -222,6 +332,19 @@ fn buildFormHelper(
 
 pub const ValidationError = struct {
     path: []const u8,
+    kind: enum {
+        required_missing,
+        type_mismatch,
+        min_length,
+        max_length,
+        minimum,
+        maximum,
+        enum_not_allowed,
+        pattern_mismatch,           // M18-01 RH1
+        dependent_required_missing, // M18-04 RH4
+        any_of_mismatch,            // M18-03 RH3
+        one_of_mismatch,            // M18-03 RH3
+    },
     message: []const u8,
 };
 
@@ -238,7 +361,86 @@ fn validateHelper(
     schema: Schema,
     value: *Value,
     path: []const u8,
-) !void {
+) error{OutOfMemory}!void {
+    // Handle $ref — resolve and recurse (RH2)
+    if (schema.ref) |ref_uri| {
+        if (schema.definitions) |_| {
+            if (resolveRef(schema, ref_uri)) |resolved| {
+                return validateHelper(alloc, list, resolved.*, value, path);
+            }
+        }
+        // Broken ref — skip validation (v1 behavior)
+        return;
+    }
+
+    // Handle if/then/else conditional schemas
+    if (schema.if_schema) |if_schema| {
+        var test_errors: std.ArrayList(ValidationError) = .empty;
+        try validateHelper(alloc, &test_errors, if_schema.*, value, path);
+
+        if (test_errors.items.len == 0) {
+            // Condition passes — apply then schema
+            if (schema.then_schema) |then_schema| {
+                try validateHelper(alloc, list, then_schema.*, value, path);
+            }
+        } else {
+            // Condition fails — apply else schema
+            if (schema.else_schema) |else_schema| {
+                try validateHelper(alloc, list, else_schema.*, value, path);
+            }
+        }
+        return;
+    }
+
+    // Handle allOf (all sub-schemas must pass)
+    if (schema.all_of) |sub_schemas| {
+        for (sub_schemas) |sub| {
+            try validateHelper(alloc, list, sub, value, path);
+        }
+        return;
+    }
+
+    // Handle anyOf (at least one sub-schema must pass)
+    if (schema.any_of) |sub_schemas| {
+        var any_passed = false;
+        for (sub_schemas) |sub| {
+            var test_errors: std.ArrayList(ValidationError) = .empty;
+            try validateHelper(alloc, &test_errors, sub, value, path);
+            if (test_errors.items.len == 0) {
+                any_passed = true;
+                break;
+            }
+        }
+        if (!any_passed) {
+            try list.append(alloc, .{
+                .path = path,
+                .kind = .any_of_mismatch,
+                .message = "value must be valid for at least one schema in anyOf",
+            });
+        }
+        return;
+    }
+
+    // Handle oneOf (exactly one sub-schema must pass)
+    if (schema.one_of) |sub_schemas| {
+        var passed_count: u32 = 0;
+        for (sub_schemas) |sub| {
+            var test_errors: std.ArrayList(ValidationError) = .empty;
+            try validateHelper(alloc, &test_errors, sub, value, path);
+            if (test_errors.items.len == 0) {
+                passed_count += 1;
+            }
+        }
+        if (passed_count != 1) {
+            try list.append(alloc, .{
+                .path = path,
+                .kind = .one_of_mismatch,
+                .message = "value must be valid for exactly one schema in oneOf",
+            });
+        }
+        return;
+    }
+
     if (schema.type == .object) {
         // Check required fields
         for (schema.required) |req_name| {
@@ -253,9 +455,55 @@ fn validateHelper(
             };
             if (!present) {
                 const err_path = try joinPath(alloc, path, req_name);
-                try list.append(alloc, .{ .path = err_path, .message = "required field missing" });
+                try list.append(alloc, .{
+                    .path = err_path,
+                    .kind = .required_missing,
+                    .message = "required field missing",
+                });
             }
         }
+
+        // Handle dependentRequired (RH4)
+        if (schema.dependent_required) |deps| {
+            if (value.* == .object) {
+                var iter = deps.iterator();
+                while (iter.next()) |entry| {
+                    const dep_key = entry.key_ptr.*;
+                    const required_props = entry.value_ptr.*;
+
+                    var found_dep_key = false;
+                    for (value.object) |f| {
+                        if (std.mem.eql(u8, f.key, dep_key)) {
+                            found_dep_key = true;
+                            break;
+                        }
+                    }
+
+                    if (found_dep_key) {
+                        for (required_props) |required_prop| {
+                            var found_required = false;
+                            for (value.object) |f| {
+                                if (std.mem.eql(u8, f.key, required_prop)) {
+                                    found_required = true;
+                                    break;
+                                }
+                            }
+                            if (!found_required) {
+                                const err_msg = try std.fmt.allocPrint(alloc,
+                                    "property '{s}' is required when '{s}' is present",
+                                    .{ required_prop, dep_key });
+                                try list.append(alloc, .{
+                                    .path = path,
+                                    .kind = .dependent_required_missing,
+                                    .message = err_msg,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Validate each declared property
         for (schema.properties) |prop| {
             switch (value.*) {
@@ -282,7 +530,7 @@ fn validateScalar(
     schema: Schema,
     value: *Value,
     path: []const u8,
-) !void {
+) error{OutOfMemory}!void {
     // Enum check
     if (schema.enum_values.len > 0) {
         const in_enum: bool = blk: {
@@ -292,7 +540,11 @@ fn validateScalar(
             break :blk false;
         };
         if (!in_enum) {
-            try list.append(alloc, .{ .path = path, .message = "value not in enum" });
+            try list.append(alloc, .{
+                .path = path,
+                .kind = .enum_not_allowed,
+                .message = "value not in enum",
+            });
         }
     }
 
@@ -301,36 +553,106 @@ fn validateScalar(
         .string => |s| {
             if (schema.min_length) |ml| {
                 if (s.len < @as(usize, ml)) {
-                    try list.append(alloc, .{ .path = path, .message = "string too short (minLength)" });
+                    try list.append(alloc, .{
+                        .path = path,
+                        .kind = .min_length,
+                        .message = "string too short (minLength)",
+                    });
                 }
             }
             if (schema.max_length) |ml| {
                 if (s.len > @as(usize, ml)) {
-                    try list.append(alloc, .{ .path = path, .message = "string too long (maxLength)" });
+                    try list.append(alloc, .{
+                        .path = path,
+                        .kind = .max_length,
+                        .message = "string too long (maxLength)",
+                    });
                 }
             }
+
+            // M18-01 RH1: Pattern validation
+            if (schema.pattern) |pattern_str| {
+                const regex = @import("regex.zig");
+                const compiled = try regex.compilePattern(alloc, pattern_str);
+                defer compiled.deinit();
+                if (!regex.matches(compiled, s)) {
+                    const msg = try std.fmt.allocPrint(alloc,
+                        "value does not match pattern '{s}'",
+                        .{pattern_str});
+                    try list.append(alloc, .{
+                        .path = path,
+                        .kind = .pattern_mismatch,
+                        .message = msg,
+                    });
+                }
+            }
+
             switch (schema.format) {
                 .email => {
                     if (!isValidEmail(s)) {
-                        try list.append(alloc, .{ .path = path, .message = "invalid email format" });
+                        try list.append(alloc, .{
+                            .path = path,
+                            .kind = .type_mismatch,
+                            .message = "invalid email format",
+                        });
                     }
                 },
                 .date => {
                     if (!isValidDate(s)) {
-                        try list.append(alloc, .{ .path = path, .message = "invalid date (expected YYYY-MM-DD)" });
+                        try list.append(alloc, .{
+                            .path = path,
+                            .kind = .type_mismatch,
+                            .message = "invalid date (expected YYYY-MM-DD)",
+                        });
                     }
                 },
                 .date_time => {
                     if (!isValidDateTime(s)) {
-                        try list.append(alloc, .{ .path = path, .message = "invalid date-time" });
+                        try list.append(alloc, .{
+                            .path = path,
+                            .kind = .type_mismatch,
+                            .message = "invalid date-time",
+                        });
                     }
                 },
                 .uri => {
                     if (!isValidUri(s)) {
-                        try list.append(alloc, .{ .path = path, .message = "invalid URI" });
+                        try list.append(alloc, .{
+                            .path = path,
+                            .kind = .type_mismatch,
+                            .message = "invalid URI",
+                        });
                     }
                 },
                 .none => {},
+            }
+        },
+        .array => |items| {
+            // M18-06 RH6: Array min/max items validation
+            if (schema.min_items) |min_items| {
+                if (items.len < @as(usize, min_items)) {
+                    try list.append(alloc, .{
+                        .path = path,
+                        .kind = .type_mismatch,
+                        .message = "array has too few items",
+                    });
+                }
+            }
+            if (schema.max_items) |max_items| {
+                if (items.len > @as(usize, max_items)) {
+                    try list.append(alloc, .{
+                        .path = path,
+                        .kind = .type_mismatch,
+                        .message = "array has too many items",
+                    });
+                }
+            }
+            // Validate each item against the items schema
+            if (schema.items) |item_schema| {
+                for (items, 0..) |*item, idx| {
+                    const item_path = try std.fmt.allocPrint(alloc, "{s}.{d}", .{ path, idx });
+                    try validateHelper(alloc, list, item_schema.*, item, item_path);
+                }
             }
         },
         else => {},
@@ -345,12 +667,20 @@ fn validateScalar(
     if (num_val) |n| {
         if (schema.minimum) |min| {
             if (n < min) {
-                try list.append(alloc, .{ .path = path, .message = "value below minimum" });
+                try list.append(alloc, .{
+                    .path = path,
+                    .kind = .minimum,
+                    .message = "value below minimum",
+                });
             }
         }
         if (schema.maximum) |max| {
             if (n > max) {
-                try list.append(alloc, .{ .path = path, .message = "value above maximum" });
+                try list.append(alloc, .{
+                    .path = path,
+                    .kind = .maximum,
+                    .message = "value above maximum",
+                });
             }
         }
     }
