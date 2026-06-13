@@ -1534,9 +1534,23 @@ pub const AppInner = struct {
             if (self.scene.kindOfIdx(idx) != .data_table) continue;
             if (idx >= self.scene.elements.layout.items.len) continue;
             const rect = self.scene.elements.layout.items[idx].computed;
+            // Adjust the table's raw Y for any ancestor ScrollView offset so that
+            // the hit-test uses the actual screen position rather than the layout rect.
+            var screen_y = rect.y;
+            for (0..self.scene._kind.items.len) |si| {
+                if (self.scene.kindOfIdx(@intCast(si)) != .scrollview) continue;
+                if (si >= self.scene.elements.layout.items.len) continue;
+                const sv_rect = self.scene.elements.layout.items[si].computed;
+                if (sv_rect.x <= rect.x and sv_rect.y <= rect.y and
+                    sv_rect.x + sv_rect.w >= rect.x + rect.w)
+                {
+                    screen_y -= self.scene._scroll_state.items[si].scroll_y;
+                    break;
+                }
+            }
             const header_h: f32 = 36.0;
             if (x < rect.x or x >= rect.x + rect.w) continue;
-            if (y < rect.y or y >= rect.y + header_h) continue;
+            if (y < screen_y or y >= screen_y + header_h) continue;
             const ts = self.scene.tableStateOf(idx);
             var col_x = rect.x;
             var col_found: ?u8 = null;
@@ -1625,28 +1639,11 @@ pub const AppInner = struct {
     }
 
     fn handleScroll(self: *AppInner, dx: f32, dy: f32) void {
-        // Scroll the innermost (highest-index) scrollview under the cursor.
-        // Iterating in reverse DFS order ensures descendants match before ancestors.
         const n = self.scene._kind.items.len;
-        var i = n;
-        while (i > 0) {
-            i -= 1;
-            const idx = @as(u32, @intCast(i));
-            if (self.scene.kindOfIdx(idx) != .scrollview) continue;
-            if (idx >= self.scene.elements.layout.items.len) continue;
-            const rect = self.scene.elements.layout.items[idx].computed;
-            if (self.last_cursor_x >= rect.x and self.last_cursor_x < rect.x + rect.w and
-                self.last_cursor_y >= rect.y and self.last_cursor_y < rect.y + rect.h)
-            {
-                const ss = self.scene.scrollStateOf(idx);
-                const max_y = @max(0.0, ss.content_height - ss.container_height);
-                if (max_y <= 0 and dy != 0) continue; // can't scroll vertically, try parent
-                self.scene.setScrollOffset(idx, ss.scroll_y - dy * 16.0, ss.scroll_x - dx * 16.0);
-                break;
-            }
-        }
 
-        // Scroll data_table widgets under the cursor.
+        // First: check if cursor is over a data_table — if so, scroll it and return.
+        // This must run before the scrollview block so an ancestor ScrollView does not
+        // consume the event first.
         var j = n;
         while (j > 0) {
             j -= 1;
@@ -1664,6 +1661,26 @@ pub const AppInner = struct {
                 const max_scroll = @max(0.0, ts.row_height * @as(f32, @floatFromInt(n_rows)) - view_h);
                 ts.scroll_y = std.math.clamp(ts.scroll_y - dy * 32.0, 0.0, max_scroll);
                 if (idx < self.scene.elements.dirty.bit_length) self.scene.elements.dirty.set(idx);
+                return;
+            }
+        }
+
+        // Then: scroll the innermost (highest-index) scrollview under the cursor.
+        // Iterating in reverse DFS order ensures descendants match before ancestors.
+        var i = n;
+        while (i > 0) {
+            i -= 1;
+            const idx = @as(u32, @intCast(i));
+            if (self.scene.kindOfIdx(idx) != .scrollview) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const rect = self.scene.elements.layout.items[idx].computed;
+            if (self.last_cursor_x >= rect.x and self.last_cursor_x < rect.x + rect.w and
+                self.last_cursor_y >= rect.y and self.last_cursor_y < rect.y + rect.h)
+            {
+                const ss = self.scene.scrollStateOf(idx);
+                const max_y = @max(0.0, ss.content_height - ss.container_height);
+                if (max_y <= 0 and dy != 0) continue; // can't scroll vertically, try parent
+                self.scene.setScrollOffset(idx, ss.scroll_y - dy * 16.0, ss.scroll_x - dx * 16.0);
                 break;
             }
         }
