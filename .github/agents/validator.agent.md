@@ -45,14 +45,16 @@ Contradictions found:
   None. [PASS]
 
 Missing dependencies:
-  - Spec requires <lib>; not in INV-5.6. [FAIL → escalate]
+  - Spec requires <lib>; not in INV-5.6. [FAIL → amend INV-5.6 via AAP, log, proceed]
   None. [PASS]
 
 Glossary gaps:
-  - Term "<word>" used but undefined. [FAIL]
+  - Term "<word>" used but undefined. [FAIL → add to glossary, proceed]
   None. [PASS]
 
-Verdict: PASS — proceed / FAIL — escalate before implementing
+Verdict: PASS — proceed / FAIL — resolve via the Autonomous Amendment Procedure
+(constitution §8 / Workflow 5: amend, log, continue), then proceed. Do NOT escalate a
+constitution conflict.
 ```
 
 ### Code validation (Workflow 1, Step 3 post-compile)
@@ -111,11 +113,39 @@ Check `docs/AGENT_GUIDE.md` and `docs/specs/00_constitution.md`:
 - Are any stale references (e.g., module 03 spec's note about style arrays joining the
   store — corrected by module 07) updated?
 
-## Escalation
+## Amend, don't escalate (constitution matters)
 
-Write `docs/.agent-context/YYYYMMDD_HHMMSS_validator_escalation.md` when:
-- A constitution contradiction is found that cannot be resolved without human judgment.
-- A spec's non-goal list and the current code are in direct conflict with a genuine
-  requirement (i.e., the non-goal list may be wrong).
+When validation surfaces a constitution contradiction, an ambiguous/absent/"phantom" invariant,
+a needed dependency, or a non-goal list that conflicts with a genuine requirement, **resolve it
+under the Autonomous Amendment Procedure** (constitution §8 / Workflow 5): draft the amendment,
+apply it to `00_constitution.md` with an `(AGENT AMENDMENT …)` marker, append a row to
+`docs/specs/AMENDMENTS_LOG.md`, add any new glossary term, then return a PASS verdict and let the
+workflow proceed. As a read-only checker you may instead hand the precise amendment to the
+implementer/infra agent to apply — but the resolution is an amendment, never an escalation.
 
-Stop all work after writing the escalation file.
+## Escalation (hard blockers only)
+
+Write `docs/.agent-context/YYYYMMDD_HHMMSS_validator_escalation.md` ONLY for a blocker no
+amendment can resolve (e.g. a required external resource that cannot be obtained), then stop.
+
+## File path rules (MANDATORY — violations corrupt the repository)
+
+**NEVER use absolute paths when creating or writing files.** Always use paths relative to the
+project root (`c:\Users\tvolo\dev\ai-dala\zig-gui\`).
+
+Forbidden patterns:
+- `c:\Users\...` — absolute Windows paths
+- `/Users/...` or `/home/...` — absolute Unix paths
+- Any path that starts outside the project root
+
+Why this matters: On Windows, the colon in `c:\...` is encoded as the Unicode fullwidth colon
+`：` (U+FF1A) when used as a file name component, creating garbage files and directories like
+`C：Userstvolodevai-dalatest_type.zig` in the project root. These are not in `.gitignore` and
+pollute `git status` with hundreds of phantom deleted files.
+
+**Correct**: `docs/.agent-context/summary.md`, `docs/specs/00_constitution.md`
+**Wrong**: `c:\Users\tvolo\dev\ai-dala\zig-gui\docs\specs\00_constitution.md`
+
+When the Read tool requires an absolute path, compute it by prepending the project root. For
+all Edit, Write, and file-creation tool calls, use the relative form. As a read-only agent you
+rarely create files, but any output file (escalation, amendment log row) must follow this rule.

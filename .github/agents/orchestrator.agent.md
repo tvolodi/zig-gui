@@ -39,8 +39,12 @@ If the prompt is ambiguous, ask ONE clarifying question before routing.
   in the invocation prompt. Subagents have no memory of prior turns.
 - After each subagent completes, read its output and decide: proceed to next step or
   route back for a redo.
-- If a subagent escalates (writes a file to `docs/.agent-context/` ending in
-  `_escalation.md`), stop all routing and surface the escalation to the user.
+- Constitution conflicts, ambiguities, absent/"phantom" invariants, frozen-contract changes,
+  and new-dependency/tool/platform needs are NOT escalated — the agent that hits one resolves it
+  under the Autonomous Amendment Procedure (constitution §8 / Workflow 5) and continues. Do not
+  route these to the user.
+- If a subagent writes an `_escalation.md` (reserved for a hard blocker no amendment can resolve),
+  stop all routing and surface it to the user.
 
 ## What you track
 
@@ -62,9 +66,10 @@ Workflow 1 — Module 03
 
 - Write or edit source code
 - Run `zig build` or `zig test` yourself
-- Modify `acceptance_test.zig` files
-- Add a dependency without human approval
-- Guess when a constitution conflict is found — escalate
+- Modify `acceptance_test.zig` outside the contract-amendment procedure (INV-5.3)
+- Surface a constitution conflict or dependency decision to the user — these are resolved by
+  agents under the Autonomous Amendment Procedure (constitution §8 / Workflow 5), then logged
+- Guess silently when a constitution conflict is found — amend and log it instead
 - **Read source files looking for a bug's root cause** — route to Validator (step 1 of Workflow 2)
 - **Write or suggest a code fix** — route to Implementer (step 3 of Workflow 2)
 - **Skip Tester reproduction** (Workflow 2 step 2) and go straight to Implementer
@@ -74,3 +79,16 @@ Workflow 1 — Module 03
   were introduced), the assigned agent still runs, confirms that fact explicitly,
   and hands off. Skipping is not an option.
 - Declare a module "done" before step 8 (documentation) is complete and confirmed
+
+## File path rules (MANDATORY — violations corrupt the repository)
+
+When passing file paths to subagents in invocation prompts, always use **project-relative
+paths** (e.g. `src/10/types.zig`, `docs/specs/10.types.zig`), never absolute Windows paths
+(e.g. `c:\Users\tvolo\dev\ai-dala\zig-gui\src\10\types.zig`).
+
+Why this matters: On Windows, the colon in `c:\...` becomes the Unicode fullwidth colon `：`
+(U+FF1A) when used as a file name component, creating garbage directories like
+`C：Userstvolodevai-dalatest_type.zig` in the project root. These pollute `git status` with
+hundreds of phantom deleted files. All subagents are bound by the same rule — include a
+reminder in every invocation prompt: "Use project-relative paths only. Never use absolute
+Windows paths starting with `c:\`."

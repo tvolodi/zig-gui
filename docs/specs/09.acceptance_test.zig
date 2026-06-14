@@ -3,6 +3,16 @@
 //! THIS FILE IS THE SPECIFICATION OF CORRECT BEHAVIOR (INV-5.3). DO NOT EDIT IT TO MAKE AN
 //! IMPLEMENTATION PASS. If a test seems wrong, STOP and surface it to the human.
 //!
+//! (AGENT AMENDMENT 2026-06-14: the local `solve` helper's call to `layout_mod.solve` was
+//! updated to pass `1.0` as the new `dpi_scale` argument, matching the evolved signature in
+//! `docs/specs/04.types.zig`. Argument shape only; no assertion weakened. Enacted under
+//! INV-5.3 + AAP §8. See `docs/specs/AMENDMENTS_LOG.md`.)
+//!
+//! (AGENT AMENDMENT 2026-06-14: `drawFrame` call site updated from `drawFrame(&.{}, &gpu_atlas)`
+//! to `drawFrame(&.{}, .{ .glyph = .{ .backend_obj = ... }, .sdf = ..., .image = ... })`,
+//! matching the evolved RJ1 signature `drawFrame(commands, handles: AtlasHandles)`.
+//! Argument shape only; no assertion weakened. Enacted under INV-5.3 + AAP §8.)
+//!
 //! Pure CPU tests run always. GPU tests skip automatically if Vulkan is unavailable.
 //! Run with: `zig build test-09`.
 //! "Done" for module 09 == all pure tests pass, GPU tests pass on a Vulkan-capable machine,
@@ -43,7 +53,7 @@ fn stubFont() C.text.Font {
 // Manually solve a single-element scene with the given available size.
 fn solve(scene: *comp_mod.Scene, root: store_mod.ElementId, w: f32, h: f32) void {
     var scratch: [4096]u8 = undefined;
-    layout_mod.solve(scene.store(), root, .{ .min_w = w, .max_w = w, .min_h = h, .max_h = h }, &scratch);
+    layout_mod.solve(scene.store(), root, .{ .min_w = w, .max_w = w, .min_h = h, .max_h = h }, &scratch, 1.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +77,7 @@ test "invisible element (transparent bg, no border, no text) emits no commands" 
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -91,7 +101,7 @@ test "zero-size element emits no commands" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -114,7 +124,7 @@ test "button with solid background emits filled_rect with correct color and rect
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Must contain at least one filled_rect (background).
@@ -155,7 +165,7 @@ test "element with border emits border_rect command" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     var found_border = false;
@@ -183,7 +193,7 @@ test "painter order: parent filled_rect comes before child filled_rect" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     // Find index of parent (card) bg and child (button) bg.
@@ -280,7 +290,7 @@ test "text element emits glyph commands (font present, else skip)" {
     var img_atlas = try makeDummyImageAtlas(testing.allocator);
     defer img_atlas.deinit();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     var glyph_count: usize = 0;
@@ -316,7 +326,7 @@ test "empty draw list is valid (no commands emitted, no crash)" {
     defer img_atlas.deinit();
     var font = stubFont();
 
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
 
     try testing.expectEqual(@as(usize, 0), cmds.len);
@@ -376,7 +386,11 @@ test "GPU: drawFrame with empty command list completes without validation errors
     defer gpu_atlas.deinit(impl.device);
 
     if (ctx.backend.beginFrame()) {
-        ctx.backend.drawFrame(&.{}, &gpu_atlas);
+        ctx.backend.drawFrame(&.{}, platform_mod.AtlasHandles{
+            .glyph = .{ .backend_obj = @as(*anyopaque, @ptrCast(&gpu_atlas)) },
+            .sdf   = .{ .backend_obj = @as(*anyopaque, @ptrCast(&gpu_atlas)) },
+            .image = .{ .backend_obj = @as(*anyopaque, @ptrCast(&gpu_atlas)) },
+        });
         ctx.backend.endFrame();
     }
     try testing.expectEqual(@as(u32, 0), ctx.backend.validationIssueCount());

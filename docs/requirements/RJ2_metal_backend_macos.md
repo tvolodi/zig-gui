@@ -79,3 +79,22 @@ module changes.
 4. A side-by-side visual comparison of the demo screens (Metal vs Vulkan reference) shows no
    structural differences (text legible, colors correct, shapes positioned identically).
 5. Missing-device path shows the RA3 startup-failure dialog.
+
+## Deferred items from M20 (must be completed as part of this requirement)
+
+The following items were deferred from M20 (RJ0 implementation) because they require a second
+backend to exist before the extraction is justified. They are **not optional** — they are part
+of RJ2's definition of done.
+
+### Surface layer file extraction (RJ5 follow-through)
+
+M20 shipped with `Surface`, `createSurface`, and the Vulkan surface dispatch living inline in
+`src/01/types.zig`. The module location table in RJ2 (above) lists `src/01/surface_macos.zig`
+as a separate file. When implementing RJ2:
+
+1. Extract the platform-surface logic from `src/01/types.zig` into per-platform files:
+   - `src/01/surface_vulkan.zig` — VkSurfaceKHR creation (moved from `types.zig`)
+   - `src/01/surface_macos.zig` — CAMetalLayer surface (new, for Metal)
+2. `src/01/types.zig` retains only the `Surface` union and a thin `createSurface` dispatcher
+   that delegates to the per-platform file selected by `build_options.gpu`.
+3. Existing Vulkan tests must continue to pass after the extraction.

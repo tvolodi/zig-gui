@@ -64,3 +64,35 @@ docs/requirements/RJ1_vulkan_backend_conformance.md
    pre-refactor baseline (diff = 0).
 3. RJ0 AC3 (shader-mode parity test) passes against the reorganized `quad.frag`.
 4. RJ0 AC5 (no `Vulkan*` symbol in modules 04–08) passes.
+
+## Deferred items from M20 (must be completed as part of this requirement)
+
+The following items were deferred from M20 (RJ0 implementation) because they require the
+Vulkan conformance refactor to land first. They are **not optional** — they are part of
+RJ1's definition of done.
+
+### AC2 — Visual regression baseline
+
+M20 shipped without a pre-refactor screenshot baseline. RJ1 is the refactor; the baseline
+must be established **before** the refactor code lands:
+
+1. Run `zig build visual-check` on the `main` branch (pre-refactor) and save the output
+   screenshots to `testdata/visual-baseline/` (one PNG per demo screen).
+2. After the refactor lands, run `zig build visual-check` again and diff against the baseline.
+3. AC2 is satisfied when the diff shows 0 structural differences (pixel-identical or within
+   the documented AA tolerance).
+
+The baseline directory does not exist yet — the implementer must create it and the `zig build
+visual-baseline` capture step as part of this requirement.
+
+### `drawFrame` AtlasHandles signature
+
+M20 kept `drawFrame(commands, atlas: *const anyopaque)` because `09.acceptance_test.zig`
+(frozen, INV-5.3) calls `drawFrame(&.{}, &gpu_atlas)` with a raw pointer. RJ1 (this
+requirement) changes the `VulkanBackend.drawFrame` signature to `AtlasHandles` as specified
+in the RJ0 public API table. This requires a contract amendment (INV-5.3 / AAP):
+
+1. Update `src/01/types.zig` `drawFrame` to accept `handles: AtlasHandles`.
+2. Update the corresponding call sites in `docs/specs/09.acceptance_test.zig` in the same
+   pass (never weaken an assertion).
+3. Record the amendment in `docs/specs/AMENDMENTS_LOG.md`.

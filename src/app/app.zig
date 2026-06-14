@@ -918,13 +918,15 @@ pub const AppInner = struct {
             const main_cmds = mod09.buildDrawList(
                 self.gpa,
                 &self.scene,
-                &self.atlas_cpu,
-                &self.image_atlas,
-                self.font_family.face(false, false),
-                self.tokens,
-                &self.subpixel_atlas_cpu,
-                self.subpixel_text,
-                &self.sdf_atlas_cpu,
+                .{
+                    .atlas = &self.atlas_cpu,
+                    .image_atlas = &self.image_atlas,
+                    .font = self.font_family.face(false, false),
+                    .tokens = self.tokens,
+                    .subpixel_atlas = &self.subpixel_atlas_cpu,
+                    .subpixel_text = self.subpixel_text,
+                    .sdf_atlas = &self.sdf_atlas_cpu,
+                },
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
@@ -994,12 +996,11 @@ pub const AppInner = struct {
                 .b = @as(f32, @floatFromInt(c1.b)) / 255.0,
                 .a = 1.0,
             });
-            const handles = @import("../10/types.zig").AtlasHandles{
-                .glyph = .{ .backend_obj = @ptrCast(self.atlas_gpu.image.?) },
-                .sdf = .{ .backend_obj = @ptrCast(self.sdf_atlas_gpu.image.?) },
-                .image = .{ .backend_obj = @ptrCast(self.subpixel_atlas_gpu.image.?) },
-            };
-            self.backend.drawFrame(all_cmds2, handles);
+            self.backend.drawFrame(all_cmds2, mod01.AtlasHandles{
+                .glyph = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.atlas_gpu)) },
+                .sdf   = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.sdf_atlas_gpu)) },
+                .image = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.gpu_image_atlas)) },
+            });
             self.backend.endFrame();
 
             // R92: Record frame counters.
@@ -1198,13 +1199,15 @@ pub const AppInner = struct {
             const main_cmds = mod09.buildDrawList(
                 self.gpa,
                 &self.scene,
-                &self.atlas_cpu,
-                &self.image_atlas,
-                self.font_family.face(false, false),
-                self.tokens,
-                &self.subpixel_atlas_cpu,
-                self.subpixel_text,
-                &self.sdf_atlas_cpu,
+                .{
+                    .atlas = &self.atlas_cpu,
+                    .image_atlas = &self.image_atlas,
+                    .font = self.font_family.face(false, false),
+                    .tokens = self.tokens,
+                    .subpixel_atlas = &self.subpixel_atlas_cpu,
+                    .subpixel_text = self.subpixel_text,
+                    .sdf_atlas = &self.sdf_atlas_cpu,
+                },
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
             };
@@ -1270,12 +1273,11 @@ pub const AppInner = struct {
                 .b = @as(f32, @floatFromInt(c2.b)) / 255.0,
                 .a = 1.0,
             });
-            const handles2 = @import("../10/types.zig").AtlasHandles{
-                .glyph = .{ .backend_obj = @ptrCast(self.atlas_gpu.image.?) },
-                .sdf = .{ .backend_obj = @ptrCast(self.sdf_atlas_gpu.image.?) },
-                .image = .{ .backend_obj = @ptrCast(self.subpixel_atlas_gpu.image.?) },
-            };
-            self.backend.drawFrame(all_cmds2, handles2);
+            self.backend.drawFrame(all_cmds2, mod01.AtlasHandles{
+                .glyph = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.atlas_gpu)) },
+                .sdf   = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.sdf_atlas_gpu)) },
+                .image = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.gpu_image_atlas)) },
+            });
             self.backend.endFrame();
 
             // R92: Record frame counters.

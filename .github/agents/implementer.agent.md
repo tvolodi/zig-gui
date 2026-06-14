@@ -30,14 +30,18 @@ satisfy `NN.types.zig` and pass `NN.acceptance_test.zig`.
 
 ## Implementation rules (non-negotiable)
 
-- **Match `types.zig` signatures exactly.** Do NOT change a signature because it is
-  inconvenient. If a signature looks wrong, write an escalation file and stop.
-- **Never modify `acceptance_test.zig`.** It is the human's specification (INV-5.3).
-  If a test looks wrong, write an escalation file and stop.
+- **Match `types.zig` signatures exactly.** Do NOT change a signature for convenience. If a
+  signature genuinely must change to let correct work proceed, follow the contract-amendment
+  procedure (INV-5.3): change the `types.zig` signature AND its `acceptance_test.zig` call sites
+  in the same pass (never weakening an assertion), record it as an amendment
+  (constitution §8 / Workflow 5), then continue. Do NOT escalate it.
+- **Modify `acceptance_test.zig` only via the contract-amendment procedure (INV-5.3)** — together
+  with the signature it verifies, recorded as an amendment. Never edit a test on its own.
 - **Never implement non-goals.** Each spec lists them. Respect the list (INV-5.4).
 - **No per-widget heap allocations.** Widget data lives in parallel arrays (INV-3.1).
 - **No upward imports.** Module N may only import modules numbered less than N (INV-3.4).
-- **No unapproved dependencies.** If you need something not in INV-5.6, escalate.
+- **Dependencies:** if you need something not in INV-5.6, add it to INV-5.6 under the Autonomous
+  Amendment Procedure (constitution §8 / Workflow 5) — amend, log, continue. Do NOT escalate.
 
 ## Do → validate → redo loop
 
@@ -87,12 +91,37 @@ This step is not optional and cannot be skipped regardless of how small the chan
 
 Do not tell the Orchestrator Step 7 is done until all four sub-tasks are complete.
 
-## Escalation
+## Amend, don't escalate (constitution matters)
 
-Write `docs/.agent-context/YYYYMMDD_HHMMSS_implementer_escalation.md` when:
-- A `types.zig` signature appears impossible to implement as written.
-- A test appears to encode incorrect behavior.
-- A needed import would violate build order.
-- After 3 attempts, a compile error is unresolved.
+For a wrong/impossible `types.zig` signature, a test that encodes incorrect behavior, a needed
+dependency, or any other rule that blocks correct work: **amend the constitution under the
+Autonomous Amendment Procedure** (constitution §8 / Workflow 5) — draft the change, apply it with
+an `(AGENT AMENDMENT …)` marker, append a row to `docs/specs/AMENDMENTS_LOG.md`, then continue.
+Do NOT stop, and do NOT write an `_escalation.md` for these.
 
-Stop all work after writing the escalation file.
+## Escalation (hard blockers only)
+
+Write `docs/.agent-context/YYYYMMDD_HHMMSS_implementer_escalation.md` ONLY when a blocker exists
+that no amendment can resolve — e.g. after 3 attempts a compile error remains unresolved, or a
+required external resource cannot be obtained. Then stop all work.
+
+## File path rules (MANDATORY — violations corrupt the repository)
+
+**NEVER use absolute paths when creating or writing files.** Always use paths relative to the
+project root (`c:\Users\tvolo\dev\ai-dala\zig-gui\`).
+
+Forbidden patterns:
+- `c:\Users\...` — absolute Windows paths
+- `/Users/...` or `/home/...` — absolute Unix paths
+- Any path that starts outside the project root
+
+Why this matters: On Windows, the colon in `c:\...` is encoded as the Unicode fullwidth colon
+`：` (U+FF1A) when used as a file name component, creating garbage files and directories like
+`C：Userstvolodevai-dalatest_type.zig` in the project root. These are not in `.gitignore` and
+pollute `git status` with hundreds of phantom deleted files.
+
+**Correct**: `src/10/types.zig`, `docs/specs/10.types.zig`, `build.zig`
+**Wrong**: `c:\Users\tvolo\dev\ai-dala\zig-gui\src\10\types.zig`
+
+When the Read tool requires an absolute path, compute it by prepending the project root. For
+all Edit, Write, and file-creation tool calls, use the relative form.

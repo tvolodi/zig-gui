@@ -74,3 +74,17 @@ None beyond RJ0. `Dx12Backend` conforms to `GpuBackend`.
 3. Shader-mode parity test passes for the HLSL shader set.
 4. Side-by-side visual comparison (DX12 vs Vulkan reference) shows no structural differences.
 5. Missing-device path shows the RA3 startup-failure dialog.
+
+## Deferred items from M20 (prerequisite check)
+
+Before implementing RJ3, confirm that RJ2 (Metal backend) has already completed the surface
+layer file extraction (see RJ2's "Deferred items from M20" section). If RJ2 is not yet done,
+the extraction must be completed first (it can be done as part of RJ3 instead if RJ2 is
+skipped on timeline, but the extraction itself is mandatory before RJ3 ships):
+
+- `src/01/surface_vulkan.zig` must exist and be extracted from `types.zig`.
+- `src/01/surface_win32.zig` is the new DX12/DXGI surface file (listed in the module location
+  table above). It must be created as part of RJ3 if not already present from RJ2.
+
+No additional M20 deferrals apply to RJ3 specifically — the `drawFrame` AtlasHandles signature
+and visual baseline are RJ1's responsibility (see `RJ1_vulkan_backend_conformance.md`).

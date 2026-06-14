@@ -91,3 +91,15 @@ platform query so R82/RA2 can branch without per-call OS checks upstream.
 4. Input (click, type, scroll, resize) works in the browser via the event shim.
 5. Browser-without-WebGPU shows the in-page unsupported message; no uncaught exception.
 6. Persistent-settings and logging degradation on the browser is documented and does not crash.
+
+## Deferred items from M20 (prerequisite check)
+
+Before implementing RJ4, confirm that:
+
+1. **RJ1** has completed the `drawFrame` AtlasHandles signature update and visual regression
+   baseline (see `RJ1_vulkan_backend_conformance.md` deferred items section).
+2. **RJ2** has completed the surface layer file extraction (see `RJ2_metal_backend_macos.md`
+   deferred items section). `src/01/surface_web.zig` and `src/01/surface_webgpu_native.zig`
+   (listed in the module location table above) must be created as part of RJ4.
+
+No additional M20 deferrals apply to RJ4 specifically.
