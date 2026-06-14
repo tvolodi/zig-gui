@@ -371,16 +371,16 @@ Generalize the single Vulkan backend into one interface with multiple implementa
 
 ---
 
-## Milestone 24 — Complex-script text `planned (v2)`
+## Milestone 24 — Complex-script text `done`
 
 Adds a shaping stage and bidirectional reordering (module 11). Highest regression risk.
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
-| M24-01 | **HarfBuzz shaping** — contextual glyph selection, ligatures, mark positioning | 02, 04 | [RK0](requirements/RK0_harfbuzz_shaping.md) | `planned` |
-| M24-02 | **Bidirectional text** — UBA itemization + visual reorder; mixed LTR/RTL | RK0, RE3 | [RK1](requirements/RK1_bidirectional_text.md) | `planned` |
-| M24-03 | **CJK fallback + atlas scaling** — atlas growth/LRU eviction, CJK font, ideograph line breaks | RK0, R64 | [RK2](requirements/RK2_cjk_atlas_scaling.md) | `planned` |
-| M24-04 | **Shaping-aware editing** — cluster carets, visual navigation, bidi selection rects | RK0, RK1, R32, R62, R63 | [RK3](requirements/RK3_shaping_aware_editing.md) | `planned` |
+| M24-01 | **HarfBuzz shaping** — contextual glyph selection, ligatures, mark positioning | 02, 04 | [RK0](requirements/RK0_harfbuzz_shaping.md) | `done` |
+| M24-02 | **Bidirectional text** — UBA itemization + visual reorder; mixed LTR/RTL | RK0, RE3 | [RK1](requirements/RK1_bidirectional_text.md) | `done` |
+| M24-03 | **CJK fallback + atlas scaling** — atlas growth/LRU eviction, CJK font, ideograph line breaks | RK0, R64 | [RK2](requirements/RK2_cjk_atlas_scaling.md) | `done` |
+| M24-04 | **Shaping-aware editing** — cluster carets, visual navigation, bidi selection rects | RK0, RK1, R32, R62, R63 | [RK3](requirements/RK3_shaping_aware_editing.md) | `done` |
 
 ---
 

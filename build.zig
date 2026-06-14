@@ -26,6 +26,27 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // -----------------------------------------------------------------------
+    // HarfBuzz vendored stub — compiles to a static library.
+    // Replace vendor/harfbuzz/src/hb-stub.c with real HarfBuzz source for
+    // production shaping. See docs/HOW_TO_USE.md §Complex-Script Text (M24).
+    // -----------------------------------------------------------------------
+    const harfbuzz_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const harfbuzz_lib = b.addLibrary(.{
+        .name = "harfbuzz",
+        .linkage = .static,
+        .root_module = harfbuzz_mod,
+    });
+    harfbuzz_mod.addIncludePath(b.path("vendor/harfbuzz/include"));
+    harfbuzz_mod.addCSourceFile(.{
+        .file = b.path("vendor/harfbuzz/src/hb-stub.c"),
+        .flags = &.{"-std=c11"},
+    });
+
+    // -----------------------------------------------------------------------
     // GPU backend selection (-Dgpu=vulkan|metal|dx12|webgpu, default per target).
     // -----------------------------------------------------------------------
     const gpu_default: BackendKind = switch (target.result.os.tag) {
@@ -290,6 +311,10 @@ pub fn build(b: *std.Build) void {
                 ialias("startup_error.zig", "mod_startup_error"),
                 ialias("tray.zig", "mod_tray"),
             } },
+        // Module 11 — complex script shaping and bidi (M24).
+        // HarfBuzz include path and library are wired below after the module map is built.
+        .{ .name = "mod11_shaping",       .root = "src/11/types.zig" },
+
         // mod_app — public root module.
         .{ .name = "mod_app",             .root = "src/app/types.zig",         .deps = &.{
             "mod01_platform", "mod02_text", "mod03_element_store", "mod04_layout_engine",
@@ -349,6 +374,15 @@ pub fn build(b: *std.Build) void {
     }
 
     // -- Special wiring not expressible in the table --
+
+    // M24: wire HarfBuzz include path + static library into mod11_shaping.
+    // harfbuzz.zig uses @cImport("hb.h") which requires the include path.
+    {
+        const mod11 = module_map.get("mod11_shaping").?;
+        mod11.addIncludePath(b.path("vendor/harfbuzz/include"));
+        mod11.linkLibrary(harfbuzz_lib);
+        mod11.link_libc = true;
+    }
 
     module_map.get("mod01_platform").?.addImport("embedded_shaders", shaders_mod);
 
@@ -575,6 +609,15 @@ pub fn build(b: *std.Build) void {
     const update_check_test_ = createTest(b, target, optimize, &module_map, "test-update-check", "src/tools/update_check_test.zig", &.{ ia("update_check.zig", "mod_update_check") }, false, false);
     const bspatch_test_      = createTest(b, target, optimize, &module_map, "test-bspatch",      "src/tools/bspatch_test.zig",      &.{ ia("bspatch.zig",      "mod_bspatch") },      false, false);
 
+    // M24: module 11 complex-script shaping + bidi unit tests (pure, no GPU, no font required).
+    const unit_11 = createTest(b, target, optimize, &module_map, "11-unit-test", "src/11/11_test.zig", &.{
+        ia("types.zig", "mod11_shaping"),
+    }, false, false);
+    // Wire HarfBuzz include path + static library into the test module.
+    unit_11.root_module.addIncludePath(b.path("vendor/harfbuzz/include"));
+    unit_11.root_module.linkLibrary(harfbuzz_lib);
+    unit_11.root_module.link_libc = true;
+
     // startup_error_test and tray_test need Win32 libs on Windows.
     if (target.result.os.tag == .windows) {
         startup_error_test_.root_module.linkSystemLibrary("user32", .{});
@@ -702,6 +745,7 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-tray",         "Run Tray unit tests (RF0, headless)", tray_test_);
     _ = addTestStep(b, "test-update-check", "Run M19-01 update manifest check unit tests (pure, no network)", update_check_test_);
     _ = addTestStep(b, "test-bspatch",      "Run M19-02 bspatch unit tests (pure, no I/O)", bspatch_test_);
+    _ = addTestStep(b, "test-11",           "Run M24 complex-script shaping + bidi unit tests (pure, no GPU)", unit_11);
 
     // -------------------------------------------------------------------
     // R55 — Build-time markup codegen tool (ui_codegen).

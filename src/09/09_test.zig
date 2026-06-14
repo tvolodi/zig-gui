@@ -62,7 +62,7 @@ test "buildDrawList: empty scene" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
     try testing.expectEqual(@as(usize, 0), cmds.len);
 }
@@ -81,7 +81,7 @@ test "buildDrawList: invisible row emits zero commands" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, tokens(), null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tokens() });
     defer testing.allocator.free(cmds);
     try testing.expectEqual(@as(usize, 0), cmds.len);
 }
@@ -101,7 +101,7 @@ test "buildDrawList: button has background" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     var found = false;
     for (cmds) |cmd| {
@@ -402,7 +402,7 @@ test "buildDrawList: hovered button produces accent_hover background" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     // Find a filled_rect with the accent_hover color.
     const expected_color = t.accent_hover;
@@ -440,7 +440,7 @@ test "buildDrawList: scrollview emits set_scissor before children and restore_sc
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     // Verify set_scissor appears before restore_scissor
     var set_idx: ?usize = null;
@@ -469,7 +469,7 @@ test "buildDrawList: scene without scrollview emits no scissor commands" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     for (cmds) |cmd| {
         try testing.expect(cmd != .set_scissor);
@@ -495,7 +495,7 @@ test "buildDrawList: child outside scrollview bounds still appears in draw list"
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     // There should be at least a set_scissor and restore_scissor plus the child's commands.
     var has_scissor = false;
@@ -588,7 +588,7 @@ test "buildDrawList: image element with image_id != 0 emits image_rect command" 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     var found = false;
     for (cmds) |cmd| {
@@ -613,7 +613,7 @@ test "buildDrawList: image element with image_id == 0 emits no image_rect" {
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     for (cmds) |cmd| {
         try testing.expect(cmd != .image_rect);
@@ -640,7 +640,7 @@ test "buildDrawList: element with opacity=0.0 produces draw commands with a==0" 
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     // Every color in the draw commands should have a == 0.
     for (cmds) |cmd| {
@@ -694,7 +694,7 @@ test "buildDrawList: scrollview child rect is offset by scroll_y" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Find the filled_rect that belongs to the button child (after set_scissor).
@@ -735,12 +735,12 @@ fn preInsertGlyphs(atlas: *C.GlyphAtlas, str: []const u8, px: u16, include_ellip
     const blank = [_]u8{128} ** (8 * 8);
     var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
     while (iter.nextCodepoint()) |cp| {
-        const key = C.text.GlyphKey{ .codepoint = cp, .px = px };
+        const key = C.text.GlyphKey{ .glyph_id = @intCast(cp), .px = px };
         _ = try atlas.insert(key, 8, 8, &blank);
     }
     if (include_ellipsis) {
         // Pre-insert the ellipsis glyph (U+2026) so ellipsisMetrics doesn't need rasterize.
-        const ellipsis_key = C.text.GlyphKey{ .codepoint = 0x2026, .px = px };
+        const ellipsis_key = C.text.GlyphKey{ .glyph_id = 0x2026, .px = px };
         _ = try atlas.insert(ellipsis_key, 8, 8, &blank);
     }
 }
@@ -768,7 +768,7 @@ test "buildDrawList: truncate=false, overflowing text skips glyphs beyond rect" 
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, false);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Count glyph commands.
@@ -813,7 +813,7 @@ test "buildDrawList: truncate=true, overflowing text emits ellipsis" {
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     var glyph_count: usize = 0;
@@ -849,7 +849,7 @@ test "buildDrawList: truncate=true, short text that fits emits all glyphs, no el
     try preInsertGlyphs(&atlas, "ABC", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Count glyphs. Exactly 3 should be emitted (A, B, C). No extra trailing ellipsis glyph.
@@ -883,7 +883,7 @@ test "buildDrawList: truncate=true, ellipsis glyph dst.x within element rect" {
     try preInsertGlyphs(&atlas, "ABCDEFGH", px, true);
 
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     const rect_x: f32 = scene.store().layout.items[root.index].computed.x;
@@ -925,7 +925,7 @@ test "buildDrawList: opacity=0.5 element emits commands with halved alpha" {
     var img_atlas = try image_atlas_mod.ImageAtlas.init(testing.allocator);
     defer img_atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Find the first filled_rect (the card background).
@@ -1035,7 +1035,7 @@ test "buildDrawList: parent opacity=0.5, child opacity=0.5 produces effective 0.
     defer img_atlas.deinit();
     var font = stubFont();
     const t = tokens();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
 
     // Collect filled_rect alpha values from the two card backgrounds.
@@ -1169,7 +1169,7 @@ test "buildDrawList: element with shadow-md emits shadow rects before background
     var atlas = try C.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var font = stubFont();
-    const cmds = try C.buildDrawList(testing.allocator, &scene, &atlas, &img_atlas, &font, t, null, false, null);
+    const cmds = try C.buildDrawList(testing.allocator, &scene, .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = t });
     defer testing.allocator.free(cmds);
     // The first filled_rect commands should be the shadow rects (5 of them for shadow-md).
     // shadow-md sets shadow_blur=8 → 5 rects.

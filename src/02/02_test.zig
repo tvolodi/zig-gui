@@ -121,18 +121,18 @@ test "wrap: out_lines has exactly words.len slots — worst-case one word per li
 test "GlyphAtlas: lookup on an empty atlas returns null" {
     var atlas = try T.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
-    const result = atlas.lookup(.{ .codepoint = 'A', .px = 16 });
+    const result = atlas.lookup(.{ .glyph_id = 'A', .px = 16 });
     try testing.expect(result == null);
 }
 
 test "GlyphAtlas: insert zero-size glyph does not crash, returns zero-sized rect" {
     var atlas = try T.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
-    const rect = try atlas.insert(.{ .codepoint = 'Z', .px = 16 }, 0, 0, &.{});
+    const rect = try atlas.insert(.{ .glyph_id = 'Z', .px = 16 }, 0, 0, &.{});
     try testing.expectEqual(@as(u32, 0), rect.w);
     try testing.expectEqual(@as(u32, 0), rect.h);
     // A subsequent lookup must find the cached entry.
-    const cached = atlas.lookup(.{ .codepoint = 'Z', .px = 16 });
+    const cached = atlas.lookup(.{ .glyph_id = 'Z', .px = 16 });
     try testing.expect(cached != null);
     try testing.expectEqual(rect, cached.?);
 }
@@ -141,7 +141,7 @@ test "GlyphAtlas: inserting the same key 3+ times always returns the same rect" 
     var atlas = try T.GlyphAtlas.init(testing.allocator, 64, 64);
     defer atlas.deinit();
     var buf: [8 * 8]u8 = [_]u8{0xFF} ** 64;
-    const key = T.GlyphKey{ .codepoint = 'M', .px = 16 };
+    const key = T.GlyphKey{ .glyph_id = 'M', .px = 16 };
     const r1 = try atlas.insert(key, 8, 8, &buf);
     const r2 = try atlas.insert(key, 8, 8, &buf);
     const r3 = try atlas.insert(key, 8, 8, &buf);
@@ -162,16 +162,16 @@ test "GlyphAtlas: multiple growth cycles preserve all prior entries" {
     defer atlas.deinit();
     var buf: [5 * 5]u8 = [_]u8{0xAB} ** 25;
 
-    const r_a = try atlas.insert(.{ .codepoint = 'A', .px = 16 }, 5, 5, &buf);
-    const r_b = try atlas.insert(.{ .codepoint = 'B', .px = 16 }, 5, 5, &buf);
-    _ = try atlas.insert(.{ .codepoint = 'C', .px = 16 }, 5, 5, &buf);
+    const r_a = try atlas.insert(.{ .glyph_id = 'A', .px = 16 }, 5, 5, &buf);
+    const r_b = try atlas.insert(.{ .glyph_id = 'B', .px = 16 }, 5, 5, &buf);
+    _ = try atlas.insert(.{ .glyph_id = 'C', .px = 16 }, 5, 5, &buf);
 
     // Atlas must have grown at least to 16×16 after two doublings.
     try testing.expect(atlas.width >= 16 and atlas.height >= 16);
 
     // Re-lookup must return the rects that were returned at insertion time.
-    const check_a = atlas.lookup(.{ .codepoint = 'A', .px = 16 }).?;
-    const check_b = atlas.lookup(.{ .codepoint = 'B', .px = 16 }).?;
+    const check_a = atlas.lookup(.{ .glyph_id = 'A', .px = 16 }).?;
+    const check_b = atlas.lookup(.{ .glyph_id = 'B', .px = 16 }).?;
     try testing.expectEqual(r_a, check_a);
     try testing.expectEqual(r_b, check_b);
 

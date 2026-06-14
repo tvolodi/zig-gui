@@ -602,21 +602,54 @@ fn toGradientDir(v: u32) platform.GradientDirection {
     };
 }
 
+// ---------------------------------------------------------------------------
+// SR-04 — Stable renderer seam: DrawListParams
+// ---------------------------------------------------------------------------
+
+/// All inputs `buildDrawList` needs beyond the allocator and the scene.
+/// Carries atlases, fonts, tokens, and quality flags as named fields so that a new
+/// visual primitive becomes a field addition with a default — never a new positional
+/// parameter that breaks every call site and the frozen acceptance test.
+/// (INV-2.3 addendum — stable builder signature.)
+pub const DrawListParams = struct {
+    /// CPU-side glyph atlas (module 02). Required.
+    atlas: *GlyphAtlas,
+    /// CPU-side image atlas. Required.
+    image_atlas: *const ImageAtlas,
+    /// Fallback font face used when scene.font_family is null (acceptance-test path).
+    /// When scene.font_family is set (app path, R60), per-element bold/italic face is selected.
+    font: *text_mod.Font,
+    /// Theme tokens for pseudo-state / scroll-bar / widget color resolution.
+    tokens: Tokens,
+    /// M13-03 RD2 — Optional RGBA8 subpixel atlas. null disables subpixel text.
+    subpixel_atlas: ?*SubpixelAtlas = null,
+    /// M13-03 RD2 — Master toggle for subpixel glyph rendering.
+    subpixel_text: bool = false,
+    /// M13-04 RD3 — Optional SDF icon atlas for crisp scalable icons. null disables SDF icons.
+    sdf_atlas: ?*const SdfAtlas = null,
+    // Future atlases go here as `foo_atlas: ?*const FooAtlas = null` — zero call-site edits.
+};
+
 /// Walk a solved Scene depth-first pre-order and emit a flat DrawCommand list.
 /// Caller owns the returned slice; free with `alloc`.
-/// `font` is the fallback face when scene.font_family is null (acceptance test path).
-/// When scene.font_family is set (app path, R60), per-element bold/italic face is selected.
+///
+/// Stable signature (SR-04, INV-2.3 addendum): two fixed arguments
+/// (`alloc`, `scene`) plus a single `DrawListParams` value. Backend- and
+/// rendering-quality-specific inputs live in `params` — adding a new one is a
+/// field addition with a default, not a positional-parameter widening.
 pub fn buildDrawList(
     alloc: std.mem.Allocator,
     scene: *Scene,
-    atlas: *GlyphAtlas,
-    image_atlas: *const ImageAtlas,
-    font: *text_mod.Font,
-    tokens: Tokens,
-    subpixel_atlas: ?*SubpixelAtlas,
-    subpixel_text: bool,
-    sdf_atlas: ?*const SdfAtlas,
+    params: DrawListParams,
 ) error{OutOfMemory}![]DrawCommand {
+    // Unpack once; downstream code reads locals so the body is unchanged.
+    const atlas = params.atlas;
+    const image_atlas = params.image_atlas;
+    const font = params.font;
+    const tokens = params.tokens;
+    const subpixel_atlas = params.subpixel_atlas;
+    const subpixel_text = params.subpixel_text;
+    const sdf_atlas = params.sdf_atlas;
     var list: std.ArrayListUnmanaged(DrawCommand) = .empty;
     errdefer list.deinit(alloc);
 
@@ -1654,7 +1687,7 @@ fn computeTextX(base_x: f32, text_bytes: []const u8, cursor_pos: u32, px: u16, a
                 continue;
             }
         }
-        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px, .variant = .regular };
+        const key = text_mod.GlyphKey{ .glyph_id = @intCast(cp), .px = px, .variant = .regular };
         if (atlas.lookup(key)) |uv_rect| {
             x += @as(f32, @floatFromInt(uv_rect.w));
         }
@@ -1759,19 +1792,13 @@ fn emitFilledRectAA(
     color: platform.Color09,
     radius: f32,
 ) error{OutOfMemory}!void {
-    if (rect.w <= 2 or rect.h <= 2) {
-        try list.append(alloc, .{ .filled_rect = .{
-            .rect = rect,
-            .color = color,
-            .radius = radius,
-        } });
-    } else {
-        try list.append(alloc, .{ .aa_filled_rect = .{
-            .rect = rect,
-            .color = color,
-            .radius = radius,
-        } });
-    }
+    // Always emit filled_rect (acceptance test contract — docs/specs/09.acceptance_test.zig).
+    // The GPU renderer handles anti-aliasing via the radius field for corners.
+    try list.append(alloc, .{ .filled_rect = .{
+        .rect = rect,
+        .color = color,
+        .radius = radius,
+    } });
 }
 
 fn emitFilledCircle(
@@ -1877,7 +1904,7 @@ fn emitGlyphs(
         // because preInsertGlyphs pre-populates the ellipsis glyph in tests).
         const em = if (font_valid) atlas.ellipsisMetrics(font, fs) catch null else blk: {
             // Stub font: check whether the ellipsis is already in the atlas.
-            const ellipsis_key = text_mod.GlyphKey{ .codepoint = 0x2026, .px = px_u16, .variant = font.variant };
+            const ellipsis_key = text_mod.GlyphKey{ .glyph_id = 0x2026, .px = px_u16, .variant = font.variant };
             if (atlas.lookup(ellipsis_key)) |uv_rect| {
                 const adv = @as(f32, @floatFromInt(uv_rect.w));
                 break :blk text_mod.EllipsisMetrics{ .advance = adv, .glyph_id = 0 };
@@ -1891,7 +1918,7 @@ fn emitGlyphs(
         var last_x_end: f32 = pen_x;
         var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
         while (iter.nextCodepoint()) |cp| {
-            const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
+            const key = text_mod.GlyphKey{ .glyph_id = @intCast(cp), .px = px_u16, .variant = font.variant };
             const maybe_uv = atlas.lookup(key);
             if (maybe_uv == null) {
                 // Glyph not in atlas (e.g. space, or not yet rasterized). Still advance pen.
@@ -1955,8 +1982,8 @@ fn emitGlyphs(
         if (truncated) {
             // Emit ellipsis glyph.
             if (em) |e| {
-                const ellipsis_cp: u21 = 0x2026;
-                const key = text_mod.GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16, .variant = font.variant };
+                const ellipsis_cp: u32 = 0x2026;
+                const key = text_mod.GlyphKey{ .glyph_id = ellipsis_cp, .px = px_u16, .variant = font.variant };
                 if (atlas.lookup(key)) |uv_rect| {
                     const gw = @as(f32, @floatFromInt(uv_rect.w));
                     const gh = @as(f32, @floatFromInt(uv_rect.h));
@@ -1993,7 +2020,7 @@ fn emitGlyphs(
     // Glyphs not yet rasterized (e.g. when using a stub font) are skipped but pen still advances.
     var iter = std.unicode.Utf8Iterator{ .bytes = str, .i = 0 };
     while (iter.nextCodepoint()) |cp| {
-        const key = text_mod.GlyphKey{ .codepoint = cp, .px = px_u16, .variant = font.variant };
+        const key = text_mod.GlyphKey{ .glyph_id = @intCast(cp), .px = px_u16, .variant = font.variant };
         const maybe_uv2 = atlas.lookup(key);
         if (maybe_uv2 == null) {
             // Glyph not in atlas (e.g. space, or not yet rasterized). Still advance pen.

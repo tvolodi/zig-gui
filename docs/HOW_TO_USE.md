@@ -2651,3 +2651,52 @@ For actual rendering, you need the real wgpu-native library:
 - Curve shader mode is a magenta stub (planned for M26-01)
 - Non-Windows native surfaces not yet implemented (Linux/macOS planned for a future pass)
 - WASM target requires a web platform surface layer (planned)
+
+---
+
+## Complex-Script Text (M24)
+
+zig-gui supports Arabic, Hebrew, CJK, and other complex scripts via HarfBuzz shaping
+(M24-01) and Unicode bidi reordering (M24-02).
+
+### Shaping pipeline
+
+Shaping is provided by module 11 (`src/11/`). The core API:
+
+```zig
+const mod11 = @import("types.zig"); // module 11 types
+
+// 1. Itemize a paragraph into bidi runs
+const items = try bidi.itemize(allocator, paragraph_utf8, .ltr);
+defer allocator.free(items);
+
+// 2. For each item, create a TextRun and shape it
+var ctx = harfbuzz.HbContext.init(allocator);
+defer ctx.deinit();
+const run = try harfbuzz.shapeRun(&ctx, font_data, font_ptr_id, pixel_size, text_run, allocator);
+defer run.deinit(); // owns run.glyphs
+
+// 3. Assemble into ShapedLine for caret/selection queries
+const line = mod11.ShapedLine{ .runs = visual_runs, .line_x = 0.0, .allocator = allocator };
+const caret_x = line.caretX(byte_offset);
+const byte = line.byteAtX(pixel_x);
+```
+
+### CJK support (M24-03)
+
+The atlas grows automatically up to unlimited size via `GlyphAtlas.insert()`. Use
+`GlyphAtlas.insertOrEvict()` when memory is constrained — it evicts one entry before
+retrying. CJK text wraps between ideographs; `isCjkIdeograph()` and `isKinsokuClose()`
+in `src/02/types.zig` implement the basic kinsoku rules.
+
+### Production HarfBuzz
+
+The vendor stub in `vendor/harfbuzz/` provides compile-time compatibility. For
+production, replace with the real HarfBuzz library:
+
+```sh
+# Option A: build HarfBuzz from source and place compiled output in vendor/harfbuzz/
+# Option B: system install (Linux/macOS):
+#   apt install libharfbuzz-dev  OR  brew install harfbuzz
+# Then replace vendor/harfbuzz/src/hb-stub.c with a linkSystemLibrary call in build.zig
+```

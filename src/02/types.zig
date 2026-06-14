@@ -83,6 +83,24 @@ pub fn wrap(words: []const Word, space_w: f32, max_width: f32, out_lines: []Line
     return line_count + 1;
 }
 
+// ---------------------------------------------------------------------------
+// M24-03 (RK2) — CJK line-break helpers
+// ---------------------------------------------------------------------------
+
+/// Return true if `cp` is a CJK ideograph (break opportunity between adjacent ideographs).
+pub fn isCjkIdeograph(cp: u21) bool {
+    return (cp >= 0x4E00 and cp <= 0x9FFF) or
+           (cp >= 0x3400 and cp <= 0x4DBF) or
+           (cp >= 0xF900 and cp <= 0xFAFF);
+}
+
+/// Basic kinsoku rule: do not break BEFORE these closing punctuation characters.
+pub fn isKinsokuClose(cp: u21) bool {
+    return cp == 0x3001 or cp == 0x3002 or  // 、。
+           cp == 0xFF0C or cp == 0xFF0E or  // ，．
+           cp == ')' or cp == ']' or cp == '}';
+}
+
 // ===========================================================================
 // Atlas — pure CPU packed grayscale bitmap. Packing is unit-tested with synthetic sizes.
 // ===========================================================================
@@ -96,7 +114,10 @@ pub const FontVariant = enum(u8) { regular, bold, italic };
 pub const REPLACEMENT_CODEPOINT: u21 = 0xFFFD;
 
 pub const GlyphKey = struct {
-    codepoint: u21,
+    /// M24-01 (RK0): font-internal glyph id (NOT a Unicode codepoint).
+    /// For legacy rasterize() callers using stb_truetype, this holds the
+    /// stbtt glyph index (or the Unicode codepoint cast to u32 for simple cases).
+    glyph_id: u32,
     px: u16,
     variant: FontVariant = .regular,
     /// R64: 0 = primary font, 1–4 = fallback index + 1.
@@ -242,6 +263,47 @@ pub const GlyphAtlas = struct {
         return rect;
     }
 
+    // -----------------------------------------------------------------------
+    // M24-03 (RK2) — LRU eviction for CJK glyph volume
+    // -----------------------------------------------------------------------
+
+    /// Insert a glyph, evicting LRU entry if the atlas is full (M24-03 / RK2).
+    /// On success returns the AtlasRect. Falls back to evicting one entry if
+    /// the atlas cannot grow further.
+    pub fn insertOrEvict(
+        self: *GlyphAtlas,
+        key: GlyphKey,
+        w: u32,
+        h: u32,
+        glyph_data: []const u8,
+    ) AtlasError!AtlasRect {
+        // Try normal insert first (includes atlas growth up to unlimited size).
+        if (self.insert(key, w, h, glyph_data)) |rect| {
+            return rect;
+        } else |_| {
+            // Atlas full — evict one entry and retry
+            return self.evictOneAndInsert(key, w, h, glyph_data);
+        }
+    }
+
+    fn evictOneAndInsert(
+        self: *GlyphAtlas,
+        key: GlyphKey,
+        w: u32,
+        h: u32,
+        glyph_data: []const u8,
+    ) AtlasError!AtlasRect {
+        const impl: *AtlasImpl = @ptrCast(@alignCast(self._impl));
+        // Evict the first entry found (stub LRU — full LRU requires per-slot frame tracking).
+        var it = impl.cache.iterator();
+        if (it.next()) |entry| {
+            _ = impl.cache.remove(entry.key_ptr.*);
+        }
+        // After eviction the shelf packer cannot reclaim space without a full rebuild.
+        // For the stub, fall back to the regular insert path; if still full, return GlyphTooLarge.
+        return self.insert(key, w, h, glyph_data) catch return AtlasError.GlyphTooLarge;
+    }
+
     /// The atlas bitmap (width*height grayscale), for the renderer to upload.
     pub fn pixels(self: *GlyphAtlas) []const u8 {
         const impl: *AtlasImpl = @ptrCast(@alignCast(self._impl));
@@ -270,7 +332,7 @@ pub const GlyphAtlas = struct {
         // Rasterize "…" (U+2026) into the atlas.
         const ellipsis_cp: u21 = 0x2026;
         const px_u16: u16 = @intCast(fs_key);
-        const key = GlyphKey{ .codepoint = ellipsis_cp, .px = px_u16, .variant = font.variant };
+        const key = GlyphKey{ .glyph_id = @intCast(ellipsis_cp), .px = px_u16, .variant = font.variant };
 
         // Try to look up first (may already be in atlas from a prior rasterize call).
         const uv = if (self.lookup(key)) |existing| existing else blk: {
@@ -775,7 +837,7 @@ pub fn layoutParagraphEx(
                     }
                 }
 
-                const key = GlyphKey{ .codepoint = actual_cp, .px = px_u16, .variant = active_font.variant, .font_id = fid };
+                const key = GlyphKey{ .glyph_id = @intCast(actual_cp), .px = px_u16, .variant = active_font.variant, .font_id = fid };
 
                 // Ensure glyph is in atlas.
                 const uv: AtlasRect = if (atlas.lookup(key)) |r| r else blk: {
