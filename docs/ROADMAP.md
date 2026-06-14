@@ -295,17 +295,17 @@ Lifts the remaining deferred keywords from module 08.
 
 ---
 
-## Milestone 19 — Auto-update / delivery (partial) `in-progress`
+## Milestone 19 — Auto-update / delivery `done`
 
-Ships the binary to end users. RI1–RI4 (auto-update) deferred to post-v1 pending HTTP + bsdiff
-approval. RI5 (packaging) implemented for v1 with uncompressed archive (zero new dependencies).
+Ships the binary to end users. M19-01–04 implemented 2026-06-14 after AAP-M19 approved
+`std.http` and vendored pure-Zig bspatch (BSDFRAW1 format). M19-05 was implemented in v1.
 
 | ID | Feature | Depends on | Status |
 |---|---|---|---|
-| M19-01 | **Update manifest check** — on startup, fetch a JSON manifest from a configured URL and compare the bundled version string; notify the user if a newer version exists | M10-03 | `deferred` |
-| M19-02 | **Delta download** — download only a binary diff (bsdiff format) between the current and next version; apply in-process | M19-01 | `deferred` |
-| M19-03 | **Staged update** — write the new binary to a temp path, verify its checksum, then rename atomically on next launch (same pattern as `PersistentSettings.flush`) | M19-02 | `deferred` |
-| M19-04 | **Update UI** — toast notification with "Update available — restart to apply" action; progress bar during download | M19-02, M7-05 | `deferred` |
+| M19-01 | **Update manifest check** — on startup, fetch a JSON manifest from a configured URL and compare the bundled version string; notify the user if a newer version exists | M10-03 | `done` |
+| M19-02 | **Delta download** — download only a binary diff (BSDFRAW1 format) between the current and next version; apply in-process via vendored pure-Zig bspatch | M19-01 | `done` |
+| M19-03 | **Staged update** — write the new binary to a temp path (`<binary>.update`), then rename atomically on next launch; sentinel file (`<binary>.update.pending`) coordinates the swap | M19-02 | `done` |
+| M19-04 | **Update UI** — `UpdateManager` state machine drives toast notifications: "Update available", "Downloading", "Restart to apply"; progress fraction exposed for progress bar | M19-02, M7-05 | `done` |
 | M19-05 | **App installer / packaging** — `zig build package` step that bundles the binary, font assets, and a version manifest into an uncompressed archive (.zip on Windows, .tar on Linux) | — | `done` |
 
 ---
@@ -417,7 +417,7 @@ A leaf module (13) built on new GPU curve primitives + existing systems.
 | **Mobile (iOS / Android)** | Touch-first interaction, app lifecycle, and store packaging the current architecture does not address (INV-1.2-v2 keeps it out) |
 | **Vertical writing modes, kashida justification** | Beyond the bounded shaping scope (INV-1.3-v2) |
 | **`@media` / `@supports` / sibling combinators / `!important`** | Beyond the bounded cascade (INV-4.2-v2) |
-| **Auto-update pipeline (M19-01…04)** | Still pending HTTP + bsdiff approval (`00_constitution.md` §6) |
+| ~~**Auto-update pipeline (M19-01…04)**~~ | ~~Still pending HTTP + bsdiff approval~~ **Done** — AAP-M19 (2026-06-14) approved `std.http` and vendored bspatch; implemented in `src/tools/` + `src/app/update_ui.zig` |
 | **Animated chart transitions, zoom/pan, advanced chart types** | Out of the v2 chart scope (RM2/RM3 non-goals) |
 
 ---

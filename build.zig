@@ -236,6 +236,20 @@ pub fn build(b: *std.Build) void {
                 ialias("../06/types.zig", "mod06_markup"),
             } },
         .{ .name = "mod_startup_error",   .root = "src/app/startup_error.zig" },
+        // M19 auto-update modules.
+        .{ .name = "mod_bspatch",         .root = "src/tools/bspatch.zig" },
+        .{ .name = "mod_update_check",    .root = "src/tools/update_check.zig" },
+        .{ .name = "mod_staged_update",   .root = "src/tools/staged_update.zig" },
+        .{ .name = "mod_delta_download",  .root = "src/tools/delta_download.zig",
+            .deps = &.{"mod_bspatch"},
+            .extra_imports = &.{ ialias("bspatch.zig", "mod_bspatch") } },
+        .{ .name = "mod_update_ui",       .root = "src/app/update_ui.zig",
+            .deps = &.{ "mod_update_check", "mod_delta_download", "mod_staged_update" },
+            .extra_imports = &.{
+                ialias("../tools/update_check.zig", "mod_update_check"),
+                ialias("../tools/delta_download.zig", "mod_delta_download"),
+                ialias("../tools/staged_update.zig", "mod_staged_update"),
+            } },
         .{ .name = "mod_tray",            .root = "src/app/tray.zig",          .deps = &.{"mod07_components"},
             .extra_imports = &.{ ialias("../07/types.zig", "mod07_components") } },
         // mod_app_impl.
@@ -519,6 +533,10 @@ pub fn build(b: *std.Build) void {
     const m17_test_            = createTest(b, target, optimize, &module_map, "m17-test",            "src/app/m17_test.zig",            &.{ ia("../07/types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup") }, false, true);
     const tray_test_           = createTest(b, target, optimize, &module_map, "tray-test",           "src/app/tray_test.zig",           &.{ ia("tray.zig", "mod_tray"), ia("app.zig", "mod_app_impl") }, false, true);
 
+    // M19 auto-update tests (pure — no network, no GPU).
+    const update_check_test_ = createTest(b, target, optimize, &module_map, "test-update-check", "src/tools/update_check_test.zig", &.{ ia("update_check.zig", "mod_update_check") }, false, false);
+    const bspatch_test_      = createTest(b, target, optimize, &module_map, "test-bspatch",      "src/tools/bspatch_test.zig",      &.{ ia("bspatch.zig",      "mod_bspatch") },      false, false);
+
     // startup_error_test and tray_test need Win32 libs on Windows.
     if (target.result.os.tag == .windows) {
         startup_error_test_.root_module.linkSystemLibrary("user32", .{});
@@ -560,6 +578,8 @@ pub fn build(b: *std.Build) void {
     b.default_step.dependOn(&m11_test_.step);
     b.default_step.dependOn(&m17_test_.step);
     b.default_step.dependOn(&tray_test_.step);
+    b.default_step.dependOn(&update_check_test_.step);
+    b.default_step.dependOn(&bspatch_test_.step);
 
     // ---- Named test steps --------------------------------------------
 
@@ -579,6 +599,7 @@ pub fn build(b: *std.Build) void {
         high_contrast_test_, file_logger_test_, budget_arena_test_,
         startup_error_test_, window_state_test_, error_boundary_test_,
         m11_test_, m12_test_, m16_test_, m17_test_, tray_test_,
+        update_check_test_, bspatch_test_,
     }) |t| {
         test_step.dependOn(&t.step);
     }
@@ -639,7 +660,9 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-m12",         "Run M12 layout extension tests (RC0-RC4, headless)", m12_test_);
     _ = addTestStep(b, "test-m16",         "Run M16 platform integration unit tests (RF1-RF4, headless)", m16_test_);
     _ = addTestStep(b, "test-m17",         "Run M17 accessibility unit tests (RG1, RG4, RG5, headless)", m17_test_);
-    _ = addTestStep(b, "test-tray",        "Run Tray unit tests (RF0, headless)", tray_test_);
+    _ = addTestStep(b, "test-tray",         "Run Tray unit tests (RF0, headless)", tray_test_);
+    _ = addTestStep(b, "test-update-check", "Run M19-01 update manifest check unit tests (pure, no network)", update_check_test_);
+    _ = addTestStep(b, "test-bspatch",      "Run M19-02 bspatch unit tests (pure, no I/O)", bspatch_test_);
 
     // -------------------------------------------------------------------
     // R55 — Build-time markup codegen tool (ui_codegen).

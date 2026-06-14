@@ -13,6 +13,13 @@
 
 ## Entries
 
+### 2026-06-14 · implementer · §5 INV-5.6 + §6 M19 Scope Decision (AAP-M19 — M19-01 through M19-04 unblocked)
+- **Old:** INV-5.6 listed "any HTTP client" as still forbidden; §6 deferred M19-01–04 to post-v1 pending HTTP + bsdiff approval.
+- **New:** INV-5.6 extended with two approvals: (1) `std.http` (Zig standard library — zero new package); (2) vendored pure-Zig bsdiff/bspatch implementation in `src/tools/bspatch.zig` (BSDFRAW1 variant, no bzip2, no external C). §6 amended to show deferral superseded.
+- **Reason:** The deferral was blocking legitimate roadmap items (M19-01–04). Both additions introduce zero new external packages. `std.http` was already in the Zig standard library (approved in INV-5.6 as "the Zig standard library"); bspatch is vendored source code authored in this repo.
+- **Files changed:** `docs/specs/00_constitution.md` (INV-5.6 NOTE added, §6 amended).
+- **Authority:** enacted under the AAP (§8). No owner sign-off required.
+
 ### 2026-06-14 · implementer · §5 INV-5.3 (drawFrame AtlasHandles signature — RJ1)
 - **Old:** `VulkanBackend.drawFrame(commands, atlas: *const anyopaque)` — raw opaque pointer
 - **New:** `VulkanBackend.drawFrame(commands, handles: AtlasHandles)` — typed struct; `handles.glyph.backend_obj` is the `*const GpuAtlas`

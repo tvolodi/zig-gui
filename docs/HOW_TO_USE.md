@@ -2480,3 +2480,123 @@ To use a custom fonts directory:
 ```sh
 zig build package -Dversion=1.0.0 -- --fonts-dir path/to/fonts
 ```
+
+---
+
+## Auto-update (M19)
+
+The auto-update pipeline has four components, all in `src/tools/` and `src/app/`.
+
+### Apply a pending update at startup (M19-03)
+
+Call this at the very start of `main()`, before any UI is shown. If a staged update exists
+(from a previous download), it will be atomically swapped into place:
+
+```zig
+const staged_update = @import("tools/staged_update.zig");
+
+pub fn main(init: std.process.Init) !void {
+    const binary_path = init.minimal.args.toSlice(init.arena.allocator())[0];
+    if (staged_update.applyPendingUpdate(binary_path)) {
+        std.debug.print("Update applied — running new version\n", .{});
+    }
+    // ... rest of startup
+}
+```
+
+### Check for a new version (M19-01)
+
+`update_check.checkForUpdate` fetches a JSON manifest and compares version strings.
+The manifest format is `{ "version": "1.2.3", "url": "https://example.com/patch.bsdfraw1" }`.
+
+```zig
+const update_check = @import("tools/update_check.zig");
+
+// Requires io from std.process.Init (std.http.Client needs it in Zig 0.16)
+const result = try update_check.checkForUpdate(
+    allocator,
+    io,
+    "https://example.com/manifest.json",
+    "1.0.0", // current app version
+);
+if (result) |r| {
+    defer r.deinit();
+    std.debug.print("Update available: {s}\n", .{r.latest_version});
+    // r.download_url is the patch URL for M19-02
+}
+```
+
+### Managing update state and driving the toast UI (M19-04)
+
+`UpdateManager` is a state machine that owns the full lifecycle. Wire it into your app:
+
+```zig
+const update_ui = @import("app/update_ui.zig");
+
+var manager = update_ui.UpdateManager.init(allocator);
+defer manager.deinit();
+
+// On a background thread or deferred to after first frame:
+manager.checkAsync(io, "https://example.com/manifest.json", "1.0.0");
+
+// Each frame — show a toast if the state demands one:
+if (manager.toastMessage()) |msg| {
+    app.showToast(msg); // wire to your ToastManager
+}
+
+// When the user clicks the "Update available" toast:
+if (manager.state == .available) {
+    // Run on a background thread — this blocks during download
+    manager.downloadAndStage(io, binary_path);
+}
+// When manager.state == .ready_to_restart, prompt the user to restart.
+```
+
+State transitions: `idle → checking → available → downloading → ready_to_restart`
+(any step may transition to `error_state` on failure).
+
+### Patch format (BSDFRAW1) — M19-02
+
+The patch format used by `bspatch.applyPatch` is **BSDFRAW1** — a simplified variant of
+the classic bsdiff algorithm with **uncompressed** control/diff/extra blocks (no bzip2):
+
+```
+[8  bytes] magic: "BSDFRAW1"
+[8  bytes] new_size:  u64 little-endian
+[8  bytes] ctrl_len:  u64 — byte length of control block
+[8  bytes] diff_len:  u64 — byte length of diff block
+[ctrl_len] control triples: (x: i64, y: i64, z: i64) each 24 bytes
+[diff_len] diff block: bytes added (wrapping) onto old[old_pos]
+[rest]     extra block: bytes copied verbatim into output
+```
+
+To apply a patch programmatically:
+
+```zig
+const bspatch = @import("tools/bspatch.zig");
+
+const old_binary = try std.fs.cwd().readFileAlloc(allocator, "app.old", 256*1024*1024);
+defer allocator.free(old_binary);
+const patch_bytes = try std.fs.cwd().readFileAlloc(allocator, "app.patch", 512*1024*1024);
+defer allocator.free(patch_bytes);
+
+const new_binary = try bspatch.applyPatch(allocator, old_binary, patch_bytes);
+defer allocator.free(new_binary);
+```
+
+A companion bsdiff tool that produces BSDFRAW1 patches can be written in any language;
+the format is simple enough to generate without a library (see `bspatch.MAGIC` for the
+header constant).
+
+### Generating the update manifest
+
+Use the built-in `generate_manifest` tool to create the JSON manifest after packaging:
+
+```sh
+zig build run-generate-manifest -- zig-out/bin/showcase.exe \
+    https://example.com/patch-1.0.0-to-1.1.0.bsdfraw1 \
+    --output manifest.json
+```
+
+The generated `manifest.json` includes the version, download URL, and SHA256 checksum.
+Serve this file at the URL you pass to `checkForUpdate`.
