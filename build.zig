@@ -37,8 +37,9 @@ pub fn build(b: *std.Build) void {
     const gpu_selected = b.option(BackendKind, "gpu", "GPU backend (vulkan, metal, dx12, webgpu)") orelse gpu_default;
 
     // RJ0 AC4: Reject unsupported -Dgpu for the target at configure time.
+    // RJ3: .dx12 is now permitted on Windows (M22-01).
     const supported = switch (target.result.os.tag) {
-        .windows, .linux => gpu_selected == .vulkan,
+        .windows, .linux => gpu_selected == .vulkan or (target.result.os.tag == .windows and gpu_selected == .dx12),
         .macos => gpu_selected == .metal,
         .emscripten => gpu_selected == .webgpu,
         else => gpu_selected == .vulkan,
@@ -62,6 +63,25 @@ pub fn build(b: *std.Build) void {
     const vulkan_include = b.fmt("{s}\\Include", .{vulkan_sdk});
     const vulkan_lib = b.fmt("{s}\\Lib", .{vulkan_sdk});
     const glslc_exe = b.fmt("{s}\\Bin\\glslc.exe", .{vulkan_sdk});
+    // dxc: prefer the Vulkan SDK's bundled dxc (same SDK root); fallback to Windows SDK.
+    const dxc_exe = b.fmt("{s}\\Bin\\dxc.exe", .{vulkan_sdk});
+
+    // -----------------------------------------------------------------------
+    // Windows SDK paths (for D3D12/DXGI headers and libs — RJ3).
+    // -----------------------------------------------------------------------
+    const winsdk_root = b.option(
+        []const u8,
+        "winsdk",
+        "Path to Windows SDK root (e.g. C:\\Program Files (x86)\\Windows Kits\\10)",
+    ) orelse "C:\\Program Files (x86)\\Windows Kits\\10";
+    const winsdk_ver = b.option(
+        []const u8,
+        "winsdk_ver",
+        "Windows SDK version (e.g. 10.0.26100.0)",
+    ) orelse "10.0.26100.0";
+    const winsdk_include_um     = b.fmt("{s}\\Include\\{s}\\um",     .{winsdk_root, winsdk_ver});
+    const winsdk_include_shared = b.fmt("{s}\\Include\\{s}\\shared", .{winsdk_root, winsdk_ver});
+    const winsdk_lib_x64        = b.fmt("{s}\\Lib\\{s}\\um\\x64",   .{winsdk_root, winsdk_ver});
 
     // -----------------------------------------------------------------------
     // GLFW — compiled from source (fetched via build.zig.zon).
@@ -82,7 +102,23 @@ pub fn build(b: *std.Build) void {
     _ = wf.addCopyFile(frag_spv, "triangle.frag.spv");
     _ = wf.addCopyFile(quad_vert_spv, "quad.vert.spv");
     _ = wf.addCopyFile(quad_frag_spv, "quad.frag.spv");
-    const shaders_zig = wf.add("embedded_shaders.zig",
+
+    // RJ3: compile HLSL → DXIL with dxc when the DX12 backend is selected.
+    const shaders_zig = if (gpu_selected == .dx12) blk: {
+        const quad_vert_dxil = compileDxilShader(b, dxc_exe, "src/10/shaders/quad.hlsl", "VSMain", "vs_6_0", "quad.vert.dxil");
+        const quad_frag_dxil = compileDxilShader(b, dxc_exe, "src/10/shaders/quad.hlsl", "PSMain", "ps_6_0", "quad.frag.dxil");
+        _ = wf.addCopyFile(quad_vert_dxil, "quad.vert.dxil");
+        _ = wf.addCopyFile(quad_frag_dxil, "quad.frag.dxil");
+        break :blk wf.add("embedded_shaders.zig",
+            \\pub const vert_spv align(4) = @embedFile("triangle.vert.spv").*;
+            \\pub const frag_spv align(4) = @embedFile("triangle.frag.spv").*;
+            \\pub const quad_vert_spv align(4) = @embedFile("quad.vert.spv").*;
+            \\pub const quad_frag_spv align(4) = @embedFile("quad.frag.spv").*;
+            \\pub const quad_vert_dxil align(4) = @embedFile("quad.vert.dxil").*;
+            \\pub const quad_frag_dxil align(4) = @embedFile("quad.frag.dxil").*;
+            \\
+        );
+    } else wf.add("embedded_shaders.zig",
         \\pub const vert_spv align(4) = @embedFile("triangle.vert.spv").*;
         \\pub const frag_spv align(4) = @embedFile("triangle.frag.spv").*;
         \\pub const quad_vert_spv align(4) = @embedFile("quad.vert.spv").*;
@@ -308,6 +344,18 @@ pub fn build(b: *std.Build) void {
         tray.linkSystemLibrary("shell32", .{});
     }
 
+    // RJ3: DX12 backend — wire D3D12/DXGI headers and libs into mod10 only.
+    // mod01 already has GLFW headers via addGpuLinks; surface_win32.zig only needs
+    // GLFW native headers which are already on the include path.
+    if (gpu_selected == .dx12) {
+        const mod10 = module_map.get("mod10_gpu_backend").?;
+        addDx12Links(mod10, glfw_dep, winsdk_include_um, winsdk_include_shared, winsdk_lib_x64, glfw_lib);
+        // mod01 needs D3D12/DXGI libs for the surface .dx12 branch (surface_win32.zig)
+        // but NOT the extra Windows SDK um include path which causes propidlbase.h conflict.
+        // The GLFW native headers are already provided by addGpuLinks for mod01.
+        // The linker libs (d3d12, dxgi) needed by mod10 flow through link-dependency.
+    }
+
     // -----------------------------------------------------------------------
     // Build options: hot-reload passed to app layer; gpu backend to mod10.
     // -----------------------------------------------------------------------
@@ -419,6 +467,15 @@ pub fn build(b: *std.Build) void {
         ia("../02/types.zig", "mod02_text"),
     }, false, false);
     addGpuLinks(accept_10.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
+    // RJ3: unit tests for the DX12 backend — compile-time and struct-level only, no GPU required.
+    // The test file guards Windows-only imports inside `comptime if (os == .windows)` blocks;
+    // on non-Windows the DX12 method / surface checks emit SkipZigTest at runtime.
+    // addGpuLinks is needed because mod01_platform pulls in GLFW/Vulkan cImports at link time.
+    const unit_10 = createTest(b, target, optimize, &module_map, "10-unit-test", "src/10/10_test.zig", &.{
+        ia("types.zig", "mod10_gpu_backend"),
+        ia("../01/types.zig", "mod01_platform"),
+    }, false, false);
+    addGpuLinks(unit_10.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
 
     // App tests
     const app_test_           = createTest(b, target, optimize, &module_map, "app-test",           "src/app/app_test.zig",           &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
@@ -506,7 +563,7 @@ pub fn build(b: *std.Build) void {
         accept_01, unit_01, accept_02, unit_02, accept_03, unit_03,
         accept_04, unit_04, accept_05, unit_05, accept_06, unit_06,
         accept_07, unit_07, accept_08, unit_08, accept_09, unit_09,
-        accept_10,
+        accept_10, unit_10,
         app_test_, events_test, signal_test_, anim_timeline_test_, overlay_test,
         binding_test, m7_widget_test, toast_test, dialog_test, date_util_test,
         locale_test_, context_menu_test, nav_test, tooltip_test,
@@ -538,6 +595,7 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-09",          "Run module 09 tests (GPU tests skip if unavailable)", accept_09);
     _ = addTestStep(b, "test-09-unit",     "Run module 09 unit tests (pure CPU)", unit_09);
     _ = addTestStep(b, "test-10",          "Run module 10 GPU backend seam tests", accept_10);
+    _ = addTestStep(b, "test-10-unit",     "Run module 10 DX12 unit tests (compile-time + struct, no GPU)", unit_10);
     _ = addTestStep(b, "test-app",         "Run app layer unit tests (headless, no GPU)", app_test_);
     _ = addTestStep(b, "test-events",      "Run EventQueue unit tests (no GPU, no GLFW)", events_test);
     _ = addTestStep(b, "test-signal",      "Run Signal/Computed unit tests (pure, no GPU)", signal_test_);
@@ -776,6 +834,54 @@ fn compileShader(b: *std.Build, glslc: []const u8, src: []const u8, out: []const
     cmd.addFileArg(b.path(src));
     cmd.addArg("-o");
     return cmd.addOutputFileArg(out);
+}
+
+// ---------------------------------------------------------------------------
+// compileDxilShader — run dxc to produce a .dxil file (RJ3).
+// ---------------------------------------------------------------------------
+fn compileDxilShader(
+    b: *std.Build,
+    dxc: []const u8,
+    src: []const u8,
+    entry: []const u8,
+    profile: []const u8,
+    out: []const u8,
+) std.Build.LazyPath {
+    const cmd = b.addSystemCommand(&.{dxc});
+    cmd.addFileArg(b.path(src));
+    cmd.addArgs(&.{ "-E", entry });
+    cmd.addArgs(&.{ "-T", profile });
+    cmd.addArgs(&.{ "-Fo" });
+    return cmd.addOutputFileArg(out);
+}
+
+// ---------------------------------------------------------------------------
+// addDx12Links — apply D3D12/DXGI/GLFW linkage to a module (RJ3).
+// ---------------------------------------------------------------------------
+fn addDx12Links(
+    m: *std.Build.Module,
+    gd: *std.Build.Dependency,
+    winsdk_include_um: []const u8,
+    winsdk_include_shared: []const u8,
+    winsdk_lib_x64: []const u8,
+    gl: *std.Build.Step.Compile,
+) void {
+    // GLFW native headers (for glfwGetWin32Window).
+    m.addIncludePath(gd.path("include"));
+    // Windows SDK headers for D3D12 and DXGI.
+    m.addIncludePath(.{ .cwd_relative = winsdk_include_um });
+    m.addIncludePath(.{ .cwd_relative = winsdk_include_shared });
+    // D3D12/DXGI libraries.
+    m.addLibraryPath(.{ .cwd_relative = winsdk_lib_x64 });
+    m.linkSystemLibrary("d3d12", .{});
+    m.linkSystemLibrary("dxgi", .{});
+    m.linkSystemLibrary("d3dcompiler", .{});
+    // Win32 runtime libs.
+    m.linkSystemLibrary("gdi32", .{});
+    m.linkSystemLibrary("user32", .{});
+    m.linkSystemLibrary("shell32", .{});
+    m.linkLibrary(gl);
+    m.link_libc = true;
 }
 
 // ---------------------------------------------------------------------------

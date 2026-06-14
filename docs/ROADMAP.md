@@ -24,7 +24,7 @@ schema forms, renderer. Modules are numbered in `docs/specs/`.
 | 06 | `.ui` markup parser, Tailwind-subset resolver | `done` |
 | 07 | Component instantiation, Scene, measure pass | `done` |
 | 08 | Schema-driven forms, Value tree, validator | `done` |
-| 09 | DrawCommand serializer, quad pipeline, atlas GPU upload | `planned` |
+| 09 | DrawCommand serializer, quad pipeline, atlas GPU upload | `done` |
 
 ---
 
@@ -335,15 +335,15 @@ full design lives in `docs/specs/V2_ARCHITECTURE.md`; the invariant changes it r
 
 ---
 
-## Milestone 20 — GPU backend seam `planned (v2)`
+## Milestone 20 — GPU backend seam `done`
 
 Generalize the single Vulkan backend into one interface with multiple implementations.
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
-| M20-01 | **`GpuBackend` seam** — one interface; comptime-selected backend; shader-mode parity table | 01, 09 | [RJ0](requirements/RJ0_gpu_backend_seam.md) | `planned` |
-| M20-02 | **Vulkan conformance** — refactor `VulkanBackend` behind the seam, zero behavior change | RJ0 | [RJ1](requirements/RJ1_vulkan_backend_conformance.md) | `planned` |
-| M20-03 | **Platform surface layer** — per-target surface handles (VkSurface/CAMetalLayer/HWND/canvas) | 01, RJ0 | [RJ5](requirements/RJ5_platform_surface_layer.md) | `planned` |
+| M20-01 | **`GpuBackend` seam** — one interface; comptime-selected backend; shader-mode parity table | 01, 09 | [RJ0](requirements/RJ0_gpu_backend_seam.md) | `done` |
+| M20-02 | **Vulkan conformance** — refactor `VulkanBackend` behind the seam, zero behavior change | RJ0 | [RJ1](requirements/RJ1_vulkan_backend_conformance.md) | `done` |
+| M20-03 | **Platform surface layer** — per-target surface handles (VkSurface/CAMetalLayer/HWND/canvas) | 01, RJ0 | [RJ5](requirements/RJ5_platform_surface_layer.md) | `done` |
 
 ---
 
@@ -355,11 +355,11 @@ Generalize the single Vulkan backend into one interface with multiple implementa
 
 ---
 
-## Milestone 22 — Windows DX12 backend `planned (v2)`
+## Milestone 22 — Windows DX12 backend `done`
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
-| M22-01 | **DX12 backend** — native D3D12 path on Windows (Vulkan stays default) | RJ0, RJ1, RJ5 | [RJ3](requirements/RJ3_dx12_backend_windows.md) | `planned` |
+| M22-01 | **DX12 backend** — native D3D12 path on Windows (Vulkan stays default) | RJ0, RJ1, RJ5 | [RJ3](requirements/RJ3_dx12_backend_windows.md) | `done` |
 
 ---
 

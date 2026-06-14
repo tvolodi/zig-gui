@@ -759,6 +759,20 @@ const desc = markup.parseWithDiag(allocator, source, &diag) catch {
 };
 ```
 
+## Using the DX12 Backend (Windows)
+
+By default, zig-gui uses Vulkan on Windows. To opt into the native DX12 backend:
+
+```sh
+zig build -Dgpu=dx12
+```
+
+This produces a binary linked against D3D12 / DXGI. DXIL shader blobs are compiled at build time via `dxc` (from the Windows SDK). Vulkan remains the default; DX12 is a `-Dgpu=dx12` opt-in path.
+
+**Requirements:** Windows 10 or later, DX12-capable GPU (feature level 11_0+). If no DX12 adapter is found, the app shows a startup-failure dialog (see M10-04).
+
+---
+
 ## 6. Renderer bridge (module 09)
 
 Module 09 completes the pipeline from `.ui` markup to GPU pixels.
@@ -767,7 +781,12 @@ Module 09 completes the pipeline from `.ui` markup to GPU pixels.
 
 ```zig
 const renderer = @import("src/09/types.zig");
-const cmds = try renderer.buildDrawList(allocator, &scene, &atlas);
+const cmds = try renderer.buildDrawList(allocator, &scene, .{
+    .atlas = &atlas,
+    .image_atlas = &img_atlas,
+    .font = &font,
+    .tokens = tokens,
+});
 defer allocator.free(cmds);
 ```
 

@@ -755,7 +755,14 @@ pub const Platform = struct {
                 return Surface{ .vulkan = handle };
             },
             .metal  => return error.SurfaceCreationFailed, // Deferred to RJ2 (surface_macos.zig)
-            .dx12   => return error.SurfaceCreationFailed, // Deferred to RJ3 (surface_win32.zig)
+            .dx12   => {
+                // RJ3 — DX12/DXGI surface: extract HWND from GLFW window.
+                // surface_win32.zig provides createWin32Surface (Windows only).
+                const impl: *PlatformImpl = @ptrCast(@alignCast(self._impl));
+                const surface_win32 = @import("surface_win32.zig");
+                const handle = try surface_win32.createWin32Surface(@ptrCast(impl.window));
+                return Surface{ .dx12 = handle };
+            },
             .webgpu => return error.SurfaceCreationFailed, // Deferred to RJ4 (surface_web.zig)
         };
     }
