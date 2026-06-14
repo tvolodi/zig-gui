@@ -363,11 +363,11 @@ Generalize the single Vulkan backend into one interface with multiple implementa
 
 ---
 
-## Milestone 23 — Web target (WebGPU) `planned (v2)`
+## Milestone 23 — Web target (WebGPU) `done`
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
-| M23-01 | **WebGPU backend + web surface** — WASM/`<canvas>` and native WebGPU | RJ0, RJ1, RJ5 | [RJ4](requirements/RJ4_webgpu_backend_web.md) | `planned` |
+| M23-01 | **WebGPU backend + web surface** — WASM/`<canvas>` and native WebGPU | RJ0, RJ1, RJ5 | [RJ4](requirements/RJ4_webgpu_backend_web.md) | `done` |
 
 ---
 

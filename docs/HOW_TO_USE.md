@@ -2600,3 +2600,54 @@ zig build run-generate-manifest -- zig-out/bin/showcase.exe \
 
 The generated `manifest.json` includes the version, download URL, and SHA256 checksum.
 Serve this file at the URL you pass to `checkForUpdate`.
+
+---
+
+## WebGPU backend (M23-01 / RJ4)
+
+The WebGPU backend (`-Dgpu=webgpu`) is available on Windows and provides a
+wgpu-native rendering path. WASM/Emscripten support shares the same WGSL
+shaders but requires a future platform surface layer pass.
+
+### Building with WebGPU
+
+```sh
+# Install wgpu-native and ensure wgpu_native.lib is on the linker search path.
+# Then build with:
+zig build -Dgpu=webgpu
+
+# Run WebGPU unit tests (compile-time + struct-level, no GPU required):
+zig build test-10-webgpu
+```
+
+### What is provided
+
+- `src/10/webgpu_backend.zig` — `WebGpuBackend` implementing all 9 `GpuBackend` methods:
+  `init`, `deinit`, `initPipelines`, `resize`, `uploadAtlas`, `uploadSdfAtlas`,
+  `uploadImage`, `drawFrame`, `capabilities`
+- `src/10/shaders/quad.wgsl` — WGSL quad shader with 9 fragment modes (filled_rect,
+  glyph, border_rect, image_rect, sdf_icon, gradient_rect, aa_filled_circle,
+  subpixel_glyph, curve stub)
+- `src/10/surface_webgpu_native.zig` — Windows HWND surface extraction via GLFW +
+  wgpu-native
+- `vendor/wgpu-native/include/webgpu/webgpu.h` — stub header (replace with the real
+  wgpu-native SDK for GPU-accelerated rendering)
+
+### Runtime requirements
+
+The stub header in `vendor/wgpu-native/include/` provides compile-time definitions.
+For actual rendering, you need the real wgpu-native library:
+
+1. Download [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases)
+2. Place `wgpu_native.lib` (Windows) or `libwgpu_native.a` (Linux/macOS) in
+   `vendor/wgpu-native/lib/` (the build already searches there)
+3. Replace `vendor/wgpu-native/include/webgpu/webgpu.h` with the real header from the
+   wgpu-native SDK
+
+### Limitations (current pass)
+
+- Subpixel text rendering falls back to grayscale (WebGPU limitation — no GPU-side
+  subpixel coverage blending)
+- Curve shader mode is a magenta stub (planned for M26-01)
+- Non-Windows native surfaces not yet implemented (Linux/macOS planned for a future pass)
+- WASM target requires a web platform surface layer (planned)

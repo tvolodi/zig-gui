@@ -5,6 +5,17 @@ zig-pkg/
 zig-out/
 build/
 
+# Path-mangled junk files (absolute paths stripped of separators by buggy tooling).
+# Pattern: drive-letter prefix followed by a flattened path, e.g.
+#   C:Userstvolodevai-dalatest_type.zig
+#   c:Userstvolodevai-dalatest_sb.zig
+[Cc]:*
+*:Userstvolodevai-*
+
+# Any directory named *.zig-cache (catches mangled absolute-path cache dirs like
+# Userstvolodevai-dala.zig-cache in addition to the standard zig-cache above).
+*.zig-cache/
+
 # Build output
 *.o
 *.obj
@@ -14,6 +25,9 @@ build/
 *.dylib
 *.exe
 *.dll
+
+# Exception: wgpu-native stub archive (empty .lib for linker stub — no real SDK needed for tests)
+!vendor/wgpu-native/lib/wgpu_native.lib
 
 # IDE
 .vscode/
@@ -39,10 +53,14 @@ testresults/*
 
 # std.testing.TmpDir artifacts — Zig 0.16 creates these at CWD with random 16+ char names.
 # They contain only test_settings.txt or *.log files from M10 test suites.
-# Pattern: exactly 16 characters of [A-Za-z0-9_-] at the repo root.
-# (Add specific names here as they accumulate; the pattern below covers the known shape.)
-
-
+# Pattern: alphanumeric + hyphen + underscore, 16+ characters at repo root.
+????????????????*/
+?????????????????*/
+??????????????????*/
+???????????????????*/
+????????????????????*/
+?????????????????????*/
+??????????????????????*/
 # Dependencies (if vendored)
 deps/
 

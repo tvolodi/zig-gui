@@ -38,8 +38,11 @@ pub fn build(b: *std.Build) void {
 
     // RJ0 AC4: Reject unsupported -Dgpu for the target at configure time.
     // RJ3: .dx12 is now permitted on Windows (M22-01).
+    // RJ4: .webgpu is permitted on Windows + emscripten (M23-01).
     const supported = switch (target.result.os.tag) {
-        .windows, .linux => gpu_selected == .vulkan or (target.result.os.tag == .windows and gpu_selected == .dx12),
+        .windows, .linux => gpu_selected == .vulkan or
+            (target.result.os.tag == .windows and gpu_selected == .dx12) or
+            (target.result.os.tag == .windows and gpu_selected == .webgpu),
         .macos => gpu_selected == .metal,
         .emscripten => gpu_selected == .webgpu,
         else => gpu_selected == .vulkan,
@@ -348,6 +351,12 @@ pub fn build(b: *std.Build) void {
     // -- Special wiring not expressible in the table --
 
     module_map.get("mod01_platform").?.addImport("embedded_shaders", shaders_mod);
+
+    // RJ4: mod01_platform always gets the wgpu-native vendor include path so that
+    // surface_webgpu_native.zig (referenced by createSurface) can always be compiled,
+    // even when -Dgpu=vulkan is selected. The .zig branch is only executed at runtime
+    // when webgpu is selected, but Zig compiles all switch branches syntactically.
+    module_map.get("mod01_platform").?.addIncludePath(b.path("vendor/wgpu-native/include"));
     const mws = module_map.get("mod_window_state").?;
     mws.addIncludePath(glfw_dep.path("include"));
     mws.addIncludePath(.{ .cwd_relative = vulkan_include });
@@ -368,6 +377,17 @@ pub fn build(b: *std.Build) void {
         // but NOT the extra Windows SDK um include path which causes propidlbase.h conflict.
         // The GLFW native headers are already provided by addGpuLinks for mod01.
         // The linker libs (d3d12, dxgi) needed by mod10 flow through link-dependency.
+    }
+
+    // RJ4: WebGPU backend — wire wgpu-native headers and libs into mod10 + mod01.
+    // vendor/wgpu-native/include contains webgpu/webgpu.h (stub or real).
+    // The actual wgpu_native.lib/.dll must be on the link path at runtime.
+    if (gpu_selected == .webgpu) {
+        const mod10 = module_map.get("mod10_gpu_backend").?;
+        const mod01 = module_map.get("mod01_platform").?;
+        addWebGpuLinks(mod10, b, glfw_dep, glfw_lib, target);
+        // mod01 needs wgpu-native headers for surface_webgpu_native.zig (GLFW native + webgpu.h).
+        mod01.addIncludePath(b.path("vendor/wgpu-native/include"));
     }
 
     // -----------------------------------------------------------------------
@@ -495,6 +515,24 @@ pub fn build(b: *std.Build) void {
         ia("../01/types.zig", "mod01_platform"),
     }, false, false);
     addGpuLinks(unit_10.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
+
+    // RJ4: unit tests for the WebGPU backend — compile-time and struct-level only, no GPU required.
+    // Tests verify BackendKind has .webgpu, WebGpuBackend declares all 9 methods, WGSL shader exists.
+    // addGpuLinks is needed because mod01_platform pulls in GLFW/Vulkan cImports at link time.
+    const unit_10_webgpu = createTest(b, target, optimize, &module_map, "10-webgpu-unit-test", "src/10/10_webgpu_test.zig", &.{
+        ia("types.zig", "mod10_gpu_backend"),
+        ia("../01/types.zig", "mod01_platform"),
+    }, false, false);
+    addGpuLinks(unit_10_webgpu.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
+    // Add wgpu-native headers so webgpu_backend.zig and surface_webgpu_native.zig can compile.
+    unit_10_webgpu.root_module.addIncludePath(b.path("vendor/wgpu-native/include"));
+    if (target.result.os.tag == .windows) {
+        // Add stub lib path first so the linker finds the empty-archive stub before searching
+        // system paths. This allows compile-time-only tests to pass without a real wgpu-native install.
+        unit_10_webgpu.root_module.addLibraryPath(b.path("vendor/wgpu-native/lib"));
+        unit_10_webgpu.root_module.linkSystemLibrary("wgpu_native", .{ .use_pkg_config = .no });
+        unit_10_webgpu.root_module.linkSystemLibrary("dxgi", .{});
+    }
 
     // App tests
     const app_test_           = createTest(b, target, optimize, &module_map, "app-test",           "src/app/app_test.zig",           &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
@@ -628,6 +666,7 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-09-unit",     "Run module 09 unit tests (pure CPU)", unit_09);
     _ = addTestStep(b, "test-10",          "Run module 10 GPU backend seam tests", accept_10);
     _ = addTestStep(b, "test-10-unit",     "Run module 10 DX12 unit tests (compile-time + struct, no GPU)", unit_10);
+    _ = addTestStep(b, "test-10-webgpu",   "Run module 10 WebGPU backend unit tests (M23-01, compile-time + struct)", unit_10_webgpu);
     _ = addTestStep(b, "test-app",         "Run app layer unit tests (headless, no GPU)", app_test_);
     _ = addTestStep(b, "test-events",      "Run EventQueue unit tests (no GPU, no GLFW)", events_test);
     _ = addTestStep(b, "test-signal",      "Run Signal/Computed unit tests (pure, no GPU)", signal_test_);
@@ -1004,6 +1043,37 @@ fn buildGlfw(
         else => unreachable,
     }
     return lib;
+}
+
+// ---------------------------------------------------------------------------
+// addWebGpuLinks — apply wgpu-native headers and libs to a module (RJ4 / M23-01).
+// ---------------------------------------------------------------------------
+fn addWebGpuLinks(
+    m: *std.Build.Module,
+    b: *std.Build,
+    gd: *std.Build.Dependency,
+    gl: *std.Build.Step.Compile,
+    tgt: std.Build.ResolvedTarget,
+) void {
+    // GLFW headers (for GLFW window access in surface_webgpu_native.zig).
+    m.addIncludePath(gd.path("include"));
+    // wgpu-native vendor headers (webgpu/webgpu.h stub or real).
+    m.addIncludePath(b.path("vendor/wgpu-native/include"));
+    // Link GLFW (static lib compiled from source).
+    m.linkLibrary(gl);
+    m.link_libc = true;
+    if (tgt.result.os.tag == .windows) {
+        // wgpu_native.lib must be available on the user's PATH or library search path.
+        // The user must install wgpu-native and ensure wgpu_native.lib is findable.
+        // If the library path is known, add it here:
+        //   m.addLibraryPath(.{ .cwd_relative = "path/to/wgpu-native/lib" });
+        m.linkSystemLibrary("wgpu_native", .{ .use_pkg_config = .no });
+        m.linkSystemLibrary("gdi32", .{});
+        m.linkSystemLibrary("user32", .{});
+        m.linkSystemLibrary("shell32", .{});
+        // Windows Vulkan (wgpu-native internally uses Vulkan on Windows as one backend).
+        m.linkSystemLibrary("dxgi", .{});
+    }
 }
 
 // ---------------------------------------------------------------------------

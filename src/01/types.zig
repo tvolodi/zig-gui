@@ -763,7 +763,14 @@ pub const Platform = struct {
                 const handle = try surface_win32.createWin32Surface(@ptrCast(impl.window));
                 return Surface{ .dx12 = handle };
             },
-            .webgpu => return error.SurfaceCreationFailed, // Deferred to RJ4 (surface_web.zig)
+            .webgpu => {
+                // RJ4 — WebGPU surface is created directly by WebGpuBackend.init in
+                // src/10/webgpu_backend.zig (not here), because the wgpu-native symbols
+                // are only available when -Dgpu=webgpu is selected. This entry point
+                // returns SurfaceCreationFailed to satisfy the switch exhaustiveness check;
+                // it is never reached at runtime (WebGpuBackend.init bypasses createSurface).
+                return error.SurfaceCreationFailed;
+            },
         };
     }
 

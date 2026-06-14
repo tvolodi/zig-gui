@@ -28,7 +28,7 @@ pub const Backend = switch (gpu_backend) {
     .vulkan => @import("../01/types.zig").VulkanBackend,
     .metal => @compileError("Metal backend not yet implemented (RJ2)"),
     .dx12 => @import("dx12_backend.zig").Dx12Backend,
-    .webgpu => @compileError("WebGPU backend not yet implemented (RJ4)"),
+    .webgpu => @import("webgpu_backend.zig").WebGpuBackend,
 };
 
 // Re-export all GpuBackend methods through the selected backend
