@@ -752,6 +752,7 @@ pub fn build(b: *std.Build) void {
         visual_baseline_step.dependOn(&baseline_cmd.step);
 
         // M19-05: App packaging.
+        const pkg_version = b.option([]const u8, "version", "Package version string") orelse "dev";
         const package_mod = b.createModule(.{
             .root_source_file = b.path("src/tools/package.zig"),
             .target = target,
@@ -759,6 +760,8 @@ pub fn build(b: *std.Build) void {
         });
         const package_exe = b.addExecutable(.{ .name = "package", .root_module = package_mod });
         const run_package_cmd = b.addRunArtifact(package_exe);
+        run_package_cmd.addArg("--version");
+        run_package_cmd.addArg(pkg_version);
         run_package_cmd.addArg("--binary-path");
         const showcase_binary_name = if (target.result.os.tag == .windows) "showcase.exe" else "showcase";
         run_package_cmd.addArg(b.fmt("zig-out/bin/{s}", .{showcase_binary_name}));

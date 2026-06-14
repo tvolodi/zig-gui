@@ -306,7 +306,7 @@ approval. RI5 (packaging) implemented for v1 with uncompressed archive (zero new
 | M19-02 | **Delta download** — download only a binary diff (bsdiff format) between the current and next version; apply in-process | M19-01 | `deferred` |
 | M19-03 | **Staged update** — write the new binary to a temp path, verify its checksum, then rename atomically on next launch (same pattern as `PersistentSettings.flush`) | M19-02 | `deferred` |
 | M19-04 | **Update UI** — toast notification with "Update available — restart to apply" action; progress bar during download | M19-02, M7-05 | `deferred` |
-| M19-05 | **App installer / packaging** — `zig build package` step that bundles the binary, font assets, and a version manifest into an uncompressed archive (.zip on Windows, .tar on Linux) | — | `in-progress` |
+| M19-05 | **App installer / packaging** — `zig build package` step that bundles the binary, font assets, and a version manifest into an uncompressed archive (.zip on Windows, .tar on Linux) | — | `done` |
 
 ---
 

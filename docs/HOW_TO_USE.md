@@ -2453,3 +2453,30 @@ Full constraint list: `docs/specs/00_constitution.md`.
   recording them in `docs/specs/00_constitution.md`.
 
 Full constraint list: `docs/specs/00_constitution.md`.
+
+
+---
+
+## Packaging a Release (M19-05)
+
+To create a distributable package:
+
+```sh
+zig build -Doptimize=ReleaseFast     # build the binary
+zig build package -Dversion=1.0.0    # create dist/app-1.0.0.zip (Windows) or .tar (Linux)
+```
+
+The package contains:
+- The compiled binary (`app.exe` or `app`)
+- Font files from `assets/fonts/` (falls back gracefully if directory not found)
+- Optional `manifest.json` if `--include-manifest` is passed to the package tool
+
+To include a manifest:
+```sh
+zig build package -Dversion=1.0.0 -- --include-manifest
+```
+
+To use a custom fonts directory:
+```sh
+zig build package -Dversion=1.0.0 -- --fonts-dir path/to/fonts
+```
