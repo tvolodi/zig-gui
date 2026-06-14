@@ -464,6 +464,118 @@ for (errs) |e| {
 Validation checks: required fields present, enum membership, minLength/maxLength,
 minimum/maximum, email/date/uri format.
 
+### JSON Schema — Extended Keywords (M18)
+
+The schema validator supports the full M18 keyword set in addition to the v1 basics above.
+
+#### Pattern validation (`pattern`)
+
+```zig
+const schema = F.Schema{
+    .type = .string,
+    .pattern = "^[A-Z][a-z]+$",
+};
+```
+
+Validates string values against a POSIX-ERE regex (literals, `.`, `*`, `+`, `?`, `[…]`, `^`, `$`).
+Validation failure produces a `.pattern_mismatch` error. The regex engine is a pure-Zig
+backtracking implementation in `src/08/regex.zig` — no external dependency.
+
+#### `$ref` resolution
+
+```zig
+var defs = std.StringHashMap(*const F.Schema).init(allocator);
+const address_schema = F.Schema{ .type = .object, .required = &.{"city"} };
+try defs.put("Address", &address_schema);
+
+const schema = F.Schema{
+    .ref         = "#/definitions/Address",
+    .definitions = defs,
+};
+```
+
+Resolves a JSON Pointer URI (`#/definitions/Name`) within the same schema document.
+The `definitions` map holds named sub-schemas. Both `validate` and `buildForm` dereference
+`$ref` transparently.
+
+#### Combinators — `allOf`, `anyOf`, `oneOf`
+
+```zig
+const string_schema  = F.Schema{ .type = .string };
+const integer_schema = F.Schema{ .type = .integer };
+
+// anyOf: value must be valid for at least one sub-schema
+const schema = F.Schema{ .any_of = &.{ string_schema, integer_schema } };
+
+// oneOf: value must be valid for exactly one sub-schema
+const strict = F.Schema{ .one_of = &.{ string_schema, integer_schema } };
+
+// allOf: value must be valid for all sub-schemas
+const combined = F.Schema{ .all_of = &.{
+    F.Schema{ .type = .object, .required = &.{"name"} },
+    F.Schema{ .type = .object, .required = &.{"age"} },
+} };
+```
+
+Errors: `.any_of_mismatch` (none passed), `.one_of_mismatch` (zero or more than one passed).
+
+#### `dependentRequired`
+
+```zig
+var deps = std.StringHashMap([]const []const u8).init(allocator);
+try deps.put("credit_card", &.{ "cvv", "billing_address" });
+
+const schema = F.Schema{
+    .type               = .object,
+    .dependent_required = deps,
+};
+```
+
+Conditionally requires fields when a trigger property is present.
+Produces `.dependent_required_missing` errors for each missing dependent field.
+
+#### Conditional schemas — `if` / `then` / `else`
+
+```zig
+const if_s   = F.Schema{ .type = .string };
+const then_s = F.Schema{ .type = .string, .min_length = 5 };
+const else_s = F.Schema{ .type = .integer, .minimum = 0 };
+
+const schema = F.Schema{
+    .if_schema   = &if_s,
+    .then_schema = &then_s,
+    .else_schema = &else_s,
+};
+```
+
+Applies `then_schema` when `if_schema` validates; applies `else_schema` when it does not.
+If `else_schema` is absent and the condition fails, no additional constraints are checked.
+
+#### Array fields — `minItems`, `maxItems`, item schema
+
+```zig
+const item_schema = F.Schema{ .type = .string };
+const schema = F.Schema{
+    .type      = .array,
+    .items     = &item_schema,
+    .min_items = 1,
+    .max_items = 5,
+};
+```
+
+Enforces array size bounds. Out-of-bounds arrays produce a `.type_mismatch` error.
+Per-item validation runs against the `items` schema; errors use dotted paths like `"tags.0"`.
+
+`buildForm` emits `FieldSpec.is_array = true` for array-type object properties, with
+`array_item_schema`, `array_min_items`, and `array_max_items` populated:
+
+```zig
+const field = form.model[0];
+if (field.is_array) {
+    // field.array_min_items, field.array_max_items, field.array_item_schema
+}
+```
+
 ---
 
 ## 4. Reactive state with Signals and Bindings (Milestone 2)

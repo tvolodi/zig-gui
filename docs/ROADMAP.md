@@ -280,18 +280,18 @@ Promotes the framework items that were previously deferred from the post-v1 list
 
 ---
 
-## Milestone 18 — JSON Schema completeness `planned`
+## Milestone 18 — JSON Schema completeness `done`
 
 Lifts the remaining deferred keywords from module 08.
 
-| ID | Feature | Depends on |
-|---|---|---|
-| M18-01 | **`pattern` validation** — regex validation in schema forms using a vendored regex engine (human decision required per INV-5.6 before implementing) | 08 |
-| M18-02 | **`$ref` resolution** — resolve `$ref` URIs within the same schema document; enables shared sub-schema definitions | 08 |
-| M18-03 | **`allOf` / `anyOf` / `oneOf` combinators** — validate a value against multiple sub-schemas with and/or/exactly-one semantics | 08 |
-| M18-04 | **`dependentRequired`** — conditionally require fields based on the presence of other fields | 08 |
-| M18-05 | **`if` / `then` / `else` conditional schemas** — apply a sub-schema based on whether the value validates against a condition | 08 |
-| M18-06 | **Array add / remove UI** — `+` / `−` controls for array-type fields in a mounted `Form`; currently v1 renders existing items only | 08, M7-06 |
+| ID | Feature | Depends on | Status |
+|---|---|---|---|
+| M18-01 | **`pattern` validation** — regex validation in schema forms using a vendored pure-Zig regex engine (`src/08/regex.zig`); produces `.pattern_mismatch` errors | 08 | `done` |
+| M18-02 | **`$ref` resolution** — resolve `$ref` URIs within the same schema document; `resolveRef()` + `buildForm` ref dereferencing; validator dereferences `$ref` | 08 | `done` |
+| M18-03 | **`allOf` / `anyOf` / `oneOf` combinators** — validate a value against multiple sub-schemas with and/or/exactly-one semantics; `.any_of_mismatch` / `.one_of_mismatch` error kinds | 08 | `done` |
+| M18-04 | **`dependentRequired`** — conditionally require fields based on the presence of other fields; produces `.dependent_required_missing` errors | 08 | `done` |
+| M18-05 | **`if` / `then` / `else` conditional schemas** — apply a sub-schema based on whether the value validates against a condition | 08 | `done` |
+| M18-06 | **Array add / remove UI** — `Schema.min_items/max_items`, `FieldSpec.is_array/array_item_schema`; validator checks array bounds + per-item validation; `buildForm` emits array field specs | 08, M7-06 | `done` |
 
 ---
 

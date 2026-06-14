@@ -439,6 +439,11 @@ pub fn build(b: *std.Build) void {
         ia("../05_theme/types.zig", "mod05_theme"),
     }, false, false);
     const unit_08   = createTest(b, target, optimize, &module_map, "08-unit-test", "src/08/08_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    // M18 sub-requirement unit tests
+    const m18_combinator_test_     = createTest(b, target, optimize, &module_map, "08-combinator-test",     "src/08/combinator_test.zig",     &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_dep_required_test_   = createTest(b, target, optimize, &module_map, "08-dep-required-test",   "src/08/dependent_required_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_conditional_test_    = createTest(b, target, optimize, &module_map, "08-conditional-test",    "src/08/conditional_test.zig",    &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_array_field_test_    = createTest(b, target, optimize, &module_map, "08-array-field-test",    "src/08/array_field_test.zig",    &.{ia("types.zig", "mod08_schema_forms")}, false, false);
     const accept_09 = createTest(b, target, optimize, &module_map, "09-acceptance-test", "docs/specs/09.acceptance_test.zig", &.{
         ia("types.zig", "mod09_renderer"),
         ia("../03_element_store/types.zig", "mod03_element_store"),
@@ -562,7 +567,9 @@ pub fn build(b: *std.Build) void {
     inline for (.{
         accept_01, unit_01, accept_02, unit_02, accept_03, unit_03,
         accept_04, unit_04, accept_05, unit_05, accept_06, unit_06,
-        accept_07, unit_07, accept_08, unit_08, accept_09, unit_09,
+        accept_07, unit_07, accept_08, unit_08,
+        m18_combinator_test_, m18_dep_required_test_, m18_conditional_test_, m18_array_field_test_,
+        accept_09, unit_09,
         accept_10, unit_10,
         app_test_, events_test, signal_test_, anim_timeline_test_, overlay_test,
         binding_test, m7_widget_test, toast_test, dialog_test, date_util_test,
@@ -590,8 +597,12 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-06-unit",     "Run module 06 unit tests", unit_06);
     _ = addTestStep(b, "test-07",          "Run module 07 acceptance tests", accept_07);
     _ = addTestStep(b, "test-07-unit",     "Run module 07 unit tests", unit_07);
-    _ = addTestStep(b, "test-08",          "Run module 08 acceptance tests", accept_08);
-    _ = addTestStep(b, "test-08-unit",     "Run module 08 unit tests", unit_08);
+    _ = addTestStep(b, "test-08",                    "Run module 08 acceptance tests", accept_08);
+    _ = addTestStep(b, "test-08-unit",               "Run module 08 unit tests", unit_08);
+    _ = addTestStep(b, "test-08-combinator",         "Run M18-03 allOf/anyOf/oneOf combinator tests (pure)", m18_combinator_test_);
+    _ = addTestStep(b, "test-08-dep-required",       "Run M18-04 dependentRequired tests (pure)", m18_dep_required_test_);
+    _ = addTestStep(b, "test-08-conditional",        "Run M18-05 if/then/else conditional schema tests (pure)", m18_conditional_test_);
+    _ = addTestStep(b, "test-08-array-field",        "Run M18-06 array field validation tests (pure)", m18_array_field_test_);
     _ = addTestStep(b, "test-09",          "Run module 09 tests (GPU tests skip if unavailable)", accept_09);
     _ = addTestStep(b, "test-09-unit",     "Run module 09 unit tests (pure CPU)", unit_09);
     _ = addTestStep(b, "test-10",          "Run module 10 GPU backend seam tests", accept_10);
