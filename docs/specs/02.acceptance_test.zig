@@ -106,7 +106,7 @@ test "atlas packing is non-overlapping and in-bounds, with caching" {
         const gw: u32 = 8 + (i % 3) * 4; // varying sizes 8,12,16
         const gh: u32 = 10;
         rects[i] = try atlas.insert(
-            .{ .codepoint = @intCast('A' + i), .px = 16 },
+            .{ .glyph_id = @intCast('A' + i), .px = 16 },
             gw,
             gh,
             buf[0 .. gw * gh],
@@ -123,7 +123,7 @@ test "atlas packing is non-overlapping and in-bounds, with caching" {
     }
 
     // Cache: lookup and re-insert of an existing key return the same rect.
-    const key = T.GlyphKey{ .codepoint = 'A', .px = 16 };
+    const key = T.GlyphKey{ .glyph_id = 'A', .px = 16 };
     const looked = atlas.lookup(key).?;
     try testing.expectEqual(rects[0], looked);
     const reinserted = try atlas.insert(key, 8, 10, buf[0..80]);
@@ -138,13 +138,13 @@ test "atlas grows and preserves prior entries" {
     defer atlas.deinit();
 
     var buf: [10 * 10]u8 = [_]u8{0xFF} ** 100;
-    const first = try atlas.insert(.{ .codepoint = 'X', .px = 16 }, 10, 10, &buf);
+    const first = try atlas.insert(.{ .glyph_id = 'X', .px = 16 }, 10, 10, &buf);
 
     // Force growth: another 10x10 cannot fit beside the first in a 16x16 atlas.
-    _ = try atlas.insert(.{ .codepoint = 'Y', .px = 16 }, 10, 10, &buf);
+    _ = try atlas.insert(.{ .glyph_id = 'Y', .px = 16 }, 10, 10, &buf);
 
     // The first glyph is still retrievable and correct after growth.
-    const again = atlas.lookup(.{ .codepoint = 'X', .px = 16 }).?;
+    const again = atlas.lookup(.{ .glyph_id = 'X', .px = 16 }).?;
     try testing.expectEqual(first, again);
     try testing.expect(atlas.width >= 16 and atlas.height >= 16);
 }

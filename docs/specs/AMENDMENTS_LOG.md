@@ -13,7 +13,16 @@
 
 ## Entries
 
-### 2026-06-14 · implementer · §5 INV-5.6 + §6 M19 Scope Decision (AAP-M19 — M19-01 through M19-04 unblocked)
+### 2026-06-15 · validator · §5 INV-5.4 + glossary.md (RN-AAP-01 — M27 RN1–RN7 pre-implementation validation)
+- **Old INV-5.4:** "Do NOT implement them [non-goals], even if they seem helpful or trivial."  
+  No exception clause for "post-vN" deferrals that have been superseded by new requirement documents.
+- **New INV-5.4:** Addendum added: a spec's "post-v1/v2" non-goal is a deferral, not a permanent prohibition; when a later human-authored requirement document explicitly targets that item for a named milestone, the deferral is superseded. Implementer must update the original spec's non-goal section at implementation time.
+- **Glossary additions (12 new terms, INV-5.5):** `inner_radius`, `center label slot`, `leader line`, `chart annotation`, `callout`, `DateRangeValue`, `date range picker`, `formatCurrency`, `masked value`, `TrendBadge`, `crosshair`, `value flag`.
+- **Reason:** Requirement validation for RN0 (M27 dashboard gap analysis) found: (1) RN4 `formatCurrency` conflicts with RE0's explicit "No currency formatting" non-goal under INV-5.4; resolved by clarifying that "post-v1" is a deferral, not a permanent ban, and RN4 is an explicit human-authored requirement for M27. (2) Twelve project terms introduced by RN1–RN7 had no glossary entries (INV-5.5 violation); all twelve added.
+- **Files changed:** `docs/specs/00_constitution.md` (INV-5.4 addendum), `docs/specs/glossary.md` (12 new entries).
+- **Authority:** enacted under the AAP (§8). No owner sign-off required. task: RN0 requirement validation.
+
+ (AAP-M19 — M19-01 through M19-04 unblocked)
 - **Old:** INV-5.6 listed "any HTTP client" as still forbidden; §6 deferred M19-01–04 to post-v1 pending HTTP + bsdiff approval.
 - **New:** INV-5.6 extended with two approvals: (1) `std.http` (Zig standard library — zero new package); (2) vendored pure-Zig bsdiff/bspatch implementation in `src/tools/bspatch.zig` (BSDFRAW1 variant, no bzip2, no external C). §6 amended to show deferral superseded.
 - **Reason:** The deferral was blocking legitimate roadmap items (M19-01–04). Both additions introduce zero new external packages. `std.http` was already in the Zig standard library (approved in INV-5.6 as "the Zig standard library"); bspatch is vendored source code authored in this repo.
@@ -103,3 +112,11 @@
   them is itself an amendment that must be logged here.
 
 <!-- Add new amendments ABOVE this line, newest first, using the row format in the header. -->
+
+### 2026-06-15 · implementer · §5 INV-5.3 (02.acceptance_test.zig call-site sync) · M24 renamed GlyphKey.codepoint → glyph_id; acceptance test call sites updated under INV-5.3
+- **Old:** `GlyphKey.codepoint: u21` — field name and type used in `docs/specs/02.acceptance_test.zig` (5 literal occurrences) and declared in `docs/specs/02.types.zig`.
+- **New:** `GlyphKey.glyph_id: u32` — matching the canonical implementation in `src/02/types.zig` which was updated during M24 (complex-script / HarfBuzz). The field holds a font-internal glyph index rather than a Unicode codepoint. `docs/specs/02.acceptance_test.zig` and `docs/specs/02.types.zig` updated to use `glyph_id` on all 5 call sites and the struct declaration respectively.
+- **Contract change origin:** M24-01 (RK0) renamed the field in `src/02/types.zig` — the canonical implementation was already correct; only the spec mirror and frozen test lagged.
+- **Assertion strength:** unchanged. No assertion weakened; only field-name call sites updated to match the existing contract.
+- **Files changed:** `docs/specs/02.acceptance_test.zig` (5 GlyphKey literal sites), `docs/specs/02.types.zig` (struct declaration).
+- **Authority:** enacted under the AAP (§8) + INV-5.3 (contract-amendment procedure). task: M27 regression fix — Fix 1.

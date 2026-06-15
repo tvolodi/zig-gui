@@ -1019,7 +1019,7 @@ pub fn buildDrawList(
         }
 
         // 3. Text glyphs (inputs/textarea/checkbox/radio/badge emit in step 4 with custom placement)
-        if (kind != .checkbox and kind != .radio and kind != .badge and kind != .input and kind != .textarea) {
+        if (kind != .checkbox and kind != .radio and kind != .badge and kind != .input and kind != .textarea and kind != .maskable_value and kind != .trend_badge) {
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
@@ -1586,6 +1586,55 @@ pub fn buildDrawList(
 
                 // Restore scissor.
                 try list.append(alloc, .restore_scissor);
+            },
+            .maskable_value => {
+                // RN5 — Maskable value: show value_text or repeated masked_char (INV-4.3).
+                const ms = scene.maskableValueStateOf(id.index);
+                const display_len = @as(usize, ms.display_len);
+                if (display_len > 0) {
+                    const mv_font = if (scene.font_family) |fam|
+                        fam.face(style.font_bold, style.font_italic)
+                    else
+                        font;
+                    if (ms.visible) {
+                        // Show actual value text (clamped to display_len).
+                        try emitGlyphs(&list, alloc, id, ms.value_text[0..display_len], computed, &style, atlas, mv_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
+                    } else {
+                        // Show masked characters — same slot count as display_len (non-leaking fixed width).
+                        var mask_buf: [64]u8 = undefined;
+                        @memset(mask_buf[0..display_len], ms.masked_char);
+                        try emitGlyphs(&list, alloc, id, mask_buf[0..display_len], computed, &style, atlas, mv_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
+                    }
+                }
+            },
+            .trend_badge => {
+                // RN6 — Trend badge: arrow prefix + value text colored by semantic token (INV-4.3).
+                const tb = scene.trendBadgeStateOf(id.index);
+                const tb_font = if (scene.font_family) |fam|
+                    fam.face(style.font_bold, style.font_italic)
+                else
+                    font;
+                // Color comes from Tokens struct — no raw hex literals.
+                const text_color = switch (tb.direction) {
+                    .up => tokens.ok,
+                    .down => tokens.err,
+                    .neutral => tokens.text_muted,
+                };
+                var tb_style = style;
+                tb_style.text_color = text_color;
+                // Build display string: ASCII arrow prefix + formatted value.
+                const arrow: []const u8 = switch (tb.direction) {
+                    .up => "^ ",
+                    .down => "v ",
+                    .neutral => "",
+                };
+                var tb_buf: [32]u8 = undefined;
+                @memcpy(tb_buf[0..arrow.len], arrow);
+                const val_slice = std.fmt.bufPrint(tb_buf[arrow.len..], "{d:.1}", .{tb.value}) catch "";
+                const full_len = arrow.len + val_slice.len;
+                if (full_len > 0) {
+                    try emitGlyphs(&list, alloc, id, tb_buf[0..full_len], computed, &tb_style, atlas, tb_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
+                }
             },
             else => {},
         }

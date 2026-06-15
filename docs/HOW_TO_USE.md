@@ -58,7 +58,7 @@ const desc = try markup.parse(arena.allocator(),
 );
 ```
 
-**Available tags (M7 Phase 3 — 24 kinds):** `Text`, `Button`, `Input`, `Card`, `Row`, `Column`, `Dropdown`, `Checkbox`, `ScrollView`, `Image`, `Icon`, `Textarea`, `Separator`, `Radio`, `Slider`, `ProgressBar`, `Spinner`, `Tabs`+`TabItem`, `Accordion`, `DatePicker`, `Avatar`, `Badge`, `DataTable`
+**Available tags (M27 — 27 kinds):** `Text`, `Button`, `Input`, `Card`, `Row`, `Column`, `Dropdown`, `Checkbox`, `ScrollView`, `Image`, `Icon`, `Textarea`, `Separator`, `Radio`, `Slider`, `ProgressBar`, `Spinner`, `Tabs`+`TabItem`, `Accordion`, `DatePicker`, `Avatar`, `Badge`, `DataTable`, `DateRangePicker`, `MaskableValue`, `TrendBadge`
 
 **`Separator`:** Renders a 1 px horizontal rule using `tokens.border_default`. No children. No interactive state.
 
@@ -2751,8 +2751,209 @@ if (hit) |h| { /* h.series_idx, h.datum_idx, h.value */ }
 Hover/selection signals drive tooltip display and mark emphasis through the normal dirty-scan path.
 Legend swatches are emitted by `drawLegend()` in `src/13/legend.zig`.
 
+### Donut chart / ring segments (M27 RN1)
+
+Set `inner_radius` on a `pie`-kind chart to leave a hollow center.  `0.0` = solid pie (default);
+any value in `(0, 1)` makes a donut ring where the proportion is the hole radius relative to the
+outer radius:
+
+```zig
+const chart = chart_mod.Chart{
+    .kind = .pie,
+    .series = &.{.{ .name = "Types", .values = &.{ 30, 20, 50 }, .color_token = "series0" }},
+    .x = .{ .numeric = &.{ 0, 1, 2 } },
+    .inner_radius = 0.6,       // 60% hollow center → donut ring
+    .center_label = "Total",   // optional label slot (caller renders actual glyphs)
+};
+try chart.render(&frame, &draw_list, allocator);
+```
+
+`center_label` is a *slot*: when set and `inner_radius > 0`, `renderPie` emits an `aa_filled_circle`
+background centered in the hole.  The caller renders the text glyphs on top (same pattern as
+`drawLegend()` — see `src/13/legend.zig`).
+
+Ring geometry: for `inner_radius = r`, the ring occupies radii `[outer * r, outer]`.  The
+`ArcCmd.radius` is the stroke center `outer * (1 + r) / 2`; `ArcCmd.width` is `outer * (1 - r)`.
+
+### Annotation callouts / leader lines (M27 RN2)
+
+`Callout` entries in `chart.callouts` attach leader lines to pie/donut segments.  Each callout
+emits one `PolylineCmd` (the leader line) and one `filled_rect` (label background):
+
+```zig
+const callouts = [_]chart_mod.Callout{
+    .{ .datum_idx = 0, .label = "Equity 30%" },
+    .{ .datum_idx = 1, .label = "Bonds 20%"  },
+    .{ .datum_idx = 2, .label = "Cash 50%"   },
+};
+const chart = chart_mod.Chart{
+    .kind = .pie,
+    .series = &series,
+    .x = .{ .numeric = &vals },
+    .inner_radius = 0.5,
+    .callouts = &callouts,
+};
+try chart.render(&frame, &draw_list, allocator);
+```
+
+Use `marks_mod.computeCalloutPos(values, datum_idx, center, outer_r, label_r)` to compute the
+outboard label geometry without rendering — useful for positioning glyph commands above the label
+background rect:
+
+```zig
+const marks_mod = @import("src/13/marks.zig");
+if (marks_mod.computeCalloutPos(&vals, 0, center, outer_r, label_r)) |pos| {
+    // pos.anchor   → PolylineCmd start (on the outer ring)
+    // pos.label_pt → label origin
+    // pos.mid_angle → segment mid-angle in radians
+}
+```
+
+Non-overlap guarantee: for ≥ 5 evenly-distributed segments the leader-line anchors are placed at
+`outer_r × 1.5`.  The inter-anchor chord distance exceeds the 60 px label background width for
+any plot rect ≥ 100 × 100 px.
+
+### Crosshair / reference guide on hover (M27 RN7)
+
+Add `.crosshair = .{ .enabled = true }` to a chart to render a dashed vertical guide that snaps
+to the hovered datum's x-position:
+
+```zig
+const chart = chart_mod.Chart{
+    .kind = .line,
+    .series = &series,
+    .x = .{ .numeric = &vals },
+    .crosshair = .{ .enabled = true, .dash_len = 6, .gap_len = 4, .width = 1 },
+};
+```
+
+The crosshair is rendered only when at least one series has `hovered_datum` set.  The caller wires
+hover state using `hitTest` + `CrosshairState`:
+
+```zig
+const interaction = @import("src/13/interaction.zig");
+
+// Per-chart state (update each frame):
+var cs = interaction.CrosshairState{};
+
+// On mouse move:
+interaction.updateCrosshairX(&chart, &frame, mouse_pos, 20.0, &cs);
+// cs.x == null  →  mouse-out, crosshair hidden
+// cs.x == f32   →  pixel x of the snapped datum column
+
+// Mark the hovered datum on the series (drives crosshair render and tooltip):
+if (interaction.hitTest(&chart, &frame, mouse_pos, 20.0)) |hit| {
+    series[hit.series_idx].hovered_datum = hit.datum_idx;
+}
+// On mouse-out:
+// series[0].hovered_datum = null;
+```
+
+The crosshair is emitted as alternating short `PolylineCmd` segments (dashed line) — no new
+draw-command vocabulary is required.  Color is resolved via the `"axis"` semantic token (INV-4.3).
+
 ### Running module 13 tests
 
 ```sh
 zig build test-13
 ```
+
+---
+
+## M27 — Dashboard widgets (RN3–RN6)
+
+### DateRangePicker (RN3)
+
+A date-range input widget with preset shortcuts.
+
+```xml
+<DateRangePicker/>
+```
+
+```zig
+// Set start+end explicitly (rejected if end < start):
+scene.setDateRange(idx, .{ .year = 2025, .month = 1, .day = 1 },
+                       .{ .year = 2025, .month = 3, .day = 31 });
+
+// Set from a preset (atomically sets both ends):
+scene.setDateRangePreset(idx, .last_30);   // .today / .last_7 / .last_30 / .this_month / .custom
+
+// Read current range:
+const range = scene.getDateRange(idx);   // DateRangeValue{ .start, .end }
+```
+
+Presets: `.today`, `.last_7`, `.last_30`, `.this_month`, `.custom`.
+Setting `.custom` preserves the current range and only updates the preset tag.
+Rejecting `end < start`: `setDateRange` is a no-op when the end date precedes the start date.
+
+### MaskableValue (RN5)
+
+A fixed-width display that can be toggled between masked (hidden) and revealed states.
+
+```xml
+<MaskableValue/>
+```
+
+```zig
+// Set the underlying value (establishes display_len on first call):
+scene.setMaskableValue(idx, "1234-5678");
+
+// Toggle visibility (marks dirty — INV-3.3):
+scene.setMaskableVisible(idx, true);   // reveal
+scene.setMaskableVisible(idx, false);  // mask again
+
+// Read state:
+const ms = scene.maskableValueStateOf(idx);
+// ms.visible, ms.value_text, ms.display_len, ms.masked_char
+```
+
+Fixed-width constraint: `display_len` is set on the **first** call to `setMaskableValue` and never changes on subsequent calls. This prevents layout shifts when toggling between masked and revealed states.
+The default `masked_char` is `'*'` (ASCII 0x2A).
+
+### TrendBadge (RN6)
+
+An arrow + percentage indicator that signals positive/negative/neutral trends.
+
+```xml
+<TrendBadge/>
+```
+
+```zig
+// Set trend value — direction is computed automatically:
+scene.setTrendValue(idx, 3.5);    // direction = .up,      color = tokens.ok
+scene.setTrendValue(idx, -1.2);   // direction = .down,    color = tokens.err
+scene.setTrendValue(idx, 0.0);    // direction = .neutral, color = tokens.text_secondary
+
+// Read state:
+const ts = scene.trendBadgeStateOf(idx);
+// ts.value (f32), ts.direction (.up / .down / .neutral)
+```
+
+Colors are sourced from theme tokens only (INV-4.3): `tokens.ok` (up), `tokens.err` (down), `tokens.text_muted` (neutral). No hex literals.
+
+### formatCurrency (RN4)
+
+Locale-aware currency formatting. Available in `src/app/locale.zig`.
+
+```zig
+const locale = @import("app/locale.zig");
+
+var buf: [32]u8 = undefined;
+
+// USD — prefix symbol, locale grouping
+const usd = locale.formatCurrency(&buf, 9732.58, .usd, locale.Locale.en_US);
+// → "$9,732.58"
+
+// SGD — prefix compound symbol
+const sgd = locale.formatCurrency(&buf, 11456.79, .sgd, locale.Locale.en_US);
+// → "S$11,456.79"
+
+// EUR — always EU conventions (dot thousands, comma decimal), locale ignored for EUR
+const eur = locale.formatCurrency(&buf, 11310.56, .eur, locale.Locale.en_US);
+// → "€11.310,56"
+```
+
+Supported currencies: `.usd`, `.sgd`, `.eur`.
+Returns `null` if `buf` is too small.
+Always renders exactly 2 decimal places.
+

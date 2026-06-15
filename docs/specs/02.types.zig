@@ -80,7 +80,8 @@ pub const FontVariant = enum(u8) { regular, bold, italic };
 pub const REPLACEMENT_CODEPOINT: u21 = 0xFFFD;
 
 pub const GlyphKey = struct {
-    codepoint: u21,
+    /// M24-01 (RK0): font-internal glyph id (NOT a Unicode codepoint).
+    glyph_id: u32,
     px: u16,
     variant: FontVariant = .regular,
     /// R64: 0 = primary font, 1–4 = fallback index + 1.

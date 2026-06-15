@@ -110,7 +110,9 @@ build.zig                — test-locale step (if not rolled into test-app)
 
 ## Non-goals (DO NOT implement — INV-5.4)
 
-- **No currency formatting** — symbol placement, ISO 4217 codes, and rounding are post-v1.
+- ~~**No currency formatting**~~ — **SUPERSEDED by RN4 (M27 milestone).** Currency formatting
+  (`formatCurrency`) is now implemented in `src/app/locale.zig` per INV-5.4 addendum
+  (RN-AAP-01, 2026-06-15). The "No currency formatting" deferral is removed.
 - **No percentage formatting** — `"12%"` is trivial; locale-aware `"12 %"` (fr-FR) is post-v1.
 - **No ordinal formatting** — `"1st"`, `"2nd"` etc. are language-specific and post-v1.
 - **No compact/short formatting** — `"1.2K"` is post-v1.

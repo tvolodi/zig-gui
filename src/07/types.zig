@@ -43,7 +43,7 @@ pub const FontFamily = font_family_mod.FontFamily;
 /// Sentinel value used by R75, R7C, R7D to indicate "no element".
 pub const NONE: u32 = std.math.maxInt(u32);
 
-pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon, textarea, separator, radio, slider, progress_bar, spinner, tabs, tab_item, accordion, date_picker, avatar, badge, data_table };
+pub const WidgetKind = enum { text, button, input, card, row, column, dropdown, checkbox, scrollview, image, icon, textarea, separator, radio, slider, progress_bar, spinner, tabs, tab_item, accordion, date_picker, avatar, badge, data_table, date_range_picker, maskable_value, trend_badge };
 
 /// R40 — Pseudo-state flags for interactive widgets.
 pub const PseudoState = packed struct {
@@ -208,6 +208,9 @@ pub fn defaultAccessRoleFor(kind: WidgetKind) AccessRole {
         .icon => .img,
         .image => .img,
         .data_table => .none,
+        .date_range_picker => .combobox,
+        .maskable_value => .text,
+        .trend_badge => .text,
     };
 }
 
@@ -238,6 +241,9 @@ pub fn tagToKind(tag: []const u8) ?WidgetKind {
     if (eql(u8, tag, "Avatar")) return .avatar;
     if (eql(u8, tag, "Badge")) return .badge;
     if (eql(u8, tag, "DataTable")) return .data_table;
+    if (eql(u8, tag, "DateRangePicker")) return .date_range_picker;
+    if (eql(u8, tag, "MaskableValue")) return .maskable_value;
+    if (eql(u8, tag, "TrendBadge")) return .trend_badge;
     return null;
 }
 
@@ -246,7 +252,7 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
     return switch (kind) {
         .row => .{ .display = .flex, .direction = .row },
         .column => .{ .display = .flex, .direction = .column },
-        .card => .{ .display = .flex, .direction = .column },
+        .card => .{ .display = .block },
         .scrollview => .{ .display = .block, .overflow = .hidden },
         .textarea => .{ .display = .block, .overflow = .hidden },
         .separator => .{ .display = .block, .width = .{ .percent = 100 }, .height = .{ .px = 4 }, .flex_shrink = 0, .min_size = .{ .h = 4 } },
@@ -262,6 +268,9 @@ pub fn defaultLayoutFor(kind: WidgetKind) LayoutNode {
         .avatar => .{ .display = .block, .width = .{ .px = 40 }, .height = .{ .px = 40 } },
         .badge => .{ .display = .block, .width = .{ .px = 32 }, .height = .{ .px = 20 }, .flex_shrink = 0 },
         .data_table => .{ .display = .block, .overflow = .hidden },
+        .date_range_picker => .{ .display = .flex, .direction = .row, .align_items = .center },
+        .maskable_value => .{ .display = .block },
+        .trend_badge => .{ .display = .block, .flex_shrink = 0 },
         .button => .{ .display = .block, .flex_shrink = 0 }, // no shrink
         else => .{ .display = .block },
     };
@@ -276,7 +285,7 @@ pub fn defaultStyleFor(kind: WidgetKind, tokens: Tokens) ComputedStyle {
         .separator => ComputedStyle{ .background = tokens.border_strong },
         .text => ComputedStyle{ .text_color = tokens.text_body, .font_size = tokens.text_base },
         .checkbox, .radio => ComputedStyle{ .text_color = tokens.text_body },
-        .row, .column, .scrollview, .image, .icon, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table => ComputedStyle{},
+        .row, .column, .scrollview, .image, .icon, .slider, .progress_bar, .spinner, .tabs, .tab_item, .accordion, .date_picker, .avatar, .badge, .data_table, .date_range_picker, .maskable_value, .trend_badge => ComputedStyle{},
     };
 }
 
@@ -440,6 +449,52 @@ pub const DatePickerState = struct {
     nav_month: u8 = 1,
     open: bool = false,
     disabled: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// RN3 — Date range picker state
+// ---------------------------------------------------------------------------
+
+/// Preset date range options for DateRangePicker.
+pub const DateRangePreset = enum { today, last_7, last_30, this_month, custom };
+
+/// A date range with start and end DateValues.
+pub const DateRangeValue = struct {
+    start: DateValue = .{},
+    end: DateValue = .{},
+};
+
+pub const DateRangePickerState = struct {
+    value: DateRangeValue = .{},
+    preset: DateRangePreset = .custom,
+    open: bool = false,
+    disabled: bool = false,
+};
+
+// ---------------------------------------------------------------------------
+// RN5 — Maskable value widget state
+// ---------------------------------------------------------------------------
+
+/// Fixed-width maskable display. display_len is set at first setMaskableValue call.
+/// Masked run always uses the same character count as the actual text (non-leaking).
+pub const MaskableValueState = struct {
+    visible: bool = false,
+    value_text: [64]u8 = [_]u8{0} ** 64,
+    /// Masking character shown in place of each value character when hidden.
+    /// Default '*' (0x2A). '•' (U+2022) is multi-byte; use '*' for u8 compatibility.
+    masked_char: u8 = '*',
+    display_len: u8 = 0,
+};
+
+// ---------------------------------------------------------------------------
+// RN6 — Trend badge state
+// ---------------------------------------------------------------------------
+
+pub const TrendDirection = enum { up, down, neutral };
+
+pub const TrendBadgeState = struct {
+    value: f32 = 0,
+    direction: TrendDirection = .neutral,
 };
 
 // ---------------------------------------------------------------------------
@@ -733,6 +788,15 @@ pub const Scene = struct {
     // R79 — Data table state parallel array
     _table_state: std.ArrayListUnmanaged(DataTableState) = .empty,
 
+    // RN3 — Date range picker state parallel array
+    _date_range_picker_state: std.ArrayListUnmanaged(DateRangePickerState) = .empty,
+
+    // RN5 — Maskable value state parallel array
+    _maskable_value_state: std.ArrayListUnmanaged(MaskableValueState) = .empty,
+
+    // RN6 — Trend badge state parallel array
+    _trend_badge_state: std.ArrayListUnmanaged(TrendBadgeState) = .empty,
+
     // RB0 — Optional cursor shape override per element (null = use default).
     _cursor: std.ArrayListUnmanaged(?CursorShape) = .empty,
 
@@ -832,6 +896,9 @@ pub const Scene = struct {
         self._context_menu_idx.deinit(self.gpa);
         for (self._table_state.items) |*ts| ts.sorted_indices.deinit(self.gpa);
         self._table_state.deinit(self.gpa);
+        self._date_range_picker_state.deinit(self.gpa);
+        self._maskable_value_state.deinit(self.gpa);
+        self._trend_badge_state.deinit(self.gpa);
         self._classes.deinit(self.gpa);
         // RB0–RB5: new parallel arrays
         self._cursor.deinit(self.gpa);
@@ -847,6 +914,8 @@ pub const Scene = struct {
         self._enter_exit_state.deinit(self.gpa);
         // RG1 — Accessibility tree
         self._access_nodes.deinit(self.gpa);
+        // RH6 — Array field state (M18-06)
+        self._array_field_state.deinit(self.gpa);
         self.elements.deinit();
     }
 
@@ -882,6 +951,9 @@ pub const Scene = struct {
         self._tooltip.clearRetainingCapacity();
         self._context_menu_idx.clearRetainingCapacity();
         self._table_state.clearRetainingCapacity();
+        self._date_range_picker_state.clearRetainingCapacity();
+        self._maskable_value_state.clearRetainingCapacity();
+        self._trend_badge_state.clearRetainingCapacity();
         self._classes.clearRetainingCapacity();
         // RB0–RB5: new parallel arrays
         self._cursor.clearRetainingCapacity();
@@ -914,7 +986,7 @@ pub const Scene = struct {
         self.focusable_indices.clearRetainingCapacity();
         for (self._kind.items, 0..) |kind, i| {
             switch (kind) {
-                .button, .input, .dropdown, .checkbox, .textarea, .radio, .slider, .accordion, .date_picker => {
+                .button, .input, .dropdown, .checkbox, .textarea, .radio, .slider, .accordion, .date_picker, .date_range_picker => {
                     self.focusable_indices.append(self.gpa, @as(u32, @intCast(i))) catch {};
                 },
                 else => {},
@@ -1711,6 +1783,102 @@ pub const Scene = struct {
     }
 
     // -----------------------------------------------------------------------
+    // Date range picker (RN3)
+    // -----------------------------------------------------------------------
+
+    pub fn dateRangePickerStateOf(self: *Scene, idx: u32) *DateRangePickerState {
+        return &self._date_range_picker_state.items[idx];
+    }
+
+    /// Set both start and end of the date range explicitly.
+    /// Rejects ranges where end < start (by year*10000+month*100+day comparison).
+    pub fn setDateRange(self: *Scene, idx: u32, start: DateValue, end: DateValue) void {
+        // Reject end < start
+        const s = @as(u32, start.year) * 10000 + @as(u32, start.month) * 100 + @as(u32, start.day);
+        const e = @as(u32, end.year) * 10000 + @as(u32, end.month) * 100 + @as(u32, end.day);
+        if (e < s) return;
+        self._date_range_picker_state.items[idx].value = .{ .start = start, .end = end };
+        self._date_range_picker_state.items[idx].preset = .custom;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    pub fn getDateRange(self: *Scene, idx: u32) DateRangeValue {
+        return self._date_range_picker_state.items[idx].value;
+    }
+
+    /// Atomically set start and end from a preset. Uses a fixed reference date of 2025-06-15.
+    pub fn setDateRangePreset(self: *Scene, idx: u32, preset: DateRangePreset) void {
+        const today = DateValue{ .year = 2025, .month = 6, .day = 15 };
+        var range: DateRangeValue = .{};
+        switch (preset) {
+            .today => {
+                range = .{ .start = today, .end = today };
+            },
+            .last_7 => {
+                range = .{ .start = .{ .year = 2025, .month = 6, .day = 8 }, .end = today };
+            },
+            .last_30 => {
+                range = .{ .start = .{ .year = 2025, .month = 5, .day = 16 }, .end = today };
+            },
+            .this_month => {
+                range = .{ .start = .{ .year = 2025, .month = 6, .day = 1 }, .end = today };
+            },
+            .custom => {
+                // Custom: leave current value unchanged; only update preset tag.
+                self._date_range_picker_state.items[idx].preset = .custom;
+                if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+                return;
+            },
+        }
+        self._date_range_picker_state.items[idx].value = range;
+        self._date_range_picker_state.items[idx].preset = preset;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Maskable value (RN5)
+    // -----------------------------------------------------------------------
+
+    pub fn maskableValueStateOf(self: *Scene, idx: u32) *MaskableValueState {
+        return &self._maskable_value_state.items[idx];
+    }
+
+    /// Set the underlying value text. Also establishes display_len on first call.
+    pub fn setMaskableValue(self: *Scene, idx: u32, text_val: []const u8) void {
+        var ms = &self._maskable_value_state.items[idx];
+        const copy_len = @min(text_val.len, ms.value_text.len - 1);
+        @memset(&ms.value_text, 0);
+        @memcpy(ms.value_text[0..copy_len], text_val[0..copy_len]);
+        // Set display_len on first call (fixed-width constraint: never changes).
+        if (ms.display_len == 0) {
+            ms.display_len = @as(u8, @intCast(@min(copy_len, 255)));
+        }
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    /// Toggle visibility of the masked value and mark dirty (INV-3.3).
+    pub fn setMaskableVisible(self: *Scene, idx: u32, visible: bool) void {
+        self._maskable_value_state.items[idx].visible = visible;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Trend badge (RN6)
+    // -----------------------------------------------------------------------
+
+    pub fn trendBadgeStateOf(self: *Scene, idx: u32) *TrendBadgeState {
+        return &self._trend_badge_state.items[idx];
+    }
+
+    /// Set trend value and compute direction from sign.
+    pub fn setTrendValue(self: *Scene, idx: u32, value: f32) void {
+        var ts = &self._trend_badge_state.items[idx];
+        ts.value = value;
+        ts.direction = if (value > 0) .up else if (value < 0) .down else .neutral;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    // -----------------------------------------------------------------------
     // Scroll (R35)
     // -----------------------------------------------------------------------
 
@@ -2366,6 +2534,27 @@ pub const Scene = struct {
             self._table_state.items.len = needed;
         }
         self._table_state.items[id.index] = .{};
+
+        // RN3: date range picker state
+        try self._date_range_picker_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._date_range_picker_state.items.len <= id.index) {
+            self._date_range_picker_state.items.len = needed;
+        }
+        self._date_range_picker_state.items[id.index] = .{};
+
+        // RN5: maskable value state
+        try self._maskable_value_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._maskable_value_state.items.len <= id.index) {
+            self._maskable_value_state.items.len = needed;
+        }
+        self._maskable_value_state.items[id.index] = .{};
+
+        // RN6: trend badge state
+        try self._trend_badge_state.ensureTotalCapacity(self.gpa, needed);
+        if (self._trend_badge_state.items.len <= id.index) {
+            self._trend_badge_state.items.len = needed;
+        }
+        self._trend_badge_state.items[id.index] = .{};
 
         // R93: class string (for theme live-swap / rebuildStyles)
         try self._classes.ensureTotalCapacity(self.gpa, needed);

@@ -410,6 +410,23 @@ A leaf module (13) built on new GPU curve primitives + existing systems.
 
 ---
 
+## Milestone 27 — Dashboard / data-product widgets `done`
+
+Extends module 07 (components), module 09 (renderer), and module 13 (charts) with
+the seven features required to build financial dashboard and data-product UIs.
+
+| ID | Feature | Depends on | Requirements | Status |
+|---|---|---|---|---|
+| M27-RN1 | **Donut chart** — `inner_radius` + `center_label` slot on pie chart | M26 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN2 | **Chart callouts** — `Callout` struct, `renderCallouts`, `computeCalloutPos` | M26 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN3 | **Date-range picker** — `DateRangePickerState`, presets, `setDateRangePreset` | M7-09 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN4 | **Currency formatting** — `formatCurrency(buf, amount, currency, locale)` | M15 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN5 | **Maskable value widget** — `MaskableValueState`, `setMaskableVisible`, fixed-width toggle | M7 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN6 | **Trend badge** — `TrendBadgeState`, `TrendDirection`, `setTrendValue`, token-sourced colors | M7 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN7 | **Chart crosshair** — `CrosshairOptions`, `CrosshairState`, `updateCrosshairX`, dashed polyline rendering | M26 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+
+---
+
 ## Explicitly out of scope for v2
 
 | Item | Why deferred |

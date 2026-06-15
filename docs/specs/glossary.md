@@ -1468,14 +1468,58 @@ See: M19 (auto-update / delivery), RI1–RI4, `src/app/update_manager.zig`, `src
 > until `V2_constitution_amendment.md` is ratified; see that file and `V2_ARCHITECTURE.md`.
 > Listed here per INV-5.5 so v2 requirement files reference defined terms, not improvised ones.
 
+## BackendKind
+
+An enum (`src/01/types.zig`) with variants `vulkan`, `metal`, `dx12`, `webgpu`. Selected at build
+time via the `-Dgpu` build option. Exactly one backend is compiled per build (INV-1.1). Controls
+both the `GpuBackend` dispatch and the `Surface` handle type at platform level.
+
+See: RJ0, `src/01/types.zig`, `src/10/backend.zig`.
+
+## BackendError
+
+An error set (`src/10/types.zig`) with variants `NoSuitableDevice`, `InstanceCreationFailed`,
+`DeviceCreationFailed`, `SwapchainCreationFailed`, `ShaderLoadFailed`. Returned by
+`GpuBackend.init`, `initPipelines`, and all atlas upload methods when GPU resource creation
+fails.
+
+See: RJ0, `src/10/types.zig`.
+
+## Caps
+
+A struct (`src/10/types.zig`) returned by `GpuBackend.capabilities()` carrying read-only GPU
+metadata: `max_texture_dim: u32`, `subpixel_text: bool`, `present_modes: PresentModeSet`.
+Used by the app layer to adapt rendering features (e.g. disable subpixel text when unsupported).
+Must not branch layout or element-store logic (INV-2.1-v2).
+
+See: RJ0, `src/10/types.zig`.
+
+## AtlasHandle
+
+An opaque struct (`src/01/types.zig`, `{ backend_obj: *anyopaque }`) representing a GPU texture
+atlas handle. Returned by `uploadAtlas`, `uploadSdfAtlas`, and `uploadImage`. Stable across
+frames until the backend is deinitialised. Defined in module 01 so backends and the seam
+share the same nominal type without circular dependencies.
+
+See: RJ0, RJ1, `src/01/types.zig`, `src/10/types.zig`.
+
+## AtlasHandles
+
+A struct (`src/01/types.zig`) holding three `AtlasHandle` entries — `glyph`, `sdf`, `image` —
+passed to `GpuBackend.drawFrame`. Grouping all atlas handles into one parameter keeps the
+draw-frame signature stable as new atlas types are added (INV-2.3).
+
+See: RJ0, `src/01/types.zig`.
+
 ## GpuBackend
 
-The single interface every GPU backend implements (module 10). A backend owns the device,
-swapchain/drawable, pipelines, atlas uploads, and `drawFrame`. The seam — not any single
-backend — is the contract (INV-2.1-v2): all backends consume the identical `DrawCommand` list
-(INV-2.3) and the same fragment-mode table. Exactly one backend is selected at build time via
-`-Dgpu`; there is no runtime switching. Concrete backends: `VulkanBackend` (reference),
-`MetalBackend`, `Dx12Backend`, `WebGpuBackend`.
+The single interface every GPU backend implements (module 10). Selected at build time via
+`BackendKind` and the `-Dgpu` option. A backend owns the device, swapchain/drawable, pipelines,
+atlas uploads, and `drawFrame`. The seam — not any single backend — is the contract
+(INV-2.1-v2): all backends consume the identical `DrawCommand` list (INV-2.3) and the same
+fragment-mode table. Exactly one backend is selected at build time via `-Dgpu`; there is no
+runtime switching. Concrete backends: `VulkanBackend` (reference), `MetalBackend`,
+`Dx12Backend`, `WebGpuBackend`.
 
 See: RJ0–RJ4, `src/10/`.
 
@@ -1491,10 +1535,11 @@ See: RJ0, `src/10/types.zig`.
 ## Surface (v2)
 
 The per-target drawable handle a backend renders into: `VkSurfaceKHR`, `CAMetalLayer`,
-`HWND`+`IDXGISwapChain`, or a web `GPUCanvasContext`. Produced by `Platform.createSurface`.
-Per-OS code is confined to the surface layer and module 10 (INV-1.2-v2).
+`HWND`+`IDXGISwapChain`, or a web `GPUCanvasContext`. Represented as a `union(BackendKind)`
+in `src/01/types.zig`. Produced by `Platform.createSurface`. Per-OS code is confined to the
+surface layer and module 10 (INV-1.2-v2).
 
-See: RJ5, `src/01/surface.zig`.
+See: RJ5, `src/01/types.zig`.
 
 ## shaping
 
@@ -1591,3 +1636,160 @@ signal→dirty→scan path (INV-3.3); hover/legend/selection reuse existing even
 signals — no chart-specific interaction mechanism.
 
 See: RM2, RM3, `src/13/chart.zig`.
+
+---
+
+## DrawListParams
+
+The single params struct `buildDrawList` (module 09) takes after the two fixed
+arguments (`alloc`, `scene`). Defined in `src/09/types.zig`. Carries atlases,
+the fallback `Font`, theme `Tokens`, and rendering-quality flags
+(`subpixel_atlas`, `subpixel_text`, `sdf_atlas`) as named fields. Optional
+inputs have defaults so adding a new atlas is a field addition requiring zero
+call-site edits — the stable builder seam mandated by INV-2.3 (addendum, SR-04).
+
+See: SR-04, `src/09/types.zig`.
+
+---
+
+# M27 Dashboard / data-product widget terms
+
+> Terms introduced by the RN0 gap-analysis requirements (RN1–RN7). Added 2026-06-15
+> under the AAP (§8) to satisfy INV-5.5 before implementation begins.
+
+## inner_radius
+
+A `f32` field (range `[0.0, 1.0)`, relative to the outer radius) on a donut chart
+configuration. When `0.0`, the chart renders filled wedges (pie). When `> 0`, a
+centered circular hole of `inner_radius * outer_radius` pixels is left empty, producing
+a ring (donut). Implemented by using `ArcCmd` with `width = inner_radius * outer_radius`.
+
+See: RN1 (M27), `src/13/marks.zig`.
+
+---
+
+## center label slot
+
+The circular area at the center of a donut chart (where `inner_radius > 0`) reserved for
+an optional text label — typically a total value or category name. When provided, the text
+is centered both horizontally and vertically within the hole defined by `inner_radius`.
+Rendered as a `GlyphCmd` sequence after all arc segments.
+
+See: RN1 (M27), `src/13/marks.zig`.
+
+---
+
+## leader line
+
+A `PolylineCmd` drawn from the mid-arc point of a chart segment outward to its annotation
+label box. Part of a `chart annotation`. Connects a datum's visual position to its
+outboard callout text; does not overlap the label box at the terminal end.
+
+See: RN2 (M27), `src/13/marks.zig`.
+
+---
+
+## chart annotation
+
+A per-segment decoration placed outside a chart's plot area: a `leader line` from the
+datum to an outboard label box containing text (and optionally an image). Positioned at a
+computed radial point so that annotations for ≥5 segments do not overlap their labels.
+Part of the module 13 annotation layer (RN2).
+
+See: RN2 (M27), `src/13/marks.zig`.
+
+---
+
+## callout
+
+A single chart annotation consisting of a `leader line` plus its label box. A callout
+is identified by the segment index it annotates. At most one callout is emitted per
+segment.
+
+See: RN2 (M27), `src/13/marks.zig`.
+
+---
+
+## DateRangeValue
+
+`struct { start: DateValue, end: DateValue }`. The value type stored by a date range
+picker widget. Both `start` and `end` are `DateValue` (year/month/day). Invariant:
+`start <= end` in calendar order; the widget rejects `end < start` at selection time.
+Stored in `DateRangePickerState.value`.
+
+See: RN3 (M27), `src/07/types.zig`.
+
+---
+
+## date range picker
+
+A widget that extends the single `DatePicker` (R78) to select a contiguous interval.
+Displays a start and end date field (or a dual-month calendar popup) and a preset list
+(today / last 7 days / last 30 days / this month / custom). State stored in
+`DateRangePickerState`. Tag in markup: `"DateRangePicker"`.
+
+See: RN3 (M27), `src/07/types.zig`.
+
+---
+
+## formatCurrency
+
+`pub fn formatCurrency(buf: []u8, amount: f64, currency: []const u8, locale: Locale) ?[]const u8`.
+A helper in `src/app/locale.zig` (RN4) that formats a monetary amount with the correct
+ISO 4217 currency symbol, symbol position (prefix / suffix), optional spacing, and decimal
+places for the given `currency` code and `locale`. Layered on `formatFloat` and `formatInt`
+from RE0. Symbol position and decimal places are determined by a small compile-time table
+keyed on the currency string (USD, SGD, EUR at minimum). Returns `null` if `buf` is too
+small.
+
+See: RN4 (M27), `src/app/locale.zig`.
+
+---
+
+## masked value
+
+The display mode of a maskable/reveal widget (RN5) when the `Signal(bool)` visibility
+flag is `false`. The formatted value is replaced with a fixed-width run of bullet
+characters (`••••••`) whose rendered width is identical to the maximum formatted value
+width, so masked state does not reveal the order of magnitude of the hidden figure.
+The mask glyph run is rendered using the same text pipeline as the plain value.
+
+See: RN5 (M27), `src/07/types.zig`.
+
+---
+
+## TrendBadge
+
+A compact read-only component (RN6) displaying a directional trend: an arrow glyph
+(up, down, or neutral), a formatted delta value (typically a percentage), and a semantic
+color derived from the sign. Positive delta → up-arrow glyph + `Tokens.ok` color.
+Negative delta → down-arrow glyph + `Tokens.err` color. Zero delta → neutral glyph +
+`Tokens.text_secondary` color. All colors sourced from `Tokens` (INV-4.3). Tag in markup:
+`"TrendBadge"`. State stored in `TrendBadgeState` in `Scene._trend_badge_state`.
+
+See: RN6 (M27), `src/07/types.zig`.
+
+---
+
+## crosshair
+
+An optional chart overlay (RN7) rendered as a dashed vertical line (and/or horizontal
+line) that tracks the hovered datum's x position (and/or y position) across the full
+height (or width) of the plot rect. Driven by the existing hover signal from RM3; hides
+on mouse-out. Implemented as a series of short `PolylineCmd` segments that approximate a
+dashed stroke (since `PolylineCmd` has no native dash field). At most one crosshair is
+active per chart at a time.
+
+See: RN7 (M27), `src/13/interaction.zig`.
+
+---
+
+## value flag
+
+A small text label pinned to the intersection of the crosshair line and a data series
+line, showing the datum's formatted value. Rendered as a `GlyphCmd` block with a
+background `FilledRect`, positioned so it does not overflow the plot rect boundary.
+
+See: RN7 (M27), `src/13/marks.zig`.
+
+---

@@ -1499,3 +1499,291 @@ test "Scene.reset clears enter/exit state" {
     // After reset, the enter_exit_state array is cleared (length = 0).
     try testing.expectEqual(@as(usize, 0), scene._enter_exit_state.items.len);
 }
+
+// ===========================================================================
+// RN3 — Date-range picker (setDateRange / getDateRange / setDateRangePreset)
+// ===========================================================================
+
+test "RN3: date_range: setDateRange stores both start and end" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    const start = C.DateValue{ .year = 2025, .month = 1, .day = 10 };
+    const end   = C.DateValue{ .year = 2025, .month = 3, .day = 31 };
+    scene.setDateRange(id.index, start, end);
+    const range = scene.getDateRange(id.index);
+
+    try testing.expectEqual(start.year,  range.start.year);
+    try testing.expectEqual(start.month, range.start.month);
+    try testing.expectEqual(start.day,   range.start.day);
+    try testing.expectEqual(end.year,    range.end.year);
+    try testing.expectEqual(end.month,   range.end.month);
+    try testing.expectEqual(end.day,     range.end.day);
+}
+
+test "RN3: date_range: preset last_30 sets end to fixed reference, start to reference-30" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setDateRangePreset(id.index, .last_30);
+    const range = scene.getDateRange(id.index);
+
+    // Implementation uses today = 2025-06-15 and last_30 = start 2025-05-16
+    try testing.expectEqual(@as(u16, 2025), range.end.year);
+    try testing.expectEqual(@as(u8, 6),    range.end.month);
+    try testing.expectEqual(@as(u8, 15),   range.end.day);
+    try testing.expectEqual(@as(u16, 2025), range.start.year);
+    try testing.expectEqual(@as(u8, 5),    range.start.month);
+    try testing.expectEqual(@as(u8, 16),   range.start.day);
+
+    // Preset field is recorded
+    try testing.expectEqual(C.DateRangePreset.last_30, scene.dateRangePickerStateOf(id.index).preset);
+}
+
+test "RN3: date_range: end < start is rejected (range unchanged)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    // Prime with a valid range first
+    const valid_start = C.DateValue{ .year = 2025, .month = 3, .day = 1 };
+    const valid_end   = C.DateValue{ .year = 2025, .month = 3, .day = 31 };
+    scene.setDateRange(id.index, valid_start, valid_end);
+
+    // Attempt to set an invalid range where end < start
+    const bad_start = C.DateValue{ .year = 2025, .month = 6, .day = 15 };
+    const bad_end   = C.DateValue{ .year = 2025, .month = 1, .day =  1 };
+    scene.setDateRange(id.index, bad_start, bad_end); // should be silently rejected
+
+    // Range must be unchanged from the valid set
+    const range = scene.getDateRange(id.index);
+    try testing.expectEqual(valid_start.year,  range.start.year);
+    try testing.expectEqual(valid_start.month, range.start.month);
+    try testing.expectEqual(valid_end.year,    range.end.year);
+    try testing.expectEqual(valid_end.month,   range.end.month);
+}
+
+test "RN3: date_range: presets are atomic (both start and end non-zero after one call)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    // A single setDateRangePreset call must populate BOTH start and end.
+    scene.setDateRangePreset(id.index, .last_7);
+    const range = scene.getDateRange(id.index);
+    try testing.expect(range.start.year > 0);
+    try testing.expect(range.end.year > 0);
+    // start <= end (year*10000 + month*100 + day comparison)
+    const s_ord = @as(u32, range.start.year) * 10000 + @as(u32, range.start.month) * 100 + @as(u32, range.start.day);
+    const e_ord = @as(u32, range.end.year)   * 10000 + @as(u32, range.end.month)   * 100 + @as(u32, range.end.day);
+    try testing.expect(s_ord <= e_ord);
+}
+
+test "RN3: date_range: equal start and end is valid (single-day range)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    const day = C.DateValue{ .year = 2025, .month = 6, .day = 15 };
+    scene.setDateRange(id.index, day, day);
+    const range = scene.getDateRange(id.index);
+    try testing.expectEqual(day.year,  range.start.year);
+    try testing.expectEqual(day.month, range.start.month);
+    try testing.expectEqual(day.day,   range.start.day);
+    try testing.expectEqual(day.year,  range.end.year);
+    try testing.expectEqual(day.month, range.end.month);
+    try testing.expectEqual(day.day,   range.end.day);
+}
+
+test "RN3: date_range: initial state has zeroed range and preset = custom" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<DateRangePicker/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    const st = scene.dateRangePickerStateOf(id.index);
+    try testing.expectEqual(@as(u16, 0), st.value.start.year);
+    try testing.expectEqual(@as(u16, 0), st.value.end.year);
+    try testing.expectEqual(C.DateRangePreset.custom, st.preset);
+}
+
+// ===========================================================================
+// RN5 — Maskable / reveal value widget
+// ===========================================================================
+
+test "RN5: maskable: setMaskableValue stores text in value_text" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<MaskableValue/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setMaskableValue(id.index, "12345");
+    const ms = scene.maskableValueStateOf(id.index);
+    try testing.expectEqualStrings("12345", ms.value_text[0..5]);
+}
+
+test "RN5: maskable: visible true shows value; visible false shows masked state" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<MaskableValue/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setMaskableValue(id.index, "99,999");
+
+    scene.setMaskableVisible(id.index, true);
+    try testing.expect(scene.maskableValueStateOf(id.index).visible);
+
+    scene.setMaskableVisible(id.index, false);
+    try testing.expect(!scene.maskableValueStateOf(id.index).visible);
+}
+
+test "RN5: maskable: masked run length equals visible text length (fixed width)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<MaskableValue/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    // First call establishes display_len as the text length.
+    scene.setMaskableValue(id.index, "Hello");
+    try testing.expectEqual(@as(u8, 5), scene.maskableValueStateOf(id.index).display_len);
+
+    // A subsequent call with LONGER text does NOT widen display_len.
+    scene.setMaskableValue(id.index, "HiWorld!!");
+    try testing.expectEqual(@as(u8, 5), scene.maskableValueStateOf(id.index).display_len);
+}
+
+test "RN5: maskable: initial state is not visible and has zero display_len" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<MaskableValue/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    const ms = scene.maskableValueStateOf(id.index);
+    try testing.expect(!ms.visible);
+    try testing.expectEqual(@as(u8, 0), ms.display_len);
+}
+
+test "RN5: maskable: setMaskableVisible marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<MaskableValue/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+
+    scene.setMaskableVisible(id.index, true);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}
+
+// ===========================================================================
+// RN6 — Trend / delta indicator component
+// ===========================================================================
+
+test "RN6: trend_badge: positive value → direction .up" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setTrendValue(id.index, 18.20);
+    try testing.expectEqual(C.TrendDirection.up, scene.trendBadgeStateOf(id.index).direction);
+}
+
+test "RN6: trend_badge: negative value → direction .down" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setTrendValue(id.index, -0.33);
+    try testing.expectEqual(C.TrendDirection.down, scene.trendBadgeStateOf(id.index).direction);
+}
+
+test "RN6: trend_badge: zero value → direction .neutral" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setTrendValue(id.index, 0.0);
+    try testing.expectEqual(C.TrendDirection.neutral, scene.trendBadgeStateOf(id.index).direction);
+}
+
+test "RN6: trend_badge: value and direction are stored together" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setTrendValue(id.index, 5.5);
+    const ts = scene.trendBadgeStateOf(id.index);
+    try testing.expectApproxEqAbs(@as(f32, 5.5), ts.value, 0.001);
+    try testing.expectEqual(C.TrendDirection.up, ts.direction);
+}
+
+test "RN6: trend_badge: direction flips correctly on sign change" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+
+    scene.setTrendValue(id.index, 3.0);
+    try testing.expectEqual(C.TrendDirection.up, scene.trendBadgeStateOf(id.index).direction);
+    scene.setTrendValue(id.index, -3.0);
+    try testing.expectEqual(C.TrendDirection.down, scene.trendBadgeStateOf(id.index).direction);
+    scene.setTrendValue(id.index, 0.0);
+    try testing.expectEqual(C.TrendDirection.neutral, scene.trendBadgeStateOf(id.index).direction);
+}
+
+test "RN6: trend_badge: setTrendValue marks element dirty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const desc = try markup_mod.parse(arena.allocator(), "<TrendBadge/>");
+    var scene = C.Scene.init(testing.allocator);
+    defer scene.deinit();
+    const id = try scene.instantiate(desc, testTokens());
+    scene.elements.clearDirty();
+    try testing.expect(!scene.elements.dirty.isSet(id.index));
+
+    scene.setTrendValue(id.index, 1.0);
+    try testing.expect(scene.elements.dirty.isSet(id.index));
+}

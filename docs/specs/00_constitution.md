@@ -214,6 +214,14 @@ not act on the disagreement.
 - **INV-5.4 — Respect declared non-goals.**
   Rationale: Each spec lists non-goals. Do NOT implement them, even if they seem helpful or
   trivial. Scope creep across many sessions is the primary failure mode of this pipeline.
+  > **Addendum (AGENT AMENDMENT 2026-06-15: RN-AAP-01 — "post-vN" non-goals are superseded
+  > by explicit new requirements).** A spec's non-goal labelled "post-v1" or "post-v2" is a
+  > *deferral*, not a permanent prohibition. When a later human-authored requirement document
+  > explicitly targets that item for a named milestone, the deferral is superseded and the
+  > requirement takes precedence over the old spec's non-goal list. The implementer MUST
+  > update the original spec's non-goal section when implementing the superseding requirement.
+  > Enacted to resolve the conflict between RE0's "No currency formatting" non-goal and the
+  > explicit RN4 requirement in RN0 (M27 milestone). Enacted under the AAP (§8).
 
 - **INV-5.5 — Every term comes from `glossary.md`. Do not invent synonyms.**
   Rationale: "Element", "RenderObject", "signal", "token" have exact meanings. Using a term

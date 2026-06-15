@@ -156,7 +156,81 @@ pub const Locale = struct {
     };
 };
 
-/// DateValue struct matching the one in src/07/types.zig.
+/// RN4 — ISO 4217 currency codes supported by formatCurrency.
+/// Symbols and positioning rules are built-in per currency.
+pub const Currency = enum {
+    usd, // US Dollar   — $9,732.58   (prefix, no space)
+    sgd, // Singapore $ — S$11,456.79 (prefix, no space)
+    eur, // Euro        — €11.310,56  (prefix, no space; uses EU locale grouping)
+};
+
+/// RN4 — Format a monetary amount with currency symbol, locale-aware grouping,
+/// and two decimal places. Writes to buf; returns the used slice.
+/// Returns null if buf is too small.
+///
+/// Examples (en_US locale):
+///   formatCurrency(buf, 9732.58, .usd, en_US)  → "$9,732.58"
+///   formatCurrency(buf, 11456.79, .sgd, en_US) → "S$11,456.79"
+/// EUR always uses EU grouping (thousands='.', decimal=',') regardless of locale.
+///   formatCurrency(buf, 11310.56, .eur, en_US) → "€11.310,56"
+pub fn formatCurrency(buf: []u8, amount: f64, currency: Currency, locale: Locale) ?[]const u8 {
+    // Split into integer and fractional parts with 2 decimal places.
+    const abs_amount = @abs(amount);
+    const int_part: i64 = @intFromFloat(@trunc(abs_amount));
+    // Round the fractional part to 2 decimal places.
+    const frac_rounded: u64 = @intFromFloat(@round((abs_amount - @trunc(abs_amount)) * 100.0));
+    // Clamp overflow (e.g. 0.995 rounds to 100 cents → carry into integer).
+    const int_final: i64 = if (frac_rounded >= 100) int_part + 1 else int_part;
+    const frac_final: u64 = if (frac_rounded >= 100) 0 else frac_rounded;
+
+    // Choose formatting locale for the number.
+    // EUR always uses EU conventions (dot thousands, comma decimal).
+    const num_locale: Locale = switch (currency) {
+        .eur => .{ .thousands_sep = '.', .decimal_sep = ',', .date_order = locale.date_order, .date_sep = locale.date_sep },
+        else => locale,
+    };
+
+    // Choose currency symbol.
+    const symbol: []const u8 = switch (currency) {
+        .usd => "$",
+        .sgd => "S$",
+        // Euro sign is U+20AC = 0xE2 0x82 0xAC in UTF-8 (3 bytes).
+        .eur => "\xe2\x82\xac",
+    };
+
+    // Format the integer part with thousands separators into a temporary buffer.
+    var int_buf: [32]u8 = undefined;
+    const int_str = formatInt(&int_buf, int_final, num_locale) orelse return null;
+
+    // Sign prefix for negative amounts.
+    const sign: []const u8 = if (amount < 0) "-" else "";
+
+    // Build: sign + symbol + integer + decimal_sep + 2 frac digits
+    const dec_sep: u8 = num_locale.decimal_sep;
+    // Total needed: sign.len + symbol.len + int_str.len + 1 (sep) + 2 (frac)
+    const needed = sign.len + symbol.len + int_str.len + 1 + 2;
+    if (buf.len < needed) return null;
+
+    var pos: usize = 0;
+    if (sign.len > 0) {
+        buf[pos] = sign[0];
+        pos += 1;
+    }
+    @memcpy(buf[pos..][0..symbol.len], symbol);
+    pos += symbol.len;
+    @memcpy(buf[pos..][0..int_str.len], int_str);
+    pos += int_str.len;
+    buf[pos] = dec_sep;
+    pos += 1;
+    // Always write exactly 2 fractional digits.
+    buf[pos] = @as(u8, @intCast(frac_final / 10)) + '0';
+    buf[pos + 1] = @as(u8, @intCast(frac_final % 10)) + '0';
+    pos += 2;
+
+    return buf[0..pos];
+}
+
+
 /// Defined locally to keep locale.zig dependency-free.
 pub const DateValue = struct {
     year: u16 = 0,

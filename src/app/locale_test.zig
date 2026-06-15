@@ -393,3 +393,70 @@ test "formatString: literal text with no placeholders" {
     const result = locale.formatString(&buf, "plain text", &params);
     try testing.expectEqualSlices(u8, "plain text", result.?);
 }
+
+// ===========================================================================
+// RN4 — Currency formatting
+// ===========================================================================
+
+test "currency: USD prefix symbol $9,732.58" {
+    var buf: [32]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 9732.58, .usd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "$9,732.58", result.?);
+}
+
+test "currency: SGD compound prefix S$11,456.79" {
+    var buf: [32]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 11456.79, .sgd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "S$11,456.79", result.?);
+}
+
+test "currency: EUR with EU grouping €11.310,56 regardless of locale arg" {
+    var buf: [32]u8 = undefined;
+    // EUR forces EU separators (dot thousands, comma decimal) regardless of the
+    // locale passed — even when en_US locale is used.
+    const result = locale.formatCurrency(&buf, 11310.56, .eur, Locale.en_US);
+    try testing.expectEqualSlices(u8, "€11.310,56", result.?);
+}
+
+test "currency: EUR with de_DE locale still uses EU grouping €11.310,56" {
+    var buf: [32]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 11310.56, .eur, Locale.de_DE);
+    try testing.expectEqualSlices(u8, "€11.310,56", result.?);
+}
+
+test "currency: USD zero value $0.00" {
+    var buf: [16]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 0.0, .usd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "$0.00", result.?);
+}
+
+test "currency: SGD round amount S$1,000.00" {
+    var buf: [16]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 1000.0, .sgd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "S$1,000.00", result.?);
+}
+
+test "currency: USD small sub-dollar amount $0.99" {
+    var buf: [16]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 0.99, .usd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "$0.99", result.?);
+}
+
+test "currency: USD fractional cents round up correctly ($1.995 → $2.00)" {
+    var buf: [16]u8 = undefined;
+    // 1.995 rounded to 2 dp should give 2.00
+    const result = locale.formatCurrency(&buf, 1.995, .usd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "$2.00", result.?);
+}
+
+test "currency: buffer too small returns null" {
+    var buf: [3]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 9732.58, .usd, Locale.en_US);
+    try testing.expect(result == null);
+}
+
+test "currency: USD preserves en_US thousands separator in large amount $1,000,000.00" {
+    var buf: [32]u8 = undefined;
+    const result = locale.formatCurrency(&buf, 1_000_000.0, .usd, Locale.en_US);
+    try testing.expectEqualSlices(u8, "$1,000,000.00", result.?);
+}

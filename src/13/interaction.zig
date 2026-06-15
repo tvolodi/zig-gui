@@ -13,6 +13,30 @@ pub const HitResult = struct {
     pixel: Vec2,
 };
 
+/// RN7 — Per-chart crosshair state. `x` is the pixel x of the snapped vertical
+/// guide, or null when the crosshair is hidden (mouse outside plot or no datum found).
+pub const CrosshairState = struct {
+    x: ?f32 = null,
+};
+
+/// RN7 — Update `state.x` from a mouse position.
+/// Snaps to the nearest datum's pixel x within `snap_px` distance.
+/// Pass `mouse = null` (mouse-out event) to hide the crosshair.
+pub fn updateCrosshairX(
+    chart: *const chart_mod.Chart,
+    frame: *const axes_mod.ChartFrame,
+    mouse: ?Vec2,
+    snap_px: f32,
+    state: *CrosshairState,
+) void {
+    const m = mouse orelse {
+        state.x = null;
+        return;
+    };
+    const hit = hitTest(chart, frame, m, snap_px);
+    state.x = if (hit) |h| h.pixel.x else null;
+}
+
 /// Hit-test a mouse position against a chart's data.
 /// Returns the nearest datum within `snap_px` pixels, or null if none within range.
 pub fn hitTest(

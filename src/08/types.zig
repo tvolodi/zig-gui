@@ -531,6 +531,24 @@ fn validateScalar(
     value: *Value,
     path: []const u8,
 ) error{OutOfMemory}!void {
+    // Type mismatch check — value must match schema.type
+    const type_ok: bool = switch (schema.type) {
+        .string  => value.* == .string,
+        .integer => value.* == .int,
+        .number  => value.* == .int or value.* == .float,
+        .boolean => value.* == .bool,
+        .array   => value.* == .array,
+        .object  => value.* == .object,
+    };
+    if (!type_ok) {
+        try list.append(alloc, .{
+            .path = path,
+            .kind = .type_mismatch,
+            .message = "value type does not match schema type",
+        });
+        return;
+    }
+
     // Enum check
     if (schema.enum_values.len > 0) {
         const in_enum: bool = blk: {
@@ -832,6 +850,9 @@ pub const Form = struct {
                 .avatar => "Avatar",
                 .badge => "Badge",
                 .data_table => "DataTable",
+                .date_range_picker => "DateRangePicker",
+                .maskable_value => "MaskableValue",
+                .trend_badge => "TrendBadge",
             };
             children[i] = comp.NodeDesc{ .tag = tag, .classes = "" };
         }

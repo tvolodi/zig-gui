@@ -115,15 +115,20 @@ Read the full list in `00_constitution.md`. These are the most common agent mist
 
 ### INV-5.1 — Match `types.zig` exactly
 The public API lives in `NN.types.zig`. Do NOT change signatures to make implementation
-easier. If a signature seems wrong, surface it to the human; do not silently diverge.
+easier. If a signature genuinely must change, follow the contract-amendment procedure (INV-5.3):
+change the signature and its `acceptance_test.zig` call sites together and record it as an
+amendment (constitution §8). Never diverge silently, and never escalate it.
 
 ### INV-5.2 — "Done" is executable
 A module is done when `acceptance_test.zig` passes via `zig test` AND every box in
 `checklist.md` is ticked. "It looks right" is not done.
 
-### INV-5.3 — Never edit `acceptance_test.zig`
-It is the human's specification — the contract definition. Editing a test to make it pass
-defeats the system. If a test looks wrong, STOP and surface it.
+### INV-5.3 — Change `acceptance_test.zig` only via the contract-amendment procedure
+A frozen test is the contract definition. Editing a test merely to make it pass defeats the
+system. But when the `types.zig` signature it verifies legitimately changes, update the test's
+call sites in the *same* pass (never weakening an assertion) and record it as an amendment
+(constitution §8). A test edit without a matching contract change is still forbidden. Do NOT
+escalate — amend and log.
 
 **This invariant does NOT mean "don't create unit tests."** Agents regularly create new test
 files like `src/NN/NN_test.zig` with unit-level coverage. Those are mutable (normal code review).
@@ -213,17 +218,18 @@ constitution and is a flag for human review.
 ### Module 07 — Components
 - **Goal:** Turn `NodeDesc` tree into a live element tree. Map tags to widget kinds, resolve
   classes, write arrays, build elements.
-- **Twenty-four widget kinds (M7 Phase 3):** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`,
+- **Twenty-seven widget kinds (M27):** `text`, `button`, `input`, `card`, `row`, `column`, `dropdown`,
   `checkbox`, `scrollview`, `image`, `icon`, `textarea`, `separator`, `radio`, `slider`,
-  `progress_bar`, `spinner`, `tabs`, `tab_item`, `accordion`, `date_picker`, `avatar`, `badge`, `data_table`.
+  `progress_bar`, `spinner`, `tabs`, `tab_item`, `accordion`, `date_picker`, `avatar`, `badge`, `data_table`,
+  `date_range_picker`, `maskable_value`, `trend_badge`.
 - **`NONE` constant:** `pub const NONE: u32 = std.math.maxInt(u32)` — sentinel for "no element" used in `focused_idx` and similar u32 index fields. Do NOT redeclare a local `const NONE` inside functions; use the module-level constant.
 - **`Scene`** owns the `ElementStore` AND all parallel arrays: `kind[]`, `style[]`, `text[]`,
   `_button_state[]`, `_input_state[]`, `_dropdown_state[]`, `_checkbox_state[]`,
-  `_scroll_state[]`, `_queued_callbacks`, `_pseudo[]`, `_image_state[]`, `_selection[]`, `_textarea_state[]`, `_radio_state[]`, `_slider_state[]`, `_progress_state[]`, `_tabs_state[]`, `_accordion_state[]` (INV-3.1: no per-widget heap objects).
+  `_scroll_state[]`, `_queued_callbacks`, `_pseudo[]`, `_image_state[]`, `_selection[]`, `_textarea_state[]`, `_radio_state[]`, `_slider_state[]`, `_progress_state[]`, `_tabs_state[]`, `_accordion_state[]`, `_date_range_picker_state[]`, `_maskable_value_state[]`, `_trend_badge_state[]` (INV-3.1: no per-widget heap objects).
 - **`Scene.frame_count: u64`** — animation frame counter, set by the app layer each frame.
   `buildDrawList` reads this for `progress_bar` indeterminate animation and `spinner` rotation.
 - **Focus state:** `focused_idx: u32` (NONE = no focus) + `focusable_indices: []u32`
-  rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox, textarea, radio, slider, accordion (M7 Phase 2 adds accordion).
+  rebuilt by `instantiate()`. Focusable kinds: button, input, dropdown, checkbox, textarea, radio, slider, accordion (M7 Phase 2 adds accordion), date_range_picker (M27).
 - **Two passes:** `instantiate` (no font, fully testable), then `measurePass` (font-dependent,
   fills `LayoutNode.measured`). **R60:** `measurePass` takes `*FontFamily` instead of `*Font`;
   uses `family.face(style.font_bold, style.font_italic)` per element.
@@ -243,6 +249,10 @@ constitution and is a flag for human review.
 - **R7C — Tooltip (M7 Phase 3):** `_tooltip[]` is `[]?[]const u8` — `null` means no tooltip. `tooltipOf(idx)` → `?[]const u8`. `setTooltip(idx, text)` assigns text. `tooltip=` attribute on any element sets it at instantiation. `TooltipManager` in `src/app/tooltip.zig` handles hover-delay logic (500 ms) and overlay rendering.
 - **R7D — Context Menu (M7 Phase 3):** `_context_menu_idx[]` is `[]u8` — `0xFF` means no menu. `contextMenuIdxOf(idx)` → `u8`. `setContextMenuIdx(idx, menu_idx)` assigns a registered menu. `ContextMenuManager` in `src/app/context_menu.zig` handles registration, right-click popup, and overlay rendering.
 - **R79 — Data Table (M7 Phase 3):** `DataTableState` parallel array `_table_state[]`. `tableStateOf(idx)` → `*DataTableState`. `setTableData(idx, rows)` sets the data source (`DataTableRows` with `row_ptr: *anyopaque`, `row_size: usize`, `row_count: u32`, and `cell_fn: CellTextFn`). `CellTextFn = *const fn(row_ptr: *anyopaque, col: u8, buf: []u8) u8` — receives pointer to the specific row, writes text into `buf`, returns byte count. Compute row N's pointer via `@ptrCast(@as([*]u8, @ptrCast(rows.row_ptr)) + N * rows.row_size)`. `setTableColumns(idx, columns)` defines column headers/widths. `sortTable(idx, col)` toggles sort direction and rebuilds `sorted_indices` using `std.ArrayListUnmanaged(u32)`. Virtualized rendering: only visible rows emitted by `buildDrawList`.
+- **RN3 — Date Range Picker (M27):** `DateRangePickerState` parallel array `_date_range_picker_state[]`. `setDateRange(idx, start, end)` sets both ends; rejects end < start (no-op). `getDateRange(idx)` → `DateRangeValue`. `setDateRangePreset(idx, preset)` atomically sets both ends from `DateRangePreset` enum (`.today/.last_7/.last_30/.this_month/.custom`). Focusable kind; added to `focusable_indices` in `instantiate()`.
+- **RN5 — Maskable Value (M27):** `MaskableValueState` parallel array `_maskable_value_state[]`. `setMaskableValue(idx, text)` stores value text and sets `display_len` on first call (fixed-width — never changes). `setMaskableVisible(idx, visible)` toggles masking and marks dirty (INV-3.3). When hidden, renderer shows `masked_char` × `display_len`; when visible, shows actual `value_text`. Default `masked_char = '*'`.
+- **RN6 — Trend Badge (M27):** `TrendBadgeState` parallel array `_trend_badge_state[]`. `setTrendValue(idx, value: f32)` sets value and computes `direction` from sign (`.up`/`.down`/`.neutral`). Renderer colors from tokens only (INV-4.3): `tokens.ok` (up), `tokens.err` (down), `tokens.text_muted` (neutral).
+- **RN4 — Currency formatting (M27):** `formatCurrency(buf, amount, currency, locale)` in `src/app/locale.zig`. `Currency` enum: `.usd`, `.sgd`, `.eur`. EUR always uses EU grouping conventions regardless of locale arg. Renders exactly 2 decimal places.
 
 ### Module 08 — Schema forms
 - **Goal:** JSON Schema (runtime) → working form. Walk schema → `FormModel`, map fields to
@@ -283,6 +293,21 @@ constitution and is a flag for human review.
 - **R79 — Data Table (M7 Phase 3):** `set_scissor` + header row (column headers, dividers) + virtualized data rows + `restore_scissor`. Only `visible_count = ceil(view_h / row_height) + 1` rows emitted per frame.
 - **M9 — `_classes` parallel array (R90/R93/R95):** `_classes: ArrayListUnmanaged([]const u8)` stores the raw CSS class string for each element at instantiation. Used by `rebuildStyles` in the app layer to re-resolve element styles when the active theme changes at runtime. Populated in `instantiateNode` from `desc.classes`; cleared in `reset()`.
 - **M9 — `debugPrint` / `debugPrintStats` forwarding methods (R91):** Scene exposes two forwarding methods that delegate to free functions in `src/07/debug.zig`. The free functions own the DFS traversal and stderr formatting; Scene never touches stderr directly.
+
+### Module 13 — Charts (M26 / M27 RN1 RN2 RN7)
+- **Goal:** Chart-command vocabulary, scales/axes, five chart mark kinds, hit-test interactivity, M27 dashboard extensions (donut, callouts, crosshair).
+- **Files:** `scale.zig`, `axes.zig`, `marks.zig`, `chart.zig`, `interaction.zig`, `tessellate.zig`, `legend.zig`.
+- **Five chart kinds:** `line`, `bar`, `area`, `scatter`, `pie`. A `Chart` struct holds `kind`, `series`, `x`, and option fields; `.render(frame, draw_list, allocator)` dispatches to `marks.renderChart`.
+- **RN1 — Donut ring pattern:** `Chart.inner_radius: f32 = 0.0`. When > 0, `renderPie` emits `ArcCmd` with `width > 0`:
+  - `arc_radius = outer * (1 + inner_radius) / 2` (center of ring stroke)
+  - `arc_width  = outer * (1 - inner_radius)` (ring thickness)
+  - This places the inner edge at `outer × inner_radius` and outer edge at `outer`. Setting `radius = outer` directly is wrong — it would shift the ring outward.
+- **RN1 — Center-label slot pattern:** `Chart.center_label: ?[]const u8 = null`. The chart module has no glyph atlas; it emits an `aa_filled_circle` background as a slot, and the caller renders the actual text glyphs. This is the same deferral pattern used by `drawLegend()` (swatches only, no text). Always follow this pattern for modules that lack glyph access.
+- **RN2 — Callout rendering:** `Chart.callouts: []const Callout = &.{}`. For pie charts, `renderCallouts` computes each segment's mid-angle by replaying the renderPie angle traversal, then emits one 2-point `PolylineCmd` (leader line) + one `filled_rect` (label background) per callout. The public `computeCalloutPos` helper returns geometry without side effects — useful when the caller needs to position glyph commands.
+- **RN7 — Dashed line pattern:** Crosshair is "dashed" by emitting multiple short 2-point `PolylineCmd` segments (alternating dash/gap), NOT by adding a dash-pattern field to `PolylineCmd`. This preserves the draw-command vocabulary (INV-2.1-v2) and avoids a renderer change. Use this pattern wherever dashed lines are needed in chart components.
+- **RN7 — Decoupled state / render:** `CrosshairState` in `interaction.zig` is pure data (the snapped pixel x); the visual render in `marks.renderCrosshair` is driven by `Series.hovered_datum` (the signal-based hover state). These are independent — `CrosshairState.x` is a caller-side cache; the render path reads the series state. Do not couple them.
+- **ArrayListUnmanaged.append in Zig 0.16:** The signature is `append(self, gpa: Allocator, item: T)`. All `out.append` calls in chart marks MUST pass the allocator as the first argument. Omitting it compiles only because the function is lazily analyzed — if `chart.render()` is called from tests, the missing allocator will cause a compile error.
+- **Test arena pattern:** Tests that call `chart.render()` must use an `ArenaAllocator` (not bare `std.testing.allocator`) because the draw list holds slices allocated during rendering. The arena frees everything on `deinit`, avoiding leak detection failures.
 
 ### App layer — Milestone 1 (src/app/)
 - **Goal:** Single `App.run()` entry point that owns and drives all modules. Wires together
@@ -410,16 +435,24 @@ preserves the build-order invariant (INV-3.4) without duplicating type definitio
 
 ---
 
-## 9. Stopping conditions — when to pause and surface to the human
+## 9. Blocked by the rules — amend, don't pause
 
-Stop and report to the human (do not guess or work around) when:
+When the rules as written block correct work, you resolve it yourself under the Autonomous
+Amendment Procedure (constitution §8 / Workflow 5): draft the change, amend `00_constitution.md`
+with an `(AGENT AMENDMENT …)` marker, append a row to `docs/specs/AMENDMENTS_LOG.md`, add any new
+glossary term, then continue. Do NOT pause or surface these to the human. This covers:
 
-1. A task instruction appears to contradict `00_constitution.md`.
-2. A `types.zig` signature appears wrong and you cannot implement the spec without changing it.
-3. An `acceptance_test.zig` test appears to encode incorrect behavior.
-4. A task requires an unapproved dependency (see INV-5.6).
-5. A concept you need has no glossary term and you're unsure of the right name.
-6. The spec's non-goals list would need to be violated to complete the task.
+1. A task instruction that contradicts `00_constitution.md`.
+2. A `types.zig` signature that must change to implement the spec (use the contract-amendment
+   procedure, INV-5.3).
+3. An `acceptance_test.zig` that must change because the contract it verifies changed.
+4. A task that needs a dependency not in INV-5.6 (add it, pinned).
+5. A concept with no glossary term (add the term).
+6. A spec non-goal that conflicts with a genuine requirement (amend the non-goal).
+
+**Escalate (write an `_escalation.md` and stop) ONLY** for a hard blocker no amendment can
+resolve — a missing external resource you cannot obtain, or repeated unrecoverable failure after
+the 3-attempt redo cap. The owner audits `AMENDMENTS_LOG.md` asynchronously and may revert.
 
 ---
 
@@ -433,8 +466,9 @@ Stop and report to the human (do not guess or work around) when:
 | `glslc` (Vulkan SDK) | GLSL → SPIR-V at build time | Invoked from `build.zig` |
 | stb_truetype | Glyph rasterization + metrics | `@cImport` (single-header) |
 
-Do NOT add new entries to this table without recording them in `00_constitution.md` and
-surfacing the change to the human.
+To add a new entry: amend INV-5.6 under the Autonomous Amendment Procedure (constitution §8 /
+Workflow 5) — pin the version, record it with an `(AGENT AMENDMENT …)` marker, and log it in
+`docs/specs/AMENDMENTS_LOG.md`. No human approval; never a silent addition.
 
 ---
 

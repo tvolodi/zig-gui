@@ -648,7 +648,7 @@ test "buildDrawList: element with opacity=0.0 produces draw commands with a==0" 
             .filled_rect => |fr| try testing.expectEqual(@as(u8, 0), fr.color.a),
             .border_rect => |br| try testing.expectEqual(@as(u8, 0), br.color.a),
             .glyph => |g| try testing.expectEqual(@as(u8, 0), g.color.a),
-            .set_scissor, .restore_scissor, .image_rect, .gradient_rect, .aa_filled_rect, .aa_filled_circle, .clip_rounded_begin, .clip_rounded_end, .sdf_icon => {},
+            .set_scissor, .restore_scissor, .image_rect, .gradient_rect, .aa_filled_rect, .aa_filled_circle, .clip_rounded_begin, .clip_rounded_end, .sdf_icon, .polyline, .filled_path, .arc => {},
         }
     }
 }
