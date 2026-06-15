@@ -747,6 +747,12 @@ pub fn build(b: *std.Build) void {
     _ = addTestStep(b, "test-bspatch",      "Run M19-02 bspatch unit tests (pure, no I/O)", bspatch_test_);
     _ = addTestStep(b, "test-11",           "Run M24 complex-script shaping + bidi unit tests (pure, no GPU)", unit_11);
 
+    // M26: Chart and data visualization unit tests (pure CPU, no GPU required).
+    const unit_13 = createTest(b, target, optimize, &module_map, "13-unit-test", "src/13/13_test.zig", &.{
+        ia("../01/types.zig", "mod01_platform"),
+    }, false, false);
+    _ = addTestStep(b, "test-13", "Run M26 chart unit tests (pure CPU, no GPU)", unit_13);
+
     // -------------------------------------------------------------------
     // R55 — Build-time markup codegen tool (ui_codegen).
     // -------------------------------------------------------------------

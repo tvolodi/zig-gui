@@ -332,6 +332,36 @@ pub const ClipRounded = struct {
     radius_bl: f32,
 };
 
+/// 2D floating-point vector (M26-01) — used by polyline/filled_path/arc chart commands.
+pub const Vec2 = struct { x: f32, y: f32 };
+
+/// M26-01 — Stroked polyline command (CPU-tessellated on the renderer side).
+pub const PolylineCmd = struct {
+    points: []const Vec2,
+    width: f32,
+    color: Color09,
+    closed: bool,
+    join: enum { miter, bevel, round },
+};
+
+/// M26-01 — Filled triangle-list path (pre-tessellated by caller).
+pub const FilledPathCmd = struct {
+    vertices: []const Vec2,
+    indices: []const u16,
+    color: Color09,
+};
+
+/// M26-01 — Arc / wedge command.
+/// width == 0 → filled wedge; width > 0 → stroked arc.
+pub const ArcCmd = struct {
+    center: Vec2,
+    radius: f32,
+    start_rad: f32,
+    end_rad: f32,
+    width: f32,
+    color: Color09,
+};
+
 pub const DrawCommand = union(enum) {
     filled_rect: FilledRect,
     border_rect: BorderRect,
@@ -345,6 +375,10 @@ pub const DrawCommand = union(enum) {
     clip_rounded_begin: ClipRounded, // M13-02 RD1
     clip_rounded_end: void, // M13-02 RD1
     sdf_icon: SdfIconCmd, // M13-04 RD3
+    // M26-01 — Chart GPU curve primitives
+    polyline: PolylineCmd,
+    filled_path: FilledPathCmd,
+    arc: ArcCmd,
 };
 
 /// Opaque handle to a GPU texture atlas (used by GpuBackend.drawFrame).
@@ -3528,6 +3562,12 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     emitQuad(verts, &vert_count, sq_rect, sq_uv, circ.color, .{ 0, 0, 0, 0 }, 6);
                 }
             },
+            // M26-01 — GPU curve primitives: tessellation deferred to module 13.
+            // The Vulkan backend receives pre-tessellated quads from the chart layer;
+            // raw polyline/filled_path/arc commands are no-ops at this stage.
+            .polyline => {},
+            .filled_path => {},
+            .arc => {},
         }
     }
     c.vkUnmapMemory(impl.device, impl.quad_vertex_mem);

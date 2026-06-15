@@ -397,16 +397,16 @@ Adds a bounded, build-time cascade (module 12). Utility classes remain first-cla
 
 ---
 
-## Milestone 26 — Charts / data visualization `planned (v2)`
+## Milestone 26 — Charts / data visualization `done`
 
 A leaf module (13) built on new GPU curve primitives + existing systems.
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
-| M26-01 | **Chart command vocabulary** — polyline/filled-path/arc primitives; shader mode 8 (all backends) | 09, RJ0 | [RM0](requirements/RM0_chart_command_vocabulary.md) | `planned` |
-| M26-02 | **Scales + axes** — linear/log/band/time scales, ticks, axes, gridlines, chart frame | RM0, 04, 02 | [RM1](requirements/RM1_scales_axes.md) | `planned` |
-| M26-03 | **Chart marks** — line, bar, area, scatter, pie; palette-sourced series colors | RM0, RM1, 05 | [RM2](requirements/RM2_chart_marks.md) | `planned` |
-| M26-04 | **Chart interactivity** — hover/tooltip/legend/selection via existing events + signals | RM1, RM2, R7C, R41 | [RM3](requirements/RM3_chart_interactivity.md) | `planned` |
+| M26-01 | **Chart command vocabulary** — polyline/filled-path/arc primitives; shader mode 8 (all backends) | 09, RJ0 | [RM0](requirements/RM0_chart_command_vocabulary.md) | `done` |
+| M26-02 | **Scales + axes** — linear/log/band/time scales, ticks, axes, gridlines, chart frame | RM0, 04, 02 | [RM1](requirements/RM1_scales_axes.md) | `done` |
+| M26-03 | **Chart marks** — line, bar, area, scatter, pie; palette-sourced series colors | RM0, RM1, 05 | [RM2](requirements/RM2_chart_marks.md) | `done` |
+| M26-04 | **Chart interactivity** — hover/tooltip/legend/selection via existing events + signals | RM1, RM2, R7C, R41 | [RM3](requirements/RM3_chart_interactivity.md) | `done` |
 
 ---
 

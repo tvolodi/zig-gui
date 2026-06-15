@@ -2700,3 +2700,59 @@ production, replace with the real HarfBuzz library:
 #   apt install libharfbuzz-dev  OR  brew install harfbuzz
 # Then replace vendor/harfbuzz/src/hb-stub.c with a linkSystemLibrary call in build.zig
 ```
+
+---
+
+## Charts and Data Visualization (M26)
+
+Module 13 (`src/13/`) provides a chart library built on GPU curve primitives (M26-01).
+
+### Chart primitives (M26-01)
+
+New draw commands added to `DrawCommand` in `src/01/types.zig`: `polyline`, `filled_path`, `arc`.
+CPU tessellation helpers live in `src/13/tessellate.zig`.
+
+### Scales and axes (M26-02)
+
+```zig
+const scale_mod = @import("src/13/scale.zig");
+const s = scale_mod.Scale{ .linear = .{ .domain_min = 0, .domain_max = 100, .range_min = 0, .range_max = 400 }};
+const px = s.map(50.0);      // 200.0
+const val = s.invert(200.0); // 50.0
+```
+
+Supported scales: `linear`, `log`, `band`, `time`. `ticks()` generates "nice" human-friendly intervals.
+`ChartFrame` (in `src/13/axes.zig`) holds the plot rect and x/y scales; `drawAxes()` emits polyline commands.
+
+### Chart marks (M26-03)
+
+Five chart kinds: `line`, `bar`, `area`, `scatter`, `pie`. Series colors use theme palette tokens (never raw hex):
+
+```zig
+const chart_mod = @import("src/13/chart.zig");
+const chart = chart_mod.Chart{
+    .kind = .line,
+    .series = &.{.{ .name = "Revenue", .values = &data, .color_token = "accent" }},
+    .x = .{ .numeric = &x_vals },
+};
+try chart.render(&frame, &draw_list, allocator);
+```
+
+### Interactivity (M26-04)
+
+`hitTest()` in `src/13/interaction.zig` maps mouse coordinates back to data via `Scale.invert`:
+
+```zig
+const interaction = @import("src/13/interaction.zig");
+const hit = interaction.hitTest(&chart, &frame, mouse_pos, 20.0);
+if (hit) |h| { /* h.series_idx, h.datum_idx, h.value */ }
+```
+
+Hover/selection signals drive tooltip display and mark emphasis through the normal dirty-scan path.
+Legend swatches are emitted by `drawLegend()` in `src/13/legend.zig`.
+
+### Running module 13 tests
+
+```sh
+zig build test-13
+```
