@@ -104,7 +104,7 @@ to the nearest datum x; hides on mouse-out.
 These fit a new **Milestone 27 — Dashboard / data-product widgets**, dependent on M26 (charts),
 R78 (date picker), RE0/RE1 (formatting), R7B (badge). RN1, RN2, RN7 extend the chart module
 (13); RN3 extends the date picker; RN4 extends i18n (15); RN5/RN6 are new leaf components (07).
-
+ 
 ## Out of scope (consistent with v2 non-goals)
 
 Animated chart transitions and zoom/pan remain out of scope (RM2/RM3 non-goals). Real-time

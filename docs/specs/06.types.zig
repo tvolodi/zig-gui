@@ -1,3 +1,6 @@
+// GENERATED MIRROR — do not hand-edit. Canonical implementation lives in src/06/types.zig.
+// This file is NOT compiled by any build target (INV-5.7, SR-03 2026-06-14).
+//
 //! 06 — Markup + style — types.zig
 //!
 //! Contract (INV-5.1). The descriptor struct shapes (NodeDesc, Attr, AttrValue) and the
@@ -8,8 +11,8 @@
 //! All lower-numbered in the corrected build order, so these imports are legal (INV-3.4).
 
 const std = @import("std");
-const store = @import("./03.types.zig");
-const theme = @import("./05.types.zig");
+const store = @import("../03_element_store/types.zig");
+const theme = @import("../05_theme/types.zig");
 
 pub const LayoutNode = store.LayoutNode;
 pub const Tokens = theme.Tokens;

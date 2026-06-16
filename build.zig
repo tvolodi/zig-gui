@@ -237,6 +237,9 @@ pub fn build(b: *std.Build) void {
             .extra_imports = &.{ ialias("../01/types.zig", "mod01_platform") } },
         .{ .name = "mod_binding",         .root = "src/app/binding.zig",       .deps = &.{"mod07_components"},
             .extra_imports = &.{ ialias("../07/types.zig", "mod07_components") } },
+        // Module 13 — Chart and data visualization (M26/M27). Used by demo ecommerce screen.
+        .{ .name = "mod13_charts",        .root = "src/13/chart.zig",          .deps = &.{"mod01_platform"},
+            .extra_imports = &.{ ialias("../01/types.zig", "mod01_platform") } },
         .{ .name = "mod_navigator",       .root = "src/app/navigator.zig",     .deps = &.{ "mod07_components", "mod05_theme", "mod_error_boundary" },
             .extra_imports = &.{
                 ialias("../07/types.zig", "mod07_components"),
@@ -803,6 +806,7 @@ pub fn build(b: *std.Build) void {
         const mod06 = module_map.get("mod06_markup").?;
         const mod07 = module_map.get("mod07_components").?;
         const mod08 = module_map.get("mod08_schema_forms").?;
+        const mod13 = module_map.get("mod13_charts").?;
         const mod_app = module_map.get("mod_app").?;
         const mod_nav = module_map.get("mod_navigator").?;
         const mod_ev = module_map.get("mod_events").?;
@@ -821,6 +825,7 @@ pub fn build(b: *std.Build) void {
         demo_mod.addImport("../06/types.zig", mod06);
         demo_mod.addImport("../07/types.zig", mod07);
         demo_mod.addImport("../08/types.zig", mod08);
+        demo_mod.addImport("../../13/chart.zig", mod13);
         demo_mod.addImport("events.zig", mod_ev);
         demo_mod.addImport("build_options", build_options.createModule());
         demo_mod.addImport("../strings.zig", strings_mod);

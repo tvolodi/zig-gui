@@ -34,7 +34,7 @@ const tokens = theme.Tokens.light(theme.Palette.default());
 // or: theme.Tokens.light(my_custom_palette)
 ```
 
-`Palette.default()` gives a working gray + teal-accent palette immediately.
+`Palette.default()` gives a working zinc/neutral palette (shadcn-equivalent: dark buttons, subtle borders).
 
 ### Step 2 — Write markup
 
@@ -1151,6 +1151,7 @@ pub fn main() !void {
 | `font_size_px` | `f32` | `16` | Default glyph rasterization size. |
 | `bold_font_path` | `?[]const u8` | `null` | Optional. Path to the bold `.ttf` face. Used by `font-bold` class. Falls back to regular if null. |
 | `italic_font_path` | `?[]const u8` | `null` | Optional. Path to the italic `.ttf` face. Used by `font-italic` / `italic` class. Falls back to regular if null. |
+| `default_theme_mode` | `mod05.Mode` | `.light` | RF3 — Startup theme mode. Overrides system color scheme detection. |
 
 ### Frame loop (what `App.run` does every frame)
 
@@ -2858,6 +2859,83 @@ draw-command vocabulary is required.  Color is resolved via the `"axis"` semanti
 zig build test-13
 ```
 
+### Gauge chart (RN9)
+
+Semi-circle arc meter. Shows a fill ratio 0–1 as an arc sweeping from 9 o'clock (−π) to 3 o'clock (0) through the top.
+
+```zig
+const chart_mod = @import("../../13/chart.zig");
+
+const gauge = chart_mod.Chart{
+    .kind            = .gauge,
+    .series          = &.{},              // unused
+    .x               = .{ .numeric = &[_]f64{} },
+    .gauge_value     = 0.755,            // 75.5% fill
+    .gauge_bg_token  = "axis",           // background arc color
+    .gauge_fill_token = "accent",        // fill arc color
+};
+// Use a dummy scale; gauge ignores x/y scale.
+const dummy = chart_mod.Scale{ .linear = .{ .domain_min = 0, .domain_max = 1, .range_min = 0, .range_max = 1 }};
+const frame = chart_mod.ChartFrame{ .outer_rect = rect, .plot_rect = rect, .x = dummy, .y = dummy };
+try gauge.render(&frame, &draw_list, allocator);
+```
+
+### World map (RN10)
+
+Simplified world map with hardcoded continent outlines and configurable dot markers.
+
+```zig
+const markers = [_]chart_mod.MapMarker{
+    .{ .norm_x = 0.21, .norm_y = 0.38, .radius = 5.0, .color_token = "accent" },  // USA
+    .{ .norm_x = 0.49, .norm_y = 0.28, .radius = 4.0, .color_token = "series1" }, // France
+};
+const map = chart_mod.Chart{
+    .kind            = .map,
+    .series          = &.{},
+    .x               = .{ .numeric = &[_]f64{} },
+    .map_markers     = &markers,
+    .map_ocean_token = "surface",
+    .map_land_token  = "axis",
+};
+const frame = chart_mod.ChartFrame{ .outer_rect = rect, .plot_rect = rect, .x = dummy, .y = dummy };
+try map.render(&frame, &draw_list, allocator);
+```
+
+`MapMarker.norm_x`/`norm_y` are 0–1 normalized screen coordinates within the chart rect (x: left→right, y: top→bottom).
+
+### Chart injection slot — AppInner.chart_cmds (RN11)
+
+Charts can be injected between the main draw pass and the overlay draw pass by writing to `ai.chart_cmds` from `per_frame_app_fn`. The frame loop frees the slice and all `polyline.points` / `filled_path.vertices` + `.indices` sub-allocations automatically each frame — the caller must allocate them from `ai.gpa`.
+
+```zig
+// In per_frame_app_fn (called from toastAppTick or similar):
+pub fn renderCharts(ai: *app_types.app_impl.AppInner) anyerror!void {
+    // Get computed rect of a chart placeholder element.
+    const rect = ai.scene.elements.layout.items[chart_placeholder_idx].computed;
+    const outer = chart_mod.Rect09{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h };
+
+    var cmds = std.ArrayListUnmanaged(chart_mod.DrawCmd).empty;
+    errdefer cmds.deinit(ai.gpa);
+
+    // ... build chart and render into cmds ...
+    try chart.render(&frame, &cmds, ai.gpa);
+
+    if (cmds.items.len > 0) {
+        ai.chart_cmds = try cmds.toOwnedSlice(ai.gpa);
+    } else {
+        cmds.deinit(ai.gpa);
+    }
+}
+
+// In main.zig per_frame_app_fn:
+fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
+    // ... toast/tooltip logic ...
+    ecommerce_screen.renderCharts(ai) catch {};
+}
+```
+
+Chart placeholder elements are `Card` nodes with unique text attributes (e.g. `"CHART:BAR"`). After `scene.instantiate()`, scan `scene._text.items` to find their indices, then read `scene.elements.layout.items[idx].computed` each frame in `renderCharts`.
+
 ---
 
 ## M27 — Dashboard widgets (RN3–RN6)
@@ -2956,4 +3034,83 @@ const eur = locale.formatCurrency(&buf, 11310.56, .eur, locale.Locale.en_US);
 Supported currencies: `.usd`, `.sgd`, `.eur`.
 Returns `null` if `buf` is too small.
 Always renders exactly 2 decimal places.
+
+---
+
+## RN12 — Default palette (zinc/neutral) and renderer fixes
+
+### Palette.default() is now zinc-based (shadcn/ui-equivalent)
+
+`Palette.default()` returns a zinc/neutral palette matching shadcn's default theme:
+
+| Field | Hex | Note |
+|---|---|---|
+| `gray_50` | `0xFAFAFA` | zinc-50 |
+| `gray_100` | `0xF4F4F5` | zinc-100 |
+| `gray_200` | `0xE4E4E7` | zinc-200 |
+| `gray_400` | `0xA1A1AA` | zinc-400 |
+| `gray_600` | `0x52525B` | zinc-600 |
+| `gray_800` | `0x27272A` | zinc-800 |
+| `gray_900` | `0x18181B` | zinc-900 |
+| `accent_400` | `0x18181B` | zinc-900 — shadcn primary button |
+| `accent_600` | `0x09090B` | zinc-950 |
+| `ok_400` | `0x16A34A` | green-600 |
+| `warn_400` | `0xD97706` | amber-600 |
+| `err_400` | `0xDC2626` | red-600 |
+| `info_400` | `0x2563EB` | blue-600 |
+
+### Radio and Checkbox renderer improvements (RN12)
+
+**Checkbox**: now fixed 16px (was `font_size * dpi_scale`), radius 3px, border 1px.
+
+**Radio**: fixed 16px, border color changes on selection (accent when selected, border_strong on hover, border_default at rest). Has a 6px selection dot and optional focus ring (4px outer ring).
+
+---
+
+## RN13 — `src/app/ui/` component library and Components screen
+
+### ui/ library
+
+`src/app/ui/mod.zig` exports class string constants for building shadcn-equivalent NodeDescs.
+Import in any demo screen via relative path:
+
+```zig
+const ui = @import("../../app/ui/mod.zig");
+```
+
+Available namespaces:
+
+| Namespace | File | Key constants |
+|---|---|---|
+| `ui.Badge` | `badge.zig` | `default`, `secondary`, `outline`, `ok`, `warn`, `err` |
+| `ui.Button` | `button.zig` | `primary`, `secondary`, `outline`, `ghost`, `destructive` |
+| `ui.Card` | `card.zig` | `surface`, `bare`, `subtle`, `header`, `desc` |
+| `ui.Input` | `input.zig` | `base`, `label`, `hint` |
+| `ui.Separator` | `separator.zig` | `horizontal`, `vertical` |
+
+**Usage pattern** (attrs array must outlive the NodeDesc tree):
+
+```zig
+const a = [1]Attr{.{ .name = "text", .value = .{ .literal = "Delivered" } }};
+const badge_node = NodeDesc{ .tag = "Card", .classes = ui.Badge.ok, .attrs = &a };
+```
+
+For `ok`/`warn`/`err` badges, set the text color post-instantiation:
+```zig
+scene._style.items[badge_idx].text_color = tokens.ok;
+```
+
+### Components demo screen (Screen 13)
+
+Screen 13 (`src/demo/screens/components.zig`) shows a gallery of all UI components:
+- Typography scale
+- Badges (default, secondary, outline, ok, warn, err)
+- Buttons (primary, secondary, outline, ghost, destructive)
+- Form controls (Input, Checkbox, Radio group, Slider, Dropdown)
+- Stat cards
+
+Launch with: `--initial-screen components`
+
+Wired as sidebar button index 14. The screen calls `wireSidebarCallbacks(scene, global, tokens, 14)`.
+
 

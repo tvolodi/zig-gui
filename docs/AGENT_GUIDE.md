@@ -251,7 +251,7 @@ constitution and is a flag for human review.
 - **R79 — Data Table (M7 Phase 3):** `DataTableState` parallel array `_table_state[]`. `tableStateOf(idx)` → `*DataTableState`. `setTableData(idx, rows)` sets the data source (`DataTableRows` with `row_ptr: *anyopaque`, `row_size: usize`, `row_count: u32`, and `cell_fn: CellTextFn`). `CellTextFn = *const fn(row_ptr: *anyopaque, col: u8, buf: []u8) u8` — receives pointer to the specific row, writes text into `buf`, returns byte count. Compute row N's pointer via `@ptrCast(@as([*]u8, @ptrCast(rows.row_ptr)) + N * rows.row_size)`. `setTableColumns(idx, columns)` defines column headers/widths. `sortTable(idx, col)` toggles sort direction and rebuilds `sorted_indices` using `std.ArrayListUnmanaged(u32)`. Virtualized rendering: only visible rows emitted by `buildDrawList`.
 - **RN3 — Date Range Picker (M27):** `DateRangePickerState` parallel array `_date_range_picker_state[]`. `setDateRange(idx, start, end)` sets both ends; rejects end < start (no-op). `getDateRange(idx)` → `DateRangeValue`. `setDateRangePreset(idx, preset)` atomically sets both ends from `DateRangePreset` enum (`.today/.last_7/.last_30/.this_month/.custom`). Focusable kind; added to `focusable_indices` in `instantiate()`.
 - **RN5 — Maskable Value (M27):** `MaskableValueState` parallel array `_maskable_value_state[]`. `setMaskableValue(idx, text)` stores value text and sets `display_len` on first call (fixed-width — never changes). `setMaskableVisible(idx, visible)` toggles masking and marks dirty (INV-3.3). When hidden, renderer shows `masked_char` × `display_len`; when visible, shows actual `value_text`. Default `masked_char = '*'`.
-- **RN6 — Trend Badge (M27):** `TrendBadgeState` parallel array `_trend_badge_state[]`. `setTrendValue(idx, value: f32)` sets value and computes `direction` from sign (`.up`/`.down`/`.neutral`). Renderer colors from tokens only (INV-4.3): `tokens.ok` (up), `tokens.err` (down), `tokens.text_muted` (neutral).
+- **RN6 — Trend Badge (M27):** `TrendBadgeState` parallel array `_trend_badge_state[]`. `setTrendValue(idx, value: f32)` sets value and computes `direction` from sign (`.up`/`.down`/`.neutral`). Renderer colors from tokens only (INV-4.3): `tokens.ok` (up), `tokens.err` (down), `tokens.text_muted` (neutral). **Layout gotcha:** `TrendBadge` has `display: block, flex_shrink: 0` but no default size — the layout engine gives it zero width/height unless explicit `w-N h-N` classes are added (e.g. `"text-xs w-14 h-4"`). Alternatively, use a `Text` element with post-instantiation text/color injection for pixel-exact trend strings like "+11.01%".
 - **RN4 — Currency formatting (M27):** `formatCurrency(buf, amount, currency, locale)` in `src/app/locale.zig`. `Currency` enum: `.usd`, `.sgd`, `.eur`. EUR always uses EU grouping conventions regardless of locale arg. Renders exactly 2 decimal places.
 
 ### Module 08 — Schema forms
@@ -294,16 +294,22 @@ constitution and is a flag for human review.
 - **M9 — `_classes` parallel array (R90/R93/R95):** `_classes: ArrayListUnmanaged([]const u8)` stores the raw CSS class string for each element at instantiation. Used by `rebuildStyles` in the app layer to re-resolve element styles when the active theme changes at runtime. Populated in `instantiateNode` from `desc.classes`; cleared in `reset()`.
 - **M9 — `debugPrint` / `debugPrintStats` forwarding methods (R91):** Scene exposes two forwarding methods that delegate to free functions in `src/07/debug.zig`. The free functions own the DFS traversal and stderr formatting; Scene never touches stderr directly.
 
-### Module 13 — Charts (M26 / M27 RN1 RN2 RN7)
-- **Goal:** Chart-command vocabulary, scales/axes, five chart mark kinds, hit-test interactivity, M27 dashboard extensions (donut, callouts, crosshair).
+### Module 13 — Charts (M26 / M27 RN1 RN2 RN7 RN9 RN10)
+- **Goal:** Chart-command vocabulary, scales/axes, five chart mark kinds, hit-test interactivity, M27 dashboard extensions (donut, callouts, crosshair), gauge arc meter, world map.
 - **Files:** `scale.zig`, `axes.zig`, `marks.zig`, `chart.zig`, `interaction.zig`, `tessellate.zig`, `legend.zig`.
-- **Five chart kinds:** `line`, `bar`, `area`, `scatter`, `pie`. A `Chart` struct holds `kind`, `series`, `x`, and option fields; `.render(frame, draw_list, allocator)` dispatches to `marks.renderChart`.
+- **Seven chart kinds:** `line`, `bar`, `area`, `scatter`, `pie`, `gauge`, `map`. A `Chart` struct holds `kind`, `series`, `x`, and option fields; `.render(frame, draw_list, allocator)` dispatches to `marks.renderChart`.
+- **RN9 — Gauge chart:** `chart.kind = .gauge`. Set `gauge_value: f64` (0–1), `gauge_bg_token`, `gauge_fill_token`. Pass `series = &.{}` (no data series). Arc sweeps −π (left) → 0 (right) through the TOP. `renderGauge` uses `ArcCmd` for fill + background arc, `aa_filled_circle` for end-cap dots. End-caps at arc center radius (±arc_r from center). `cy = plot_rect.y + h * 0.72` positions gauge center in lower portion.
+- **RN10 — World map:** `chart.kind = .map`. Set `map_markers: []const MapMarker` (each with `norm_x`, `norm_y`, `radius`, `color_token`), `map_ocean_token`, `map_land_token`. Pass `series = &.{}`. Continent shapes are rendered as `aa_filled_rect` bounding boxes (the Vulkan backend treats `filled_path`/`polyline`/`arc` as no-ops — only `filled_rect`, `aa_filled_rect`, `aa_filled_circle`, and `glyph` produce pixels). Dot markers use `aa_filled_circle`. `renderWorldMap` previously used `tess.triangulateConvex` + `filled_path`; those were replaced with bounding-box rects.
+- **RN11 — chart_cmds injection slot:** `AppInner.chart_cmds: ?[]DrawCommand = null`. Set by `per_frame_app_fn` before the frame renders; consumed and freed by the frame loop. Commands appear between main and overlay draw passes. Use `cmds.toOwnedSlice(alloc)` to transfer ownership; `errdefer cmds.deinit(alloc)` for safety. Pattern in demo: `ecommerce_screen.renderCharts(ai) catch {}` called from `toastAppTick`. **Sub-allocation ownership:** The frame loop frees `polyline.points` and `filled_path.vertices`/`.indices` sub-slices before freeing the outer slice — allocate all of these from `ai.gpa`.
+- **Demo module 13 import:** `mod13_charts` is a named module in `build.zig` (root = `src/13/chart.zig`, dep = `mod01_platform`). Added to `demo_mod` as `"../../13/chart.zig"`. `chart.zig` re-exports `Rect09`, `AxisOptions`, `makeFrame`, `drawAxes`, `DrawCmd` from `axes.zig` so demo screens need only one import.
 - **RN1 — Donut ring pattern:** `Chart.inner_radius: f32 = 0.0`. When > 0, `renderPie` emits `ArcCmd` with `width > 0`:
   - `arc_radius = outer * (1 + inner_radius) / 2` (center of ring stroke)
   - `arc_width  = outer * (1 - inner_radius)` (ring thickness)
   - This places the inner edge at `outer × inner_radius` and outer edge at `outer`. Setting `radius = outer` directly is wrong — it would shift the ring outward.
 - **RN1 — Center-label slot pattern:** `Chart.center_label: ?[]const u8 = null`. The chart module has no glyph atlas; it emits an `aa_filled_circle` background as a slot, and the caller renders the actual text glyphs. This is the same deferral pattern used by `drawLegend()` (swatches only, no text). Always follow this pattern for modules that lack glyph access.
 - **RN2 — Callout rendering:** `Chart.callouts: []const Callout = &.{}`. For pie charts, `renderCallouts` computes each segment's mid-angle by replaying the renderPie angle traversal, then emits one 2-point `PolylineCmd` (leader line) + one `filled_rect` (label background) per callout. The public `computeCalloutPos` helper returns geometry without side effects — useful when the caller needs to position glyph commands.
+- **Area chart rendering (Vulkan-safe pattern):** `renderArea` emits `aa_filled_rect` column segments between adjacent data points — one rect per pair spanning `x[i]→x[i+1]` from `min(py[i],py[i+1])` to baseline, plus a 2 px top-edge rect. Do NOT use `filled_path`/`polyline` — the Vulkan backend treats those as no-ops.
+- **Scale tick ownership:** All three numeric tick generators (`linearTicks`, `logTicks`, `timeTicks`) and `bandTicks` allocate both the `[]Tick` array AND the `label` string via the passed allocator. The caller (`drawAxes`) must free every tick's label then the array: `for (ticks) |t| alloc.free(t.label); alloc.free(ticks);`. This is now done with `defer` in `drawAxes` for both x and y tick slices.
 - **RN7 — Dashed line pattern:** Crosshair is "dashed" by emitting multiple short 2-point `PolylineCmd` segments (alternating dash/gap), NOT by adding a dash-pattern field to `PolylineCmd`. This preserves the draw-command vocabulary (INV-2.1-v2) and avoids a renderer change. Use this pattern wherever dashed lines are needed in chart components.
 - **RN7 — Decoupled state / render:** `CrosshairState` in `interaction.zig` is pure data (the snapped pixel x); the visual render in `marks.renderCrosshair` is driven by `Series.hovered_datum` (the signal-based hover state). These are independent — `CrosshairState.x` is a caller-side cache; the render path reads the series state. Do not couple them.
 - **ArrayListUnmanaged.append in Zig 0.16:** The signature is `append(self, gpa: Allocator, item: T)`. All `out.append` calls in chart marks MUST pass the allocator as the first argument. Omitting it compiles only because the function is lazily analyzed — if `chart.render()` is called from tests, the missing allocator will cause a compile error.
@@ -591,3 +597,46 @@ The agent reads the file with the `Read` tool (it supports PNG) and describes wh
 
 Full glossary lives in `docs/specs/glossary.md` (if it does not exist yet, do not invent
 terms — surface the gap).
+
+---
+
+## 13. RN12/RN13 patterns (added 2026-06-15)
+
+### Default palette is now zinc-based (RN12)
+
+`Palette.default()` returns shadcn/ui-equivalent zinc values. The teal-accent palette
+(`0x1D9E75`) is gone. When updating tests that check exact palette hex values, update
+`src/05/05_test.zig` (not the frozen `docs/specs/05.acceptance_test.zig`).
+
+### Radio/Checkbox fixed-size (RN12)
+
+Both are now 16px fixed regardless of `font_size * dpi_scale`. When adding new widget
+renderers, prefer explicit pixel sizes over font-size-relative sizes for icon/control elements.
+
+### TrendBadge layout gotcha
+
+`TrendBadge` nodes must have explicit width/height classes (e.g. `w-14 h-4`). Without them
+the layout engine assigns zero size and the renderer produces no visible output.
+
+### `src/app/ui/` component library (RN13)
+
+`src/app/ui/mod.zig` exports class string namespaces (`Badge`, `Button`, `Card`, `Input`,
+`Separator`). These are NOT components — they are design-token class strings. The caller
+builds `NodeDesc` with their own stack-allocated `[N]Attr` arrays. The ui/ files contain
+zero runtime code (just constants).
+
+### Adding a new sidebar screen (RN13 pattern)
+
+1. Add `<name>_ctx: ?*anyopaque = null` to `GlobalState` in `shared/types.zig`
+2. Add `<name>: SidebarCb` to `SidebarCbs`
+3. Add `ctxForScreen` entry for the name
+4. Expand the `pairs` array in `wireSidebarCallbacks` to `[N+1]`, increment active guard
+5. Expand `_btn_attrs` and `_btns` in `sidebar.zig` from `[N]` to `[N+1]`
+6. Add import, ctx, global wire, `nav.register`, and initial-screen handler in `main.zig`
+
+### `DropdownOption` requires `*anyopaque` value
+
+`setDropdownOptions` takes `[]const DropdownOption` where each entry has a `.value: *anyopaque`.
+Use module-level `var _values: [N]u8` + `var _opts: [N]DropdownOption` for stable storage
+(same pattern as `forms.zig` / `dashboard.zig`).
+

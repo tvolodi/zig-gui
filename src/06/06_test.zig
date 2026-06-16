@@ -5,9 +5,9 @@
 
 const std = @import("std");
 const testing = std.testing;
-const M = @import("../../docs/specs/06.types.zig");
-const store = @import("../03_element_store/types.zig");
-const theme = @import("../../docs/specs/05.types.zig");
+const M = @import("../06/types.zig");
+const store = @import("../03/types.zig");
+const theme = @import("../05/types.zig");
 
 fn tokens() theme.Tokens {
     return theme.Tokens.light(theme.Palette.default());

@@ -92,7 +92,7 @@ fn matchesHelper(pattern: []const u8, input: []const u8, pat_idx: usize, str_idx
     if (str_idx >= input.len) return false;
 
     if (pattern[pat_idx] == '[') {
-        // Character class [abc] or [a-z]
+        // Character class [abc], [a-z], or [^abc] — may have quantifier after the closing ']'
         var class_end = pat_idx + 1;
         var negate = false;
         if (class_end < pattern.len and pattern[class_end] == '^') {
@@ -103,15 +103,54 @@ fn matchesHelper(pattern: []const u8, input: []const u8, pat_idx: usize, str_idx
         while (class_end < pattern.len and pattern[class_end] != ']') {
             class_end += 1;
         }
+        // class_end now points at ']'
 
         const class_start = if (negate) pat_idx + 2 else pat_idx + 1;
         const class_str = pattern[class_start..class_end];
-        const in_class = charInClass(input[str_idx], class_str);
+        // next_pat_after_class is the index after ']'
+        const after_class = class_end + 1;
 
-        if (in_class != negate) {
-            return matchesHelper(pattern, input, class_end + 1, str_idx + 1);
+        // Check if a quantifier follows the character class
+        const class_quantifier: u8 = if (after_class < pattern.len and
+            (pattern[after_class] == '*' or pattern[after_class] == '+' or pattern[after_class] == '?'))
+            pattern[after_class]
+        else
+            0;
+        const next_pat_after_quant = if (class_quantifier != 0) after_class + 1 else after_class;
+
+        if (class_quantifier == '*') {
+            // 0-or-more: try skipping first
+            if (matchesHelper(pattern, input, next_pat_after_quant, str_idx)) return true;
+            const in_class = charInClass(input[str_idx], class_str) != negate;
+            if (in_class) {
+                // Re-enter with same class pattern position to handle more
+                if (matchesHelper(pattern, input, pat_idx, str_idx + 1)) return true;
+            }
+            return false;
+        } else if (class_quantifier == '+') {
+            // 1-or-more: must match at least once
+            const in_class = charInClass(input[str_idx], class_str) != negate;
+            if (!in_class) return false;
+            // After one match, continue greedily or finish
+            if (matchesHelper(pattern, input, next_pat_after_quant, str_idx + 1)) return true;
+            if (matchesHelper(pattern, input, pat_idx, str_idx + 1)) return true;
+            return false;
+        } else if (class_quantifier == '?') {
+            // 0-or-1: try skipping
+            if (matchesHelper(pattern, input, next_pat_after_quant, str_idx)) return true;
+            const in_class = charInClass(input[str_idx], class_str) != negate;
+            if (in_class) {
+                if (matchesHelper(pattern, input, next_pat_after_quant, str_idx + 1)) return true;
+            }
+            return false;
+        } else {
+            // No quantifier — match exactly one character
+            const in_class = charInClass(input[str_idx], class_str) != negate;
+            if (in_class) {
+                return matchesHelper(pattern, input, after_class, str_idx + 1);
+            }
+            return false;
         }
-        return false;
     }
 
     if (charMatches(pattern[pat_idx], input[str_idx])) {

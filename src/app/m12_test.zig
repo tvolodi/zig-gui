@@ -627,8 +627,9 @@ test "RC4: draw order — sibling A(z=0) drawn before B(z=10)" {
     var font = stubFont();
 
     const cmds = try renderer_mod.buildDrawList(
-        testing.allocator, &result.scene, &atlas, &img_atlas, &font, testTokens(),
-        null, false, null,
+        testing.allocator,
+        &result.scene,
+        .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = testTokens() },
     );
     defer testing.allocator.free(cmds);
 
@@ -663,8 +664,9 @@ test "RC4: draw order — sibling A(z=20) drawn after B(z=10)" {
     var font = stubFont();
 
     const cmds = try renderer_mod.buildDrawList(
-        testing.allocator, &result.scene, &atlas, &img_atlas, &font, testTokens(),
-        null, false, null,
+        testing.allocator,
+        &result.scene,
+        .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = testTokens() },
     );
     defer testing.allocator.free(cmds);
 
@@ -718,8 +720,9 @@ test "RC4: draw order — three siblings [z=0, z=10, z=5] drawn in order [z=0, z
     var font = stubFont();
 
     const cmds = try renderer_mod.buildDrawList(
-        testing.allocator, &scene, &atlas, &img_atlas, &font, tok,
-        null, false, null,
+        testing.allocator,
+        &scene,
+        .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tok },
     );
     defer testing.allocator.free(cmds);
 
@@ -783,8 +786,9 @@ test "RC4: draw order — container with > 256 children: sort skipped, no crash"
 
     // Must not crash or return an error.
     const cmds = try renderer_mod.buildDrawList(
-        testing.allocator, &scene, &atlas, &img_atlas, &font, tok,
-        null, false, null,
+        testing.allocator,
+        &scene,
+        .{ .atlas = &atlas, .image_atlas = &img_atlas, .font = &font, .tokens = tok },
     );
     defer testing.allocator.free(cmds);
 

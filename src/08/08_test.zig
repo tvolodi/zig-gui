@@ -479,8 +479,8 @@ test "dependentRequired when trigger key is present" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var deps = std.StringHashMap([]const []const u8){};
-    try deps.put(arena.allocator(), "credit_card", &.{ "cvv", "name" });
+    var deps = std.StringHashMap([]const []const u8).init(arena.allocator());
+    try deps.put("credit_card", &.{ "cvv", "name" });
 
     const schema = F.Schema{
         .type = .object,
@@ -488,10 +488,11 @@ test "dependentRequired when trigger key is present" {
     };
 
     // Object with credit_card but missing cvv
-    var value = F.Value{ .object = &.{
+    const obj1_fields = try arena.allocator().dupe(F.Field, &.{
         .{ .key = "credit_card", .value = .{ .string = "1234" } },
         .{ .key = "name", .value = .{ .string = "John" } },
-    } };
+    });
+    var value = F.Value{ .object = obj1_fields };
 
     const errs = try F.validate(arena.allocator(), schema, &value);
 
@@ -509,8 +510,8 @@ test "dependentRequired when trigger key is absent" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var deps = std.StringHashMap([]const []const u8){};
-    try deps.put(arena.allocator(), "credit_card", &.{ "cvv", "name" });
+    var deps = std.StringHashMap([]const []const u8).init(arena.allocator());
+    try deps.put("credit_card", &.{ "cvv", "name" });
 
     const schema = F.Schema{
         .type = .object,
@@ -518,9 +519,10 @@ test "dependentRequired when trigger key is absent" {
     };
 
     // Object without credit_card — dependencies should not apply
-    var value = F.Value{ .object = &.{
+    const obj2_fields = try arena.allocator().dupe(F.Field, &.{
         .{ .key = "name", .value = .{ .string = "John" } },
-    } };
+    });
+    var value = F.Value{ .object = obj2_fields };
 
     const errs = try F.validate(arena.allocator(), schema, &value);
 
@@ -571,9 +573,10 @@ test "array validation with minItems constraint" {
 
     // Array with 0 items — should fail minItems check
     const items = try arena.allocator().alloc(F.Value, 0);
-    var value = F.Value{ .object = &.{
+    const obj_fields = try arena.allocator().dupe(F.Field, &.{
         .{ .key = "tags", .value = .{ .array = items } },
-    } };
+    });
+    var value = F.Value{ .object = obj_fields };
 
     const errs = try F.validate(arena.allocator(), schema, &value);
     try testing.expect(errs.len > 0);

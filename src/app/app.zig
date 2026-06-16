@@ -14,8 +14,8 @@ const font_family_mod = @import("font_family.zig");
 const navigator_mod = @import("navigator.zig");
 const debug_overlay_mod = @import("debug_overlay.zig");
 const perf_hud_mod = @import("perf_hud.zig");
-const anim_timeline_mod = @import("anim_timeline.zig");
 const markup_mod = @import("../06/types.zig");
+const tray_mod = @import("tray.zig");
 // M10 modules — imported via named module imports (build.zig registers each file
 // as exactly one named module to avoid the "file exists in multiple modules" error).
 pub const persistent_settings_mod = @import("persistent_settings.zig");
@@ -248,27 +248,6 @@ pub const AppOptions = struct {
     /// Output path for the screenshot PNG (only used when screenshot_frames > 0).
     screenshot_out: []const u8 = "testdata/screenshot_actual.png",
 
-    // M13-03 RD2 — Subpixel glyph rendering.
-    /// Enable subpixel text rendering for font sizes 12–14 px.
-    subpixel_text: bool = false,
-
-    // RF3 — OS color-scheme detection (M16-04).
-    /// Theme mode applied when the OS color-scheme preference cannot be determined.
-    /// When `getColorScheme()` returns `.unknown`, this value is used.
-    /// Defaults to .light.
-    default_theme_mode: mod05.Mode = .light,
-
-    // RF0 — System tray (M16-01).
-    /// Optional system tray icon. Non-null enables tray support.
-    /// Caller retains ownership; AppInner calls pumpMessages() each frame.
-    tray: ?*@import("tray.zig").Tray = null,
-
-    // RG2/RG3 — Accessibility bridges (AT-SPI2, UIA).
-    /// Optional application name for accessibility services.
-    /// If non-null, accessibility tree is exposed (Linux AT-SPI2 + Windows UIA).
-    /// Caller retains ownership; copied into AppInner if needed.
-    app_name: ?[]const u8 = null,
-
     // RA4 — Window state persistence.
     /// Enable automatic window state persistence.
     /// When true, AppInner.init restores the saved window state (if any) from
@@ -280,6 +259,14 @@ pub const AppOptions = struct {
     /// Optional reference to a PersistentSettings for window-state persistence.
     /// The caller owns the PersistentSettings and must keep it alive for the duration of App.run.
     persistent_settings: ?*persistent_settings_mod.PersistentSettings = null, // RA4
+
+    // RF0 — System tray (M16-01).
+    /// Optional system tray icon. When non-null, AppInner.run registers it on init.
+    tray: ?*tray_mod.Tray = null,
+
+    // RF3 — Default theme mode applied at startup.
+    /// When set, overrides the system color scheme detection. Default .light.
+    default_theme_mode: mod05.Mode = .light,
 };
 
 // Convenience aliases for the module types we need.
@@ -320,6 +307,25 @@ fn colorEq(a: mod05.Color, b: mod05.Color) bool {
     return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a;
 }
 
+/// Returns true when the scene contains any widget that requires continuous redraws
+/// (spinners, indeterminate progress bars). Used to decide between waitEvents/pollEvents.
+fn hasAnimatedElements(scene: *const Scene, tooltip: *const @import("tooltip.zig").TooltipManager) bool {
+    if (tooltip.isPending()) return true;
+    var i: u32 = 0;
+    while (i < scene._kind.items.len) : (i += 1) {
+        if (i < scene._hidden.items.len and scene._hidden.items[i]) continue;
+        switch (scene._kind.items[i]) {
+            .spinner => return true,
+            .progress_bar => {
+                if (i < scene._progress_state.items.len and
+                    scene._progress_state.items[i].indeterminate) return true;
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
 /// Public implementation struct.  Exposed as `App._inner` through types.zig.
 pub const AppInner = struct {
     gpa: std.mem.Allocator,
@@ -331,16 +337,6 @@ pub const AppInner = struct {
     font_family: FontFamily,
     atlas_cpu: GlyphAtlas,
     atlas_gpu: GpuAtlas,
-    /// M13-03 RD2 — Subpixel atlas (CPU-side RGBA8, GPU-side handle).
-    subpixel_atlas_cpu: mod09.SubpixelAtlas,
-    subpixel_atlas_gpu: GpuAtlas,
-    subpixel_atlas_generation_seen: u32,
-    subpixel_text: bool,
-
-    /// M13-04 RD3 — SDF icon atlas (CPU-side, GPU-side).
-    sdf_atlas_cpu: mod09.SdfAtlas,
-    sdf_atlas_gpu: mod09.GpuSdfAtlas,
-
     scene: Scene,
 
     // Pre-allocated draw-list (no per-frame heap alloc for the buffer itself).
@@ -433,11 +429,6 @@ pub const AppInner = struct {
     // R94 — Current font scale factor (1.0 = default).
     _font_scale: f32 = 1.0,
 
-    /// RD5: HiDPI display scale factor. Default 1.0 = standard DPI.
-    /// Read once at startup from the primary monitor's content scale via GLFW.
-    /// Passed to the layout engine and renderer each frame to multiply logical px values.
-    dpi_scale: f32 = 1.0,
-
     // RA2 — File logger (null when opts.log_path == null).
     file_logger: ?file_logger_mod.FileLogger = null,
 
@@ -464,39 +455,9 @@ pub const AppInner = struct {
     // M11 — RB4: Global keyboard shortcut table.
     shortcuts: ShortcutTable = .{},
 
-    // M14-01 — RD6: Animation timelines.
-    anim_timelines: std.ArrayListUnmanaged(anim_timeline_mod.AnimTimeline) = .empty,
-
-    /// M14-05: When true, all animation timelines complete instantly.
-    prefer_reduced_motion: bool = false,
-
-    /// M14-02 — Previous frame's style values for transition detection.
-    _prev_styles: std.ArrayListUnmanaged(mod05.ComputedStyle) = .empty,
-
-    // RF0 — System tray (M16-01).
-    /// Optional reference to a Tray instance. Non-null → pumpMessages called each frame.
-    _tray: ?*@import("tray.zig").Tray = null,
-
-    // RG2 — AT-SPI2 bridge (Linux D-Bus). Non-null if app_name was provided.
-    atspi_service: ?@import("atspi_bridge.zig").AtSpiService = null,
-
-    // RG3 — UIA bridge (Windows COM). Non-null if app_name was provided.
-    uia_bridge: ?@import("uia_bridge.zig").UiaBridge = null,
-
-    // -----------------------------------------------------------------------
-    // hasAnimatedElements — poll-mode vs. wait-mode decision
-    // -----------------------------------------------------------------------
-
-    /// Returns true when the app contains any element or timeline that requires
-    /// continuous redraws. Used to decide between waitEvents/pollEvents.
-    pub fn hasAnimatedElements(self: *const AppInner) bool {
-        // Check active animation timelines (covers spinner, indeterminate progress bar, and any future timelines).
-        for (self.anim_timelines.items) |tl| {
-            if (tl.running) return true;
-        }
-        if (self.tooltip_manager.isPending()) return true;
-        return false;
-    }
+    // RN11 — Per-frame chart draw commands injected between main and overlay passes.
+    // Populated by per_frame_app_fn; freed by AppInner at end of each frame.
+    chart_cmds: ?[]DrawCommand = null,
 
     // -----------------------------------------------------------------------
     // Init
@@ -511,8 +472,8 @@ pub const AppInner = struct {
         var backend = try VulkanBackend.init(gpa, &platform);
         errdefer backend.deinit();
 
-        // Step 3: initPipelines.
-        try backend.initPipelines();
+        // Step 3: initQuadPipeline.
+        try backend.initQuadPipeline(gpa);
         errdefer backend.deinitQuadPipeline();
 
         // Step 4: Load font bytes.
@@ -553,38 +514,6 @@ pub const AppInner = struct {
         );
         errdefer atlas_gpu.deinit(vk.device);
 
-        // Step 7b: M13-03 RD2 — Subpixel atlas (CPU-side RGBA8, initially 512×512).
-        var subpixel_atlas_cpu = try mod09.SubpixelAtlas.init(gpa, 512, 512);
-        errdefer subpixel_atlas_cpu.deinit();
-
-        // Upload initial empty subpixel atlas to GPU.
-        const subpixel_atlas_gpu_init = try GpuAtlas.uploadRgba8(
-            vk.device,
-            vk.phys_device,
-            vk.cmd_pool,
-            vk.graphics_queue,
-            subpixel_atlas_cpu.pixels(),
-            subpixel_atlas_cpu.width,
-            subpixel_atlas_cpu.height,
-        );
-        backend.updateSubpixelAtlas(&subpixel_atlas_gpu_init);
-
-        // Step 7c: M13-04 RD3 — SDF icon atlas (generate from built-in paths, upload to GPU).
-        var sdf_atlas_cpu = try mod09.SdfAtlas.init(gpa);
-        errdefer sdf_atlas_cpu.deinit(gpa);
-
-        const sdf_atlas_gpu_init = try mod09.GpuSdfAtlas.upload(
-            vk.device,
-            vk.phys_device,
-            vk.cmd_pool,
-            vk.graphics_queue,
-            &sdf_atlas_cpu,
-        );
-        {
-            const handles = sdf_atlas_gpu_init.asHandles();
-            backend.updateSdfAtlas(&handles);
-        }
-
         // Step 8: Scene.init.
         var scene = Scene.init(gpa);
         errdefer scene.deinit();
@@ -619,12 +548,6 @@ pub const AppInner = struct {
             .font_family = font_family,
             .atlas_cpu = atlas_cpu,
             .atlas_gpu = atlas_gpu,
-            .subpixel_atlas_cpu = subpixel_atlas_cpu,
-            .subpixel_atlas_gpu = subpixel_atlas_gpu_init,
-            .subpixel_atlas_generation_seen = subpixel_atlas_cpu.generation,
-            .subpixel_text = opts.subpixel_text,
-            .sdf_atlas_cpu = sdf_atlas_cpu,
-            .sdf_atlas_gpu = sdf_atlas_gpu_init,
             .scene = scene,
             .draw_list = draw_list,
             .viewport_constraints = viewport_constraints,
@@ -645,9 +568,6 @@ pub const AppInner = struct {
             ._current_palette = mod05.Palette.default(),
             ._current_mode = .light,
         };
-
-        // RD5: Read display content scale from the primary monitor.
-        self._readDpiScale();
 
         // Register GLFW event queue (R11).
         // setEventQueue stores the push function pointer so module 01 callbacks can call it
@@ -706,33 +626,7 @@ pub const AppInner = struct {
         self._screenshot_out = opts.screenshot_out;
         self.double_click_threshold_ms = opts.double_click_threshold_ms;
 
-        // RF3: Apply OS color-scheme preference as initial theme mode.
-        const scheme = self.platform.getColorScheme();
-        const initial_mode: mod05.Mode = switch (scheme) {
-            .dark => .dark,
-            .light => .light,
-            .unknown => opts.default_theme_mode,
-        };
-        self.setTheme(mod05.Theme.build(self._current_palette, initial_mode));
-
-        // RF0: Store tray reference for per-frame pumpMessages call.
-        self._tray = opts.tray;
-
-        // RG2/RG3: Initialize accessibility bridges if app_name is provided.
-        if (opts.app_name) |app_name| {
-            self.atspi_service = try @import("atspi_bridge.zig").AtSpiService.init(&self.scene, app_name, gpa);
-            self.uia_bridge = try @import("uia_bridge.zig").UiaBridge.init(&self.scene, &self.platform, app_name, gpa);
-        }
-
         return self;
-    }
-
-    // -----------------------------------------------------------------------
-    // RD5 — Read display scale from the primary monitor
-    // -----------------------------------------------------------------------
-
-    fn _readDpiScale(self: *AppInner) void {
-        self.dpi_scale = self.platform.contentScale();
     }
 
     // -----------------------------------------------------------------------
@@ -765,7 +659,7 @@ pub const AppInner = struct {
 
             // M2-02: Skip GPU work when nothing has changed.
             if (!self.scene.elements.hasDirty()) {
-                if (self.hasAnimatedElements()) {
+                if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
                     // Tooltip pending or animated widget: keep rendering so tick() fires.
                     // Force a dirty bit so the render path runs this iteration.
                     self.scene.elements.markAllDirty();
@@ -788,10 +682,6 @@ pub const AppInner = struct {
 
             // M2-04: Copy current signal values into Scene arrays before layout.
             self.refreshBindings();
-
-            // M14-02: Detect style transitions after bindings update.
-            self.detectTransitions();
-            // M14-03: Enter/exit animation state sync is handled in syncAnimationState.
 
             // R12: apply pending resize before beginFrame.
             if (self.pending_resize) |new_size| {
@@ -819,20 +709,8 @@ pub const AppInner = struct {
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
 
-            // M14-01: Tick active animation timelines.
-            self.tickAnimations();
-
-            // RD9: Sync timeline values into ProgressState for spinner/progress_bar rendering.
-            self.syncAnimationState();
-
             // Measure text (module 07).
             self.scene.font_family = &self.font_family;
-            self.scene.dpi_scale = self.dpi_scale;
-            self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
-
-            // Re-upload GPU atlas if the CPU atlas changed (R10).
-            self.scene.font_family = &self.font_family;
-            self.scene.dpi_scale = self.dpi_scale;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
             // Re-upload GPU atlas if the CPU atlas changed (R10).
@@ -857,31 +735,6 @@ pub const AppInner = struct {
                 self.atlas_generation_seen = self.atlas_cpu.generation;
             }
 
-            // M13-03 RD2: Re-upload subpixel atlas if CPU atlas changed.
-            if (self.subpixel_text and self.subpixel_atlas_cpu.generation != self.subpixel_atlas_generation_seen) {
-                const vk = self.backend._impl_vulkan() catch {
-                    self.backend.endFrame();
-                    continue;
-                };
-                // Destroy old GPU subpixel atlas handles.
-                self.subpixel_atlas_gpu.deinit(vk.device);
-                const new_sp_gpu = GpuAtlas.uploadRgba8(
-                    vk.device,
-                    vk.phys_device,
-                    vk.cmd_pool,
-                    vk.graphics_queue,
-                    self.subpixel_atlas_cpu.pixels(),
-                    self.subpixel_atlas_cpu.width,
-                    self.subpixel_atlas_cpu.height,
-                ) catch {
-                    self.backend.endFrame();
-                    continue;
-                };
-                self.subpixel_atlas_gpu = new_sp_gpu;
-                self.backend.updateSubpixelAtlas(&self.subpixel_atlas_gpu);
-                self.subpixel_atlas_generation_seen = self.subpixel_atlas_cpu.generation;
-            }
-
             // Layout solve (module 04).
             const s = self.scene.store();
             if (s.live > 0) {
@@ -891,7 +744,7 @@ pub const AppInner = struct {
                     const id = mod04.ElementId{ .index = idx, .gen = s.gen.items[idx] };
                     if (!s.isValid(id)) continue;
                     if (s.parentOf(id) == null) {
-                        mod04.solve(s, id, self.viewport_constraints, self.scratch, self.dpi_scale);
+                        mod04.solve(s, id, self.viewport_constraints, self.scratch, 1.0);
                         break;
                     }
                 }
@@ -903,11 +756,6 @@ pub const AppInner = struct {
             // Build draw list (module 09).
             // Fire queued callbacks after layout, before render (INV-3.3).
             self.scene.fireQueuedCallbacks();
-
-            // RG2/RG3: Tick accessibility bridges
-            if (self.atspi_service) |*svc| svc.tick();
-            if (self.uia_bridge) |*br| br.tick();
-
             self.scene.font_family = &self.font_family;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
@@ -923,9 +771,6 @@ pub const AppInner = struct {
                     .image_atlas = &self.image_atlas,
                     .font = self.font_family.face(false, false),
                     .tokens = self.tokens,
-                    .subpixel_atlas = &self.subpixel_atlas_cpu,
-                    .subpixel_text = self.subpixel_text,
-                    .sdf_atlas = &self.sdf_atlas_cpu,
                 },
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
@@ -935,16 +780,38 @@ pub const AppInner = struct {
             // Fire per-frame app-level tick (e.g. toast expiry + overlay rebuild).
             if (self.per_frame_app_fn) |f| f(self);
 
+            // RN11 — Consume chart_cmds injected by per_frame_app_fn.
+            const chart_slice: []const DrawCommand = if (self.chart_cmds) |cc| cc else &[_]DrawCommand{};
+            defer {
+                if (self.chart_cmds) |cc| {
+                    // Free sub-allocations within DrawCommands (polyline points, filled_path verts).
+                    for (cc) |cmd| {
+                        switch (cmd) {
+                            .polyline => |p| self.gpa.free(p.points),
+                            .filled_path => |fp| {
+                                self.gpa.free(fp.vertices);
+                                self.gpa.free(fp.indices);
+                            },
+                            else => {},
+                        }
+                    }
+                    self.gpa.free(cc);
+                }
+                self.chart_cmds = null;
+            }
+
             // R41: Flatten overlay slots and concatenate with main commands.
             const overlay_cmds = self.overlay.flatten(self.gpa) catch &[_]DrawCommand{};
             defer if (overlay_cmds.len > 0) self.gpa.free(overlay_cmds);
 
             const all_cmds = blk: {
-                if (overlay_cmds.len == 0) break :blk main_cmds;
-                const combined = self.gpa.alloc(DrawCommand, main_cmds.len + overlay_cmds.len) catch main_cmds;
-                if (combined.len == main_cmds.len + overlay_cmds.len) {
+                const total = main_cmds.len + chart_slice.len + overlay_cmds.len;
+                if (total == main_cmds.len) break :blk main_cmds;
+                const combined = self.gpa.alloc(DrawCommand, total) catch main_cmds;
+                if (combined.len == total) {
                     @memcpy(combined[0..main_cmds.len], main_cmds);
-                    @memcpy(combined[main_cmds.len..], overlay_cmds);
+                    @memcpy(combined[main_cmds.len..][0..chart_slice.len], chart_slice);
+                    @memcpy(combined[main_cmds.len + chart_slice.len ..], overlay_cmds);
                 }
                 break :blk combined;
             };
@@ -997,9 +864,9 @@ pub const AppInner = struct {
                 .a = 1.0,
             });
             self.backend.drawFrame(all_cmds2, mod01.AtlasHandles{
-                .glyph = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.atlas_gpu)) },
-                .sdf   = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.sdf_atlas_gpu)) },
-                .image = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.gpu_image_atlas)) },
+                .glyph = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
+                .sdf   = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
+                .image = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
             });
             self.backend.endFrame();
 
@@ -1017,9 +884,6 @@ pub const AppInner = struct {
                 .dirty_count = dirty_count2,
                 .element_count = live_count,
             });
-
-            // RF0: Pump tray message queue (Win32 only; no-op on Linux).
-            if (self._tray) |t| t.pumpMessages();
 
             // M2-02: Clear dirty bits — every dirty element was just painted.
             self.scene.elements.dirty.unsetAll();
@@ -1061,16 +925,12 @@ pub const AppInner = struct {
                 };
             }
 
-            // RD9: After scene navigation (which calls reset + instantiate), re-allocate
-            // animation timelines for spinner/progress_bar elements.
-            self.initAnimationTimelines() catch {};
-
             // R12: a pending resize must force a redraw even when no scene element is dirty.
             if (self.pending_resize != null) self.scene.elements.markAllDirty();
 
             // M2-02: Skip GPU work when nothing has changed (bypass in screenshot mode).
             if (self._screenshot_frames == 0 and !self.scene.elements.hasDirty()) {
-                if (self.hasAnimatedElements()) {
+                if (hasAnimatedElements(&self.scene, &self.tooltip_manager)) {
                     // Tooltip pending or animated widget: keep rendering so tick() fires.
                     self.scene.elements.markAllDirty();
                 } else {
@@ -1119,14 +979,7 @@ pub const AppInner = struct {
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
 
-            // M14-01: Tick active animation timelines.
-            self.tickAnimations();
-
-            // RD9: Sync timeline values into ProgressState for spinner/progress_bar rendering.
-            self.syncAnimationState();
-
             self.scene.font_family = &self.font_family;
-            self.scene.dpi_scale = self.dpi_scale;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
 
             if (self.atlas_cpu.generation != self.atlas_generation_seen) {
@@ -1149,30 +1002,6 @@ pub const AppInner = struct {
                 self.atlas_generation_seen = self.atlas_cpu.generation;
             }
 
-            // M13-03 RD2: Re-upload subpixel atlas if CPU atlas changed.
-            if (self.subpixel_text and self.subpixel_atlas_cpu.generation != self.subpixel_atlas_generation_seen) {
-                const vk = self.backend._impl_vulkan() catch {
-                    self.backend.endFrame();
-                    continue;
-                };
-                self.subpixel_atlas_gpu.deinit(vk.device);
-                const new_sp_gpu = GpuAtlas.uploadRgba8(
-                    vk.device,
-                    vk.phys_device,
-                    vk.cmd_pool,
-                    vk.graphics_queue,
-                    self.subpixel_atlas_cpu.pixels(),
-                    self.subpixel_atlas_cpu.width,
-                    self.subpixel_atlas_cpu.height,
-                ) catch {
-                    self.backend.endFrame();
-                    continue;
-                };
-                self.subpixel_atlas_gpu = new_sp_gpu;
-                self.backend.updateSubpixelAtlas(&self.subpixel_atlas_gpu);
-                self.subpixel_atlas_generation_seen = self.subpixel_atlas_cpu.generation;
-            }
-
             const s = self.scene.store();
             if (s.live > 0) {
                 var idx: u32 = 0;
@@ -1180,7 +1009,7 @@ pub const AppInner = struct {
                     const id = mod04.ElementId{ .index = idx, .gen = s.gen.items[idx] };
                     if (!s.isValid(id)) continue;
                     if (s.parentOf(id) == null) {
-                        mod04.solve(s, id, self.viewport_constraints, self.scratch, self.dpi_scale);
+                        mod04.solve(s, id, self.viewport_constraints, self.scratch, 1.0);
                         break;
                     }
                 }
@@ -1204,9 +1033,6 @@ pub const AppInner = struct {
                     .image_atlas = &self.image_atlas,
                     .font = self.font_family.face(false, false),
                     .tokens = self.tokens,
-                    .subpixel_atlas = &self.subpixel_atlas_cpu,
-                    .subpixel_text = self.subpixel_text,
-                    .sdf_atlas = &self.sdf_atlas_cpu,
                 },
             ) catch blk: {
                 break :blk @as([]DrawCommand, &[_]DrawCommand{});
@@ -1216,15 +1042,37 @@ pub const AppInner = struct {
             // Fire per-frame app-level tick (e.g. toast expiry + overlay rebuild).
             if (self.per_frame_app_fn) |f| f(self);
 
+            // RN11 — Consume chart_cmds injected by per_frame_app_fn.
+            const chart_slice: []const DrawCommand = if (self.chart_cmds) |cc| cc else &[_]DrawCommand{};
+            defer {
+                if (self.chart_cmds) |cc| {
+                    // Free sub-allocations within DrawCommands (polyline points, filled_path verts).
+                    for (cc) |cmd| {
+                        switch (cmd) {
+                            .polyline => |p| self.gpa.free(p.points),
+                            .filled_path => |fp| {
+                                self.gpa.free(fp.vertices);
+                                self.gpa.free(fp.indices);
+                            },
+                            else => {},
+                        }
+                    }
+                    self.gpa.free(cc);
+                }
+                self.chart_cmds = null;
+            }
+
             const overlay_cmds = self.overlay.flatten(self.gpa) catch &[_]DrawCommand{};
             defer if (overlay_cmds.len > 0) self.gpa.free(overlay_cmds);
 
             const all_cmds = blk: {
-                if (overlay_cmds.len == 0) break :blk main_cmds;
-                const combined = self.gpa.alloc(DrawCommand, main_cmds.len + overlay_cmds.len) catch main_cmds;
-                if (combined.len == main_cmds.len + overlay_cmds.len) {
+                const total = main_cmds.len + chart_slice.len + overlay_cmds.len;
+                if (total == main_cmds.len) break :blk main_cmds;
+                const combined = self.gpa.alloc(DrawCommand, total) catch main_cmds;
+                if (combined.len == total) {
                     @memcpy(combined[0..main_cmds.len], main_cmds);
-                    @memcpy(combined[main_cmds.len..], overlay_cmds);
+                    @memcpy(combined[main_cmds.len..][0..chart_slice.len], chart_slice);
+                    @memcpy(combined[main_cmds.len + chart_slice.len ..], overlay_cmds);
                 }
                 break :blk combined;
             };
@@ -1274,9 +1122,9 @@ pub const AppInner = struct {
                 .a = 1.0,
             });
             self.backend.drawFrame(all_cmds2, mod01.AtlasHandles{
-                .glyph = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.atlas_gpu)) },
-                .sdf   = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.sdf_atlas_gpu)) },
-                .image = .{ .backend_obj = @as(*anyopaque, @ptrCast(&self.gpu_image_atlas)) },
+                .glyph = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
+                .sdf   = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
+                .image = .{ .backend_obj = @constCast(@ptrCast(&self.atlas_gpu)) },
             });
             self.backend.endFrame();
 
@@ -1294,9 +1142,6 @@ pub const AppInner = struct {
                 .dirty_count = @intCast(dirty_count2),
                 .element_count = live_count,
             });
-
-            // RF0: Pump tray message queue (Win32 only; no-op on Linux).
-            if (self._tray) |t| t.pumpMessages();
 
             self.scene.elements.dirty.unsetAll();
 
@@ -1319,319 +1164,10 @@ pub const AppInner = struct {
     }
 
     // -----------------------------------------------------------------------
-    // M14-01 — RD6: Animation timeline management
-    // -----------------------------------------------------------------------
-
-    /// Advance all active animation timelines by one frame.
-    /// Must be called once per rendered frame, after advancing frame_count.
-    pub fn tickAnimations(self: *AppInner) void {
-        if (self.prefer_reduced_motion) {
-            for (self.anim_timelines.items) |*tl| {
-                if (tl.running) {
-                    tl.elapsed = tl.duration;
-                    tl.value = 1.0;
-                    tl.running = false;
-                }
-            }
-            return;
-        }
-        for (self.anim_timelines.items) |*tl| {
-            if (tl.running) {
-                tl.tick();
-            }
-        }
-    }
-
-    /// Allocate a new animation timeline in the collection and return its index.
-    pub fn allocateTimeline(self: *AppInner, tl: anim_timeline_mod.AnimTimeline) !u32 {
-        const idx = self.anim_timelines.items.len;
-        try self.anim_timelines.append(self.gpa, tl);
-        // Start the new timeline immediately.
-        self.anim_timelines.items[idx].start();
-        return @intCast(idx);
-    }
-
-    /// After Scene.instantiate, iterate the element tree and allocate AnimTimelines
-    /// for spinner and indeterminate progress bar elements.
-    pub fn initAnimationTimelines(self: *AppInner) !void {
-        for (0..self.scene._kind.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            if (idx >= self.scene._progress_state.items.len) continue;
-            switch (self.scene.kindOfIdx(idx)) {
-                .spinner => {
-                    const tl_idx = try self.allocateTimeline(.{
-                        .duration = 80, // 80 frames = one full rotation (8 ticks × 10 frames per tick)
-                        .repeating = true,
-                        .easing = .linear,
-                    });
-                    self.scene.progressStateOf(idx).anim_timeline_idx = tl_idx;
-                },
-                .progress_bar => {
-                    const ps = self.scene.progressStateOf(idx);
-                    if (ps.indeterminate) {
-                        const tl_idx = try self.allocateTimeline(.{
-                            .duration = 120, // 120 frames per cycle
-                            .repeating = true,
-                            .easing = .linear,
-                        });
-                        ps.anim_timeline_idx = tl_idx;
-                    }
-                },
-                else => {},
-            }
-        }
-    }
-
-    pub fn setReducedMotion(self: *AppInner, enabled: bool) void {
-        self.prefer_reduced_motion = enabled;
-    }
-
-    /// Sync animation timeline values into ProgressState for elements with active timelines.
-    /// Also handles M14-02 transition style lerps and M14-03 enter/exit animation state.
-    /// Called each frame after tickAnimations() and before buildDrawList().
-    fn syncAnimationState(self: *AppInner) void {
-        // Sync progress state from timelines.
-        for (0..self.scene._kind.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            if (idx >= self.scene._progress_state.items.len) continue;
-            const kind = self.scene.kindOfIdx(idx);
-            if (kind != .spinner and kind != .progress_bar) continue;
-            const ps = self.scene.progressStateOf(idx);
-            if (ps.anim_timeline_idx == 0xFFFFFFFF) continue;
-            if (ps.anim_timeline_idx >= self.anim_timelines.items.len) continue;
-            const tl = self.anim_timelines.items[ps.anim_timeline_idx];
-            // Store the raw timeline value [0,1) for rendering.
-            ps.anim_frame_value = tl.value;
-        }
-
-        // M14-02: Sync transition styles into _style.
-        for (0..self.scene._transition_state.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            if (idx >= self.scene._style.items.len) continue;
-            const ts = self.scene.transitionStateOf(idx);
-            var out = self.scene._style.items[idx];
-
-            if (ts.active_opacity and ts.opacity_timeline_idx != 0xFFFFFFFF) {
-                if (ts.opacity_timeline_idx < self.anim_timelines.items.len) {
-                    const t = self.anim_timelines.items[ts.opacity_timeline_idx].value;
-                    out.opacity = ts.from_opacity + (ts.to_opacity - ts.from_opacity) * t;
-                }
-            }
-            if (ts.active_background and ts.background_timeline_idx != 0xFFFFFFFF) {
-                if (ts.background_timeline_idx < self.anim_timelines.items.len) {
-                    const t = self.anim_timelines.items[ts.background_timeline_idx].value;
-                    out.background = mod09.lerpColor(ts.from_background, ts.to_background, t);
-                }
-            }
-
-            self.scene._style.items[idx] = out;
-        }
-
-        // M14-03: Sync enter/exit animation state and handle completed enter/exit.
-        for (0..self.scene._enter_exit_state.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            if (idx >= self.scene._style.items.len) continue;
-            const ees = self.scene.enterExitStateOf(idx);
-
-            // Entering: fade from 0 to 1.
-            if (ees.entering and ees.enter_timeline_idx != 0xFFFFFFFF) {
-                if (ees.enter_timeline_idx < self.anim_timelines.items.len) {
-                    const t = self.anim_timelines.items[ees.enter_timeline_idx].value;
-                    self.scene._style.items[idx].opacity = t;
-                }
-            }
-            // Exiting: fade from 1 to 0.
-            if (ees.exiting and ees.exit_timeline_idx != 0xFFFFFFFF) {
-                if (ees.exit_timeline_idx < self.anim_timelines.items.len) {
-                    const t = self.anim_timelines.items[ees.exit_timeline_idx].value;
-                    self.scene._style.items[idx].opacity = 1.0 - t;
-                }
-            }
-
-            // Check completed exit animations.
-            if (ees.exiting and ees.exit_timeline_idx != 0xFFFFFFFF) {
-                if (ees.exit_timeline_idx >= self.anim_timelines.items.len or
-                    !self.anim_timelines.items[ees.exit_timeline_idx].running)
-                {
-                    // Exit animation complete.
-                    ees.exiting = false;
-                    ees.exit_timeline_idx = 0xFFFFFFFF;
-                    if (ees.pending_hidden) {
-                        self.scene.setHidden(idx, true);
-                        ees.pending_hidden = false;
-                    }
-                }
-            }
-            // Check completed enter animations.
-            if (ees.entering and ees.enter_timeline_idx != 0xFFFFFFFF) {
-                if (ees.enter_timeline_idx >= self.anim_timelines.items.len or
-                    !self.anim_timelines.items[ees.enter_timeline_idx].running)
-                {
-                    ees.entering = false;
-                    ees.enter_timeline_idx = 0xFFFFFFFF;
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // M14-02 — Transition detection
-    // -----------------------------------------------------------------------
-
-    /// Detect style changes and start transition timelines when transition-* classes
-    /// are active. Called each frame after refreshBindings().
-    fn detectTransitions(self: *AppInner) void {
-        const s = self.scene.store();
-        // Ensure _prev_styles is sized correctly.
-        if (self._prev_styles.items.len < s.gen.items.len) {
-            self._prev_styles.resize(self.gpa, s.gen.items.len) catch {};
-        }
-        for (0..s.gen.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            const id = store_mod.ElementId{ .index = idx, .gen = s.gen.items[idx] };
-            if (!s.isValid(id)) continue;
-            if (idx >= self.scene._style.items.len) continue;
-            const current = self.scene._style.items[idx];
-            const prev = if (idx < self._prev_styles.items.len) self._prev_styles.items[idx] else mod05.ComputedStyle{};
-            const style = current; // reuse
-            if (idx >= self.scene._transition_state.items.len) continue;
-            const ts = self.scene.transitionStateOf(idx);
-
-            // Opacity transition.
-            if (style.transition_opacity or style.transition_colors) {
-                if (style.transition_duration > 0 and prev.opacity != current.opacity) {
-                    if (!ts.active_opacity) {
-                        ts.active_opacity = true;
-                        ts.from_opacity = prev.opacity;
-                        ts.to_opacity = current.opacity;
-                        ts.opacity_timeline_idx = self.allocateTimeline(.{
-                            .duration = style.transition_duration,
-                            .easing = .linear,
-                        }) catch {
-                            ts.active_opacity = false;
-                            return;
-                        };
-                        if (idx < self.scene.elements.dirty.bit_length)
-                            self.scene.elements.dirty.set(idx);
-                    }
-                }
-            }
-
-            // Background transition.
-            if (style.transition_background or style.transition_colors) {
-                if (style.transition_duration > 0 and !colorEq(prev.background, current.background)) {
-                    if (!ts.active_background) {
-                        ts.active_background = true;
-                        ts.from_background = prev.background;
-                        ts.to_background = current.background;
-                        ts.background_timeline_idx = self.allocateTimeline(.{
-                            .duration = style.transition_duration,
-                            .easing = .linear,
-                        }) catch {
-                            ts.active_background = false;
-                            return;
-                        };
-                        if (idx < self.scene.elements.dirty.bit_length)
-                            self.scene.elements.dirty.set(idx);
-                    }
-                }
-            }
-
-            // Update prev for next frame.
-            if (idx < self._prev_styles.items.len) {
-                self._prev_styles.items[idx] = current;
-            }
-        }
-
-        // After ticking, check for completed transition timelines and reset them.
-        for (0..self.scene._transition_state.items.len) |i| {
-            const idx = @as(u32, @intCast(i));
-            const ts = self.scene.transitionStateOf(idx);
-            if (ts.active_opacity and ts.opacity_timeline_idx != 0xFFFFFFFF) {
-                if (ts.opacity_timeline_idx >= self.anim_timelines.items.len or
-                    !self.anim_timelines.items[ts.opacity_timeline_idx].running)
-                {
-                    ts.active_opacity = false;
-                    ts.opacity_timeline_idx = 0xFFFFFFFF;
-                }
-            }
-            if (ts.active_background and ts.background_timeline_idx != 0xFFFFFFFF) {
-                if (ts.background_timeline_idx >= self.anim_timelines.items.len or
-                    !self.anim_timelines.items[ts.background_timeline_idx].running)
-                {
-                    ts.active_background = false;
-                    ts.background_timeline_idx = 0xFFFFFFFF;
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // M14-03 — Enter/exit animation handler
-    // -----------------------------------------------------------------------
-
-    /// Set hidden state with optional enter/exit animation. Falls back to
-    /// Scene.setHidden when no animation is needed or when reduced motion is active.
-    fn setHiddenWithAnimation(self: *AppInner, idx: u32, hidden: bool) void {
-        if (idx >= self.scene._enter_exit_state.items.len) {
-            self.scene.setHidden(idx, hidden);
-            return;
-        }
-        const ees = self.scene.enterExitStateOf(idx);
-
-        if (self.prefer_reduced_motion) {
-            if (hidden) {
-                ees.exiting = false;
-                ees.exit_timeline_idx = 0xFFFFFFFF;
-                ees.entering = false;
-                ees.enter_timeline_idx = 0xFFFFFFFF;
-            }
-            self.scene.setHidden(idx, hidden);
-            return;
-        }
-
-        if (hidden) {
-            // Exiting.
-            if (idx < self.scene._style.items.len and self.scene._style.items[idx].animate_out) {
-                ees.exiting = true;
-                ees.pending_hidden = true;
-                ees.exit_timeline_idx = self.allocateTimeline(.{
-                    .duration = if (idx < self.scene._style.items.len) self.scene._style.items[idx].transition_duration else 60,
-                    .easing = .ease_in_out,
-                }) catch { self.scene.setHidden(idx, true); return; };
-                // Keep the element visible (do NOT call setHidden yet).
-                // Mark dirty so it keeps rendering during exit.
-                if (idx < self.scene.elements.dirty.bit_length)
-                    self.scene.elements.dirty.set(idx);
-            } else {
-                self.scene.setHidden(idx, true);
-            }
-        } else {
-            // Entering.
-            if (idx < self.scene._style.items.len and self.scene._style.items[idx].animate_in) {
-                self.scene.setHidden(idx, false); // Show immediately for layout.
-                ees.entering = true;
-                ees.enter_timeline_idx = self.allocateTimeline(.{
-                    .duration = if (idx < self.scene._style.items.len) self.scene._style.items[idx].transition_duration else 60,
-                    .easing = .ease_in_out,
-                }) catch { return; };
-                if (idx < self.scene.elements.dirty.bit_length)
-                    self.scene.elements.dirty.set(idx);
-            } else {
-                self.scene.setHidden(idx, false);
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
     // Deinit (reverse init order, R10)
     // -----------------------------------------------------------------------
 
     pub fn deinit(self: *AppInner) void {
-        // RG2/RG3: Deinit accessibility bridges
-        if (self.atspi_service) |*svc| svc.deinit();
-        if (self.uia_bridge) |*br| br.deinit();
-
         // RA4: Save window state before tearing down the window.
         if (self.window_state_mgr) |*wsm| {
             const state = window_state_mod.readFromPlatform(&self.platform);
@@ -1648,10 +1184,6 @@ pub const AppInner = struct {
         self.context_menu_manager.deinit(self.gpa);
         // 1. bindings (no GPU resources)
         self.bindings.deinit(self.gpa);
-        // 1a. animation timelines (no GPU resources)
-        self.anim_timelines.deinit(self.gpa);
-        // 1ab. prev_styles (M14-02)
-        self._prev_styles.deinit(self.gpa);
         // 1b. overlay (no GPU resources)
         self.overlay.deinit();
         // 1c. image_atlas CPU
@@ -1666,10 +1198,6 @@ pub const AppInner = struct {
         }
         // 3. atlas_cpu
         self.atlas_cpu.deinit();
-        // 3b. M13-03 RD2: subpixel atlas CPU (GPU handles owned by VulkanImpl → deinitQuadPipeline).
-        self.subpixel_atlas_cpu.deinit();
-        // 3c. M13-04 RD3: SDF atlas CPU (GPU handles owned by VulkanImpl → deinitQuadPipeline).
-        self.sdf_atlas_cpu.deinit(self.gpa);
         // 4. font_family (R60)
         self.font_family.deinit();
         // 5. scratch
@@ -1739,11 +1267,6 @@ pub const AppInner = struct {
             const base = mod07.defaultStyleFor(kind, self.tokens);
             self.scene._style.items[idx] = self.resolveStyleForIdx(idx, base);
         }
-        // Sync prev_styles so transitions don't fire spuriously after a theme swap.
-        if (self._prev_styles.items.len < self.scene._style.items.len) {
-            self._prev_styles.resize(self.gpa, self.scene._style.items.len) catch {};
-        }
-        @memcpy(self._prev_styles.items[0..@min(self._prev_styles.items.len, self.scene._style.items.len)], self.scene._style.items[0..@min(self._prev_styles.items.len, self.scene._style.items.len)]);
     }
 
     /// Merge class-defined overrides on top of `base` for element `idx`.
@@ -1843,11 +1366,7 @@ pub const AppInner = struct {
 
         // 5. Re-run measure pass.
         self.scene.font_family = &self.font_family;
-        self.scene.dpi_scale = self.dpi_scale;
         self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
-
-        // RD9: Re-allocate animation timelines for spinner/progress_bar elements.
-        self.initAnimationTimelines() catch {};
 
         // 6. Mark all elements dirty so the next frame paints the new tree.
         self.scene.elements.markAllDirty();

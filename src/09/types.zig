@@ -1125,18 +1125,18 @@ pub fn buildDrawList(
             .checkbox => {
                 // R70 — Polished checkbox: box + checkmark as two FilledRect tick strokes.
                 const st = scene.checkboxStateOf(id.index);
-                const S: f32 = @round(style.font_size * scene.dpi_scale); // box side length (revised decision)
+                const S: f32 = 16.0; // fixed 16px — shadcn Checkbox size
                 const bx = computed.x;
                 const by = computed.y + (computed.h - S) / 2.0;
                 // Box background: accent when checked, raised (white) when unchecked so it
                 // is visually distinct from the card surface background.
                 const bg_col = if (st.checked) tokens.accent else tokens.bg_raised;
-                try emitFilledRectAA(&list, alloc, .{ .x = bx, .y = by, .w = S, .h = S }, toColor09(applyOpacity(bg_col, effective_alpha)), 2.0);
+                try emitFilledRectAA(&list, alloc, .{ .x = bx, .y = by, .w = S, .h = S }, toColor09(applyOpacity(bg_col, effective_alpha)), 3.0);
                 // Box border: focus = blue ring, hover = strong, else default.
                 const border_col = if (pseudo.focus) theme_mod.Color.hex(0x0066FF)
                     else if (st.hovered) tokens.border_strong
                     else tokens.border_default;
-                const border_w: f32 = if (pseudo.focus) 2.0 else 1.5;
+                const border_w: f32 = if (pseudo.focus) 2.0 else 1.0;
                 try list.append(alloc, .{ .border_rect = .{
                     .rect = .{ .x = bx, .y = by, .w = S, .h = S },
                     .color = toColor09(applyOpacity(border_col, effective_alpha)),
@@ -1175,32 +1175,41 @@ pub fn buildDrawList(
                 }
             },
             .radio => {
-                // R71 — Radio button: outer ring + inner fill + accent dot if selected.
-                // Uses scanline circle approximation (GPU renderer ignores FilledRect.radius).
+                // RN12 — Shadcn-equivalent radio: fixed 16px, border changes on select, clear dot.
                 const rs = scene.radioStateOf(id.index);
-                const S: f32 = @round(style.font_size * scene.dpi_scale); // circle diameter
-                const r = S / 2.0;
-                // Circle center: horizontally left-aligned, vertically centered in the element.
+                const S: f32 = 16.0; // fixed 16px — shadcn RadioGroupItem size
+                const r = S / 2.0;   // 8px
                 const ccx = computed.x + r;
                 const ccy = computed.y + computed.h / 2.0;
-                // Outer filled circle in ring color:
-                const ring_col = if (rs.hovered) tokens.border_strong else tokens.border_default;
+
+                // 1. White background fill (so it reads as a circle on any background).
+                try emitFilledCircle(&list, alloc, ccx, ccy, r, toColor09(applyOpacity(tokens.bg_raised, effective_alpha)));
+
+                // 2. Border ring: color changes with state (1.5px simulated by concentric circles).
+                const ring_col = if (rs.selected)
+                    tokens.accent          // zinc-900: strong selected border
+                else if (rs.hovered)
+                    tokens.border_strong   // zinc-400: hover
+                else
+                    tokens.border_default; // zinc-200: default
                 try emitFilledCircle(&list, alloc, ccx, ccy, r, toColor09(applyOpacity(ring_col, effective_alpha)));
-                // Inner filled circle in surface color (creates visible ring):
-                if (r > 2.0) {
-                    try emitFilledCircle(&list, alloc, ccx, ccy, r - 2.0, toColor09(applyOpacity(tokens.bg_surface, effective_alpha)));
-                }
-                // Accent dot if selected:
+                try emitFilledCircle(&list, alloc, ccx, ccy, r - 1.5, toColor09(applyOpacity(tokens.bg_raised, effective_alpha)));
+
+                // 3. Selection dot (shadcn uses ~6px dot at 16px size).
                 if (rs.selected) {
-                    const dot_r = r * 0.4;
-                    if (dot_r >= 0.5) {
-                        try emitFilledCircle(&list, alloc, ccx, ccy, dot_r, toColor09(applyOpacity(tokens.accent, effective_alpha)));
-                    }
+                    try emitFilledCircle(&list, alloc, ccx, ccy, r * 0.47, toColor09(applyOpacity(tokens.accent, effective_alpha)));
                 }
-                // Emit label text to the right of the circle.
+
+                // 4. Focus ring (offset ring when keyboard-focused).
+                if (pseudo.focus) {
+                    try emitFilledCircle(&list, alloc, ccx, ccy, r + 4, toColor09(.{ .r = tokens.accent.r, .g = tokens.accent.g, .b = tokens.accent.b, .a = @intFromFloat(60.0 * effective_alpha) }));
+                    try emitFilledCircle(&list, alloc, ccx, ccy, r + 2, toColor09(applyOpacity(tokens.bg_canvas, effective_alpha)));
+                }
+
+                // 5. Label text to the right.
                 if (scene.textOf(id)) |label| {
                     if (label.len > 0) {
-                        const label_rect = store_mod.Rect{ .x = computed.x + S + 4.0, .y = computed.y, .w = computed.w - S - 4.0, .h = computed.h };
+                        const label_rect = store_mod.Rect{ .x = computed.x + S + 6.0, .y = computed.y, .w = computed.w - S - 6.0, .h = computed.h };
                         const r_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
                         try emitGlyphs(&list, alloc, id, label, label_rect, &style, atlas, r_font, effective_alpha, scene.dpi_scale, subpixel_atlas, subpixel_text);
                     }

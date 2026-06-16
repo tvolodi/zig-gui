@@ -1,3 +1,6 @@
+// GENERATED MIRROR — do not hand-edit. Canonical implementation lives in src/04/types.zig.
+// This file is NOT compiled by any build target (INV-5.7, SR-03 2026-06-14).
+//
 //! 04 — Layout engine — types.zig  (reconciled with module 03)
 //!
 //! This file IS the contract (INV-5.1). The layout engine's only public entry point is

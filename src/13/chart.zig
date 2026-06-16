@@ -5,9 +5,17 @@ const axes_mod = @import("axes.zig");
 const marks_mod = @import("marks.zig");
 const types01 = @import("../01/types.zig");
 
-pub const ChartKind = enum { line, bar, area, scatter, pie };
+pub const ChartKind = enum { line, bar, area, scatter, pie, gauge, map };
 pub const Scale = scale_mod.Scale;
 pub const ChartFrame = axes_mod.ChartFrame;
+pub const MapMarker = marks_mod.MapMarker;
+
+// Re-export axes API for use by demo screens (single named module import).
+pub const Rect09 = axes_mod.Rect09;
+pub const AxisOptions = axes_mod.AxisOptions;
+pub const makeFrame = axes_mod.makeFrame;
+pub const drawAxes = axes_mod.drawAxes;
+pub const DrawCmd = axes_mod.DrawCmd;
 
 pub const XData = union(enum) {
     categories: []const []const u8,
@@ -64,6 +72,18 @@ pub const Chart = struct {
     callouts: []const Callout = &.{},
     /// RN7 — optional crosshair guide (ignored when .enabled = false).
     crosshair: CrosshairOptions = .{},
+    /// RN9 — Gauge fill value [0, 1]. Ignored for non-gauge kinds.
+    gauge_value: f64 = 0.0,
+    /// RN9 — Background arc color token (e.g. "axis").
+    gauge_bg_token: []const u8 = "axis",
+    /// RN9 — Fill arc color token (e.g. "accent").
+    gauge_fill_token: []const u8 = "accent",
+    /// RN10 — Map data point markers.
+    map_markers: []const MapMarker = &.{},
+    /// RN10 — Ocean background color token.
+    map_ocean_token: []const u8 = "surface",
+    /// RN10 — Land fill color token.
+    map_land_token: []const u8 = "axis",
 
     pub fn render(
         self: *const Chart,

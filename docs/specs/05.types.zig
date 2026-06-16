@@ -1,3 +1,6 @@
+// GENERATED MIRROR — do not hand-edit. Canonical implementation lives in src/05/types.zig.
+// This file is NOT compiled by any build target (INV-5.7, SR-03 2026-06-14).
+//
 //! 05 — Theme — types.zig
 //!
 //! Contract (INV-5.1). The struct shapes (Color, Palette, Tokens, ComputedStyle) and all
@@ -9,7 +12,7 @@
 //! spec.md "Build-order correction"), so this import is legal.
 
 const std = @import("std");
-const store = @import("./03.types.zig");
+const store = @import("../03_element_store/types.zig");
 
 pub const Insets = store.Insets;
 

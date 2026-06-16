@@ -48,6 +48,7 @@ name navigates to it. The content area (884 px wide) fills the remaining space.
 │ • Notify │                                                        │
 │ • Layout │                                                        │
 │ • State  │                                                        │
+│ • Dashboard │                                                    │
 └──────────┴───────────────────────────────────────────────────────┘
 ```
 
@@ -364,6 +365,29 @@ An empty-state message `"No items yet — add one above"` is shown when the list
 
 ---
 
+### Screen 11 — Dashboard
+
+**Purpose:** Demonstrate M27 features (RN1–RN7) in a Finova-style financial dashboard layout
+that mirrors a real-world asset management UI.
+
+**Content:**
+- **Overview row**: "Overview" heading + three filter Dropdowns (Currency, Assets, Last 30 days).
+- **KPI cards**: Four equal-width cards showing asset totals:
+  - *Asset Total* — `MaskableValue` widget showing "$32,499.93"; eye-button toggles visibility (RN5).
+  - *Asset in USD* — formatted via `formatCurrency(.usd, en_US)`; `TrendBadge −0.33%` (RN4, RN6).
+  - *Asset in SGD* — `formatCurrency(.sgd, en_US)`; `TrendBadge +12.95%`.
+  - *Asset in EUR* — `formatCurrency(.eur, de_DE)` → EU grouping; `TrendBadge +11.65%`.
+- **Chart area**: "Asset Total Statistic" card with crosshair chart placeholder (RN7 noted);
+  "Top Assets" list with five assets, each having a `TrendBadge` return indicator.
+- **Bottom row**: Transactions list (six items with Buy/Sell pills); Types legend (six categories
+  with color dots and values); Members section (five members with avatar placeholders and
+  percentages, donut-chart placeholder noted for RN1+RN2).
+
+**Framework features exercised:** `MaskableValue` (RN5), `TrendBadge` (RN6),
+`formatCurrency` (RN4), `Dropdown`, `Card`, `Row`, `Column`, `ScrollView`, `Text`.
+
+---
+
 ## 4. Persistent sidebar
 
 The sidebar is a `Column` (`w-36 bg-surface`) with one `Button` per screen in ghost style.
@@ -414,6 +438,7 @@ src/demo/
     notifications.zig — Screen 6 ScreenFn
     layout.zig       — Screen 7 ScreenFn
     state.zig        — Screen 8 ScreenFn + counter/list state
+    dashboard.zig    — Screen 11 ScreenFn (Dashboard / M27 feature showcase)
   shared/
     sidebar.zig      — buildSidebar(scene, tokens, active_screen) ScreenFn-compatible helper
     row_data.zig     — deterministic fake data generation (no file I/O)

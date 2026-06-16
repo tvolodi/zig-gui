@@ -2,7 +2,6 @@
 const std = @import("std");
 const chart_mod = @import("chart.zig");
 const axes_mod = @import("axes.zig");
-const tess = @import("tessellate.zig");
 const types01 = @import("../01/types.zig");
 const Vec2 = types01.Vec2;
 const Color09 = types01.Color09;
@@ -10,6 +9,14 @@ const Color09 = types01.Color09;
 const Chart = chart_mod.Chart;
 const ChartFrame = axes_mod.ChartFrame;
 const DrawCmd = types01.DrawCommand;
+
+/// RN10 — A dot marker positioned on the world map.
+pub const MapMarker = struct {
+    norm_x: f32,
+    norm_y: f32,
+    radius: f32 = 4.0,
+    color_token: []const u8 = "accent",
+};
 
 /// Resolve a color token name to a Color09 (simplified — uses fixed semantic palette).
 /// In production this reads from the Tokens struct passed from module 05 (INV-4.3).
@@ -34,6 +41,13 @@ pub fn renderChart(
     out: *std.ArrayListUnmanaged(DrawCmd),
     allocator: std.mem.Allocator,
 ) !void {
+    // RN9/RN10 — gauge and map do not iterate over series; handle and return early.
+    switch (chart.kind) {
+        .gauge => return renderGauge(chart.gauge_value, chart.gauge_bg_token, chart.gauge_fill_token, frame, out, allocator),
+        .map   => return renderWorldMap(chart.map_markers, chart.map_ocean_token, chart.map_land_token, frame, out, allocator),
+        else   => {},
+    }
+
     for (chart.series) |series| {
         if (!series.visible) continue;
         const color = resolveToken(series.color_token);
@@ -43,6 +57,7 @@ pub fn renderChart(
             .bar     => try renderBar(series, chart, frame, color, out, allocator),
             .scatter => try renderScatter(series, frame, color, out, allocator),
             .pie     => try renderPie(series, chart, frame, color, out, allocator),
+            .gauge, .map => {}, // handled above, never reached via series loop
         }
     }
 
@@ -98,32 +113,41 @@ fn renderArea(
 ) !void {
     if (series.values.len < 2) return;
     const pr = frame.plot_rect;
-    const n = series.values.len;
-    // vertices: top line + bottom baseline (reverse order)
-    const verts = try allocator.alloc(Vec2, n * 2);
+    const baseline = pr.y + pr.h;
+
+    // The Vulkan backend renders filled_path/polyline as no-ops.
+    // Emit aa_filled_rect column segments instead: each column spans from
+    // x[i] to x[i+1], from min(y[i], y[i+1]) down to the baseline.
+    var fill_color = color;
+    fill_color.a = 120;
+
+    var prev_px: f32 = 0;
+    var prev_py: f32 = 0;
     for (series.values, 0..) |v, i| {
         const xi = @as(f64, @floatFromInt(i));
         const px = frame.x.map(xi);
         const py = pr.y + pr.h - (frame.y.map(v) - pr.y);
-        const baseline = pr.y + pr.h;
-        verts[i] = .{ .x = px, .y = py };
-        verts[n * 2 - 1 - i] = .{ .x = px, .y = baseline };
+        if (i > 0 and px > prev_px) {
+            // Area fill column.
+            const col_top = @min(prev_py, py);
+            const col_h = baseline - col_top;
+            if (col_h > 0) {
+                try out.append(allocator, .{ .aa_filled_rect = .{
+                    .rect = .{ .x = prev_px, .y = col_top, .w = px - prev_px, .h = col_h },
+                    .color = fill_color,
+                    .radius = 0,
+                }});
+            }
+            // Top edge line (2 px tall, spanning the column width at the top).
+            try out.append(allocator, .{ .aa_filled_rect = .{
+                .rect = .{ .x = prev_px, .y = col_top - 1, .w = px - prev_px, .h = 2.0 },
+                .color = color,
+                .radius = 0,
+            }});
+        }
+        prev_px = px;
+        prev_py = py;
     }
-    // Triangulate as fan
-    const fan = try tess.triangulateConvex(allocator, verts);
-    var fill_color = color;
-    fill_color.a = 120;
-    try out.append(allocator, .{ .filled_path = .{
-        .vertices = fan.verts,
-        .indices = fan.indices,
-        .color = fill_color,
-    }});
-    // Top line
-    const top_pts = try allocator.dupe(Vec2, verts[0..n]);
-    try out.append(allocator, .{ .polyline = .{
-        .points = top_pts, .width = 2.0, .color = color,
-        .closed = false, .join = .miter,
-    }});
 }
 
 fn renderBar(
@@ -432,6 +456,158 @@ fn renderCrosshair(
             .color  = color,
             .closed = false,
             .join   = .miter,
+        }});
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RN9 — Gauge chart (semi-circle arc meter)
+// ---------------------------------------------------------------------------
+
+/// RN9 — Semi-circle arc meter showing a value 0..1.
+/// Arc sweeps through the TOP of the circle (left → top → right).
+/// Angle convention: start_rad = -π (left = 9 o'clock), end_rad = 0 (right = 3 o'clock).
+fn renderGauge(
+    value: f64,
+    bg_token: []const u8,
+    fill_token: []const u8,
+    frame: *const ChartFrame,
+    out: *std.ArrayListUnmanaged(DrawCmd),
+    allocator: std.mem.Allocator,
+) !void {
+    const pr = frame.plot_rect;
+    const cx = pr.x + pr.w * 0.5;
+    // Gauge center: lower portion of plot rect so the arc dome has headroom.
+    const cy = pr.y + pr.h * 0.72;
+
+    const outer_r = @min(pr.w, pr.h * 1.3) * 0.46;
+    const inner_r = outer_r * 0.72;
+    const arc_r   = (outer_r + inner_r) * 0.5;
+    const arc_w   = outer_r - inner_r;
+
+    const pi: f32 = std.math.pi;
+    const start_rad: f32 = -pi;   // left endpoint of gauge (9 o'clock)
+    const end_rad: f32   = 0.0;   // right endpoint (3 o'clock)
+
+    const clamped: f32 = @floatCast(@max(0.0, @min(1.0, value)));
+    const fill_end: f32 = start_rad + clamped * pi;
+
+    // Background arc (full 180° sweep, light color).
+    try out.append(allocator, .{ .arc = .{
+        .center    = .{ .x = cx, .y = cy },
+        .radius    = arc_r,
+        .start_rad = start_rad,
+        .end_rad   = end_rad,
+        .width     = arc_w,
+        .color     = resolveToken(bg_token),
+    }});
+
+    // Fill arc (value portion, accent color).
+    if (clamped > 0.001) {
+        try out.append(allocator, .{ .arc = .{
+            .center    = .{ .x = cx, .y = cy },
+            .radius    = arc_r,
+            .start_rad = start_rad,
+            .end_rad   = fill_end,
+            .width     = arc_w,
+            .color     = resolveToken(fill_token),
+        }});
+    }
+
+    // End-cap dots at 9 o'clock and 3 o'clock positions for a polished look.
+    const cap_r: f32 = arc_w * 0.5;
+    // Left cap (9 o'clock)
+    try out.append(allocator, .{ .aa_filled_circle = .{
+        .center_x = cx - arc_r,
+        .center_y = cy,
+        .radius   = cap_r,
+        .color    = resolveToken(bg_token),
+    }});
+    // Right cap (3 o'clock)
+    try out.append(allocator, .{ .aa_filled_circle = .{
+        .center_x = cx + arc_r,
+        .center_y = cy,
+        .radius   = cap_r,
+        .color    = resolveToken(bg_token),
+    }});
+    // Tip of fill arc (polished cap at the fill endpoint)
+    if (clamped > 0.001 and clamped < 0.999) {
+        const tip_x = cx + arc_r * @cos(fill_end);
+        const tip_y = cy + arc_r * @sin(fill_end);
+        try out.append(allocator, .{ .aa_filled_circle = .{
+            .center_x = tip_x,
+            .center_y = tip_y,
+            .radius   = cap_r,
+            .color    = resolveToken(fill_token),
+        }});
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RN10 — World map visualization
+// ---------------------------------------------------------------------------
+
+/// RN10 — Simplified world map with hardcoded continent outlines and dot markers.
+fn renderWorldMap(
+    markers: []const MapMarker,
+    ocean_token: []const u8,
+    land_token: []const u8,
+    frame: *const ChartFrame,
+    out: *std.ArrayListUnmanaged(DrawCmd),
+    allocator: std.mem.Allocator,
+) !void {
+    const pr = frame.plot_rect;
+
+    // Ocean background.
+    try out.append(allocator, .{ .aa_filled_rect = .{
+        .rect = .{ .x = pr.x, .y = pr.y, .w = pr.w, .h = pr.h },
+        .color = resolveToken(ocean_token),
+        .radius = 4.0,
+    }});
+
+    // Simplified continent bounding boxes (normalized 0..1).
+    // The Vulkan backend renders filled_path as a no-op, so use aa_filled_rect
+    // for each continent's approximate bounding box instead.
+    // x: longitude −180→+180 mapped to 0→1; y: latitude +90→−90 mapped to 0→1.
+    const ContinentBox = struct { x: f32, y: f32, w: f32, h: f32 };
+    const all_continents = [_]ContinentBox{
+        .{ .x = 0.04, .y = 0.08, .w = 0.28, .h = 0.42 }, // North America
+        .{ .x = 0.17, .y = 0.48, .w = 0.15, .h = 0.30 }, // South America
+        .{ .x = 0.44, .y = 0.12, .w = 0.11, .h = 0.14 }, // Europe
+        .{ .x = 0.44, .y = 0.26, .w = 0.14, .h = 0.42 }, // Africa
+        .{ .x = 0.54, .y = 0.08, .w = 0.34, .h = 0.34 }, // Asia
+        .{ .x = 0.73, .y = 0.56, .w = 0.13, .h = 0.16 }, // Australia
+    };
+
+    const land_col = resolveToken(land_token);
+
+    for (all_continents, 0..) |box, ci| {
+        const shade_offset: i32 = @as(i32, @intCast(ci)) * 12;
+        var col = land_col;
+        col.r = @intCast(@min(255, @max(0, @as(i32, col.r) + shade_offset)));
+        col.g = @intCast(@min(255, @max(0, @as(i32, col.g) + shade_offset)));
+        col.b = @intCast(@min(255, @max(0, @as(i32, col.b) + shade_offset)));
+        try out.append(allocator, .{ .aa_filled_rect = .{
+            .rect = .{
+                .x = pr.x + box.x * pr.w,
+                .y = pr.y + box.y * pr.h,
+                .w = box.w * pr.w,
+                .h = box.h * pr.h,
+            },
+            .color = col,
+            .radius = 3.0,
+        }});
+    }
+
+    // Dot markers (aa_filled_circle is supported by the Vulkan backend).
+    for (markers) |m| {
+        const mx = pr.x + m.norm_x * pr.w;
+        const my = pr.y + m.norm_y * pr.h;
+        try out.append(allocator, .{ .aa_filled_circle = .{
+            .center_x = mx,
+            .center_y = my,
+            .radius   = m.radius,
+            .color    = resolveToken(m.color_token),
         }});
     }
 }

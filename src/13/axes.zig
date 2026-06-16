@@ -72,6 +72,10 @@ pub fn drawAxes(
 
         // Y ticks + gridlines
         const y_ticks = try frame.y.ticks(opts.y_tick_count, allocator);
+        defer {
+            for (y_ticks) |tick| allocator.free(tick.label);
+            allocator.free(y_ticks);
+        }
         for (y_ticks) |tick| {
             const py = frame.y.map(tick.value);
             if (py < pr.y or py > pr.y + pr.h) continue;
@@ -111,6 +115,10 @@ pub fn drawAxes(
 
         // X ticks + gridlines
         const x_ticks = try frame.x.ticks(opts.x_tick_count, allocator);
+        defer {
+            for (x_ticks) |tick| allocator.free(tick.label);
+            allocator.free(x_ticks);
+        }
         for (x_ticks) |tick| {
             const px = frame.x.map(tick.value);
             if (px < pr.x or px > pr.x + pr.w) continue;

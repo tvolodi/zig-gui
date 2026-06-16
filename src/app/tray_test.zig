@@ -186,7 +186,7 @@ test "Tray: update does not panic with items in the list" {
 
 test "AppOptions.tray field exists and defaults to null" {
     const AppOptions = app_mod.AppOptions;
-    comptime try testing.expect(@hasField(AppOptions, "tray"));
+    try testing.expect(@hasField(AppOptions, "tray"));
 
     // Construct with minimum required fields and verify default.
     const opts = AppOptions{ .font_path = "dummy.ttf" };

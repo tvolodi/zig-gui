@@ -1,23 +1,841 @@
 //! 06 — Markup + style — src/06/types.zig
 //!
-//! Re-exports the canonical implementation from docs/specs/06.types.zig.
-//! The implementation lives in docs/specs/06.types.zig so the acceptance
-//! test in docs/specs/ can resolve its imports correctly via build.zig.
+//! Contract (INV-5.1). The descriptor struct shapes (NodeDesc, Attr, AttrValue) and the
+//! public signatures are the contract — match them exactly. `parse` and `resolveClasses` are
+//! the real work; implemented per spec.md. Do not change signatures.
+//!
+//! Depends on std + module 03 (LayoutNode/geometry) + module 05 (Tokens/ComputedStyle).
+//! All lower-numbered in the corrected build order, so these imports are legal (INV-3.4).
+//!
+//! (AGENT AMENDMENT 2026-06-14: SR-03 — moved canonical impl from docs/specs/06.types.zig
+//!  to src/06/types.zig per INV-5.7; src/ is now the sole compilation source.)
 
-const spec = @import("../../docs/specs/06.types.zig");
-pub const Attr = spec.Attr;
-pub const AttrValue = spec.AttrValue;
-pub const ComputedStyle = spec.ComputedStyle;
-pub const LayoutNode = spec.LayoutNode;
-pub const NodeDesc = spec.NodeDesc;
-pub const ParseDiagnostic = spec.ParseDiagnostic;
-pub const ParseError = spec.ParseError;
-pub const ParseErrorKind = spec.ParseErrorKind;
-pub const Resolved = spec.Resolved;
-pub const SourceLoc = spec.SourceLoc;
-pub const Tokens = spec.Tokens;
-pub const parse = spec.parse;
-pub const parseFloat = spec.parseFloat;
-pub const parseHexColor = spec.parseHexColor;
-pub const parseWithDiag = spec.parseWithDiag;
-pub const resolveClasses = spec.resolveClasses;
+const std = @import("std");
+const store = @import("../03/types.zig");
+const theme = @import("../05/types.zig");
+
+pub const LayoutNode = store.LayoutNode;
+pub const Tokens = theme.Tokens;
+pub const ComputedStyle = theme.ComputedStyle;
+
+// ---------------------------------------------------------------------------
+// Markup descriptor tree (output of parse)
+// ---------------------------------------------------------------------------
+
+/// An attribute value is either a literal string or a binding path captured from
+/// `{bind path}`. Binding paths are recorded only — never evaluated here (spec non-goal).
+pub const AttrValue = union(enum) {
+    literal: []const u8,
+    bind: []const u8, // e.g. "user.name" from text="{bind user.name}"
+};
+
+pub const Attr = struct {
+    name: []const u8,
+    value: AttrValue,
+};
+
+/// A parsed markup node. Slices are owned by the allocator passed to `parse`.
+pub const NodeDesc = struct {
+    tag: []const u8,
+    classes: []const u8 = "", // value of class="..." ("" if absent)
+    attrs: []const Attr = &.{}, // every attribute except class
+    children: []const NodeDesc = &.{},
+    // RG4 — Accessibility attributes
+    role: []const u8 = "", // value of role="..." (e.g. "button", "list")
+    aria_label: []const u8 = "", // value of aria-label="..."
+    aria_description: []const u8 = "", // value of aria-description="..."
+};
+
+/// Error variants returned by `parse` on failure.
+/// Also used as the error-kind field in ParseDiagnostic.
+pub const ParseError = error{
+    UnexpectedToken,
+    UnclosedTag,
+    MismatchedTag,
+    MalformedAttribute,
+    OutOfMemory,
+};
+
+/// Error kind enum for ParseDiagnostic (mirrors ParseError variants). (R54)
+pub const ParseErrorKind = enum {
+    UnexpectedToken,
+    UnclosedTag,
+    MismatchedTag,
+    MalformedAttribute,
+};
+
+/// Source location within a `.ui` file (1-based, matching editor conventions). (R54)
+pub const SourceLoc = struct {
+    line: u32, // 1-based line number
+    column: u32, // 1-based byte column on that line
+};
+
+/// Diagnostic emitted by `parse` on failure. (R54)
+pub const ParseDiagnostic = struct {
+    err: ParseErrorKind,
+    loc: SourceLoc,
+    /// A human-readable description of the error. Points into static string storage (no allocation).
+    message: []const u8,
+};
+
+// ---------------------------------------------------------------------------
+// Parser — recursive descent over bytes
+// ---------------------------------------------------------------------------
+
+/// Internal parse error set used only within the parser.
+const InternalParseError = error{ UnexpectedToken, UnclosedTag, MismatchedTag, MalformedAttribute, OutOfMemory };
+
+/// Internal parser state. (R54: adds line/column tracking)
+const Parser = struct {
+    src: []const u8,
+    pos: usize,
+    alloc: std.mem.Allocator,
+    line: u32 = 1, // NEW (R54): current line (1-based)
+    column: u32 = 1, // NEW (R54): current byte column (1-based)
+
+    fn init(alloc: std.mem.Allocator, src: []const u8) Parser {
+        return .{ .src = src, .pos = 0, .alloc = alloc };
+    }
+
+    /// Skip ASCII whitespace. Goes through consume() for line/col tracking.
+    fn skipWs(p: *Parser) void {
+        while (p.pos < p.src.len and isWs(p.src[p.pos])) {
+            _ = p.consume();
+        }
+    }
+
+    fn peek(p: *Parser) ?u8 {
+        if (p.pos >= p.src.len) return null;
+        return p.src[p.pos];
+    }
+
+    /// Consume one byte, updating line/column. (R54)
+    fn consume(p: *Parser) ?u8 {
+        if (p.pos >= p.src.len) return null;
+        const c = p.src[p.pos];
+        p.pos += 1;
+        if (c == '\n') {
+            p.line += 1;
+            p.column = 1;
+        } else {
+            p.column += 1;
+        }
+        return c;
+    }
+
+    fn expect(p: *Parser, c: u8, diag: ?*ParseDiagnostic) InternalParseError!void {
+        if (p.pos >= p.src.len or p.src[p.pos] != c) {
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken, "unexpected character; expected '<', '/', '>', '=', or a name");
+            return error.UnexpectedToken;
+        }
+        _ = p.consume();
+    }
+
+    /// Read a NAME (tag name or attribute name).
+    fn readName(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError![]const u8 {
+        const start = p.pos;
+        while (p.pos < p.src.len and isNameChar(p.src[p.pos])) {
+            _ = p.consume();
+        }
+        if (p.pos == start) {
+            if (diag) |d| d.* = p.makeDiag(.UnexpectedToken, "unexpected character; expected '<', '/', '>', '=', or a name");
+            return error.UnexpectedToken;
+        }
+        return p.src[start..p.pos];
+    }
+
+    /// Parse the content of a double-quoted attribute value.
+    fn readAttrValue(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError!AttrValue {
+        try p.expect('"', diag);
+        const start = p.pos;
+        // Find the closing quote
+        while (p.pos < p.src.len and p.src[p.pos] != '"') {
+            _ = p.consume();
+        }
+        const raw = p.src[start..p.pos];
+        try p.expect('"', diag);
+        // Check for {bind ...}
+        if (std.mem.startsWith(u8, raw, "{bind ") and std.mem.endsWith(u8, raw, "}")) {
+            const path = raw[6 .. raw.len - 1];
+            return AttrValue{ .bind = path };
+        }
+        return AttrValue{ .literal = raw };
+    }
+
+    /// Construct a ParseDiagnostic from current parser state. (R54)
+    fn makeDiag(p: *const Parser, err: ParseErrorKind, message: []const u8) ParseDiagnostic {
+        return .{
+            .err = err,
+            .loc = .{ .line = p.line, .column = p.column },
+            .message = message,
+        };
+    }
+
+    /// Parse a single node starting from '<'. Returns the parsed NodeDesc.
+    fn parseNode(p: *Parser, diag: ?*ParseDiagnostic) InternalParseError!NodeDesc {
+        p.skipWs();
+        try p.expect('<', diag);
+
+        const tag = try p.readName(diag);
+        p.skipWs();
+
+        // Collect attributes
+        var attrs_list: std.ArrayListUnmanaged(Attr) = .empty;
+        var classes: []const u8 = "";
+        // RG4 — Accessibility attributes
+        var role: []const u8 = "";
+        var aria_label: []const u8 = "";
+        var aria_description: []const u8 = "";
+
+        while (true) {
+            p.skipWs();
+            const ch = p.peek() orelse {
+                if (diag) |d| d.* = p.makeDiag(.UnclosedTag, "tag was opened but never closed");
+                return error.UnclosedTag;
+            };
+            if (ch == '/' or ch == '>') break;
+            // Parse attribute: NAME '=' '"' value '"'
+            const name = try p.readName(diag);
+            p.skipWs();
+            try p.expect('=', diag);
+            p.skipWs();
+            const val = try p.readAttrValue(diag);
+            if (std.mem.eql(u8, name, "class")) {
+                switch (val) {
+                    .literal => |s| classes = s,
+                    .bind => |s| classes = s,
+                }
+            } else if (std.mem.eql(u8, name, "role")) {
+                // RG4 — parse role attribute (only literal, not bind paths)
+                switch (val) {
+                    .literal => |s| role = s,
+                    .bind => {}, // ignore bind paths for role
+                }
+            } else if (std.mem.eql(u8, name, "aria-label")) {
+                // RG4 — parse aria-label attribute
+                switch (val) {
+                    .literal => |s| aria_label = s,
+                    .bind => |s| aria_label = s,
+                }
+            } else if (std.mem.eql(u8, name, "aria-description")) {
+                // RG4 — parse aria-description attribute
+                switch (val) {
+                    .literal => |s| aria_description = s,
+                    .bind => |s| aria_description = s,
+                }
+            } else {
+                try attrs_list.append(p.alloc, Attr{ .name = name, .value = val });
+            }
+        }
+
+        const attrs = try attrs_list.toOwnedSlice(p.alloc);
+
+        // Self-closing or container?
+        if (p.peek() == '/') {
+            _ = p.consume(); // '/'
+            try p.expect('>', diag);
+            return NodeDesc{
+                .tag = tag,
+                .classes = classes,
+                .attrs = attrs,
+                .children = &.{},
+                .role = role,
+                .aria_label = aria_label,
+                .aria_description = aria_description,
+            };
+        }
+
+        // Container: '>' children* '</' TAG '>'
+        try p.expect('>', diag);
+
+        var children_list: std.ArrayListUnmanaged(NodeDesc) = .empty;
+        while (true) {
+            p.skipWs();
+            // Check for closing tag
+            if (p.pos + 1 < p.src.len and p.src[p.pos] == '<' and p.src[p.pos + 1] == '/') {
+                break;
+            }
+            if (p.pos >= p.src.len) {
+                if (diag) |d| d.* = p.makeDiag(.UnclosedTag, "tag was opened but never closed");
+                return error.UnclosedTag;
+            }
+            const child = try p.parseNode(diag);
+            try children_list.append(p.alloc, child);
+        }
+
+        // Consume '</'
+        try p.expect('<', diag);
+        try p.expect('/', diag);
+        const close_tag = try p.readName(diag);
+        p.skipWs();
+        try p.expect('>', diag);
+
+        if (!std.mem.eql(u8, tag, close_tag)) {
+            if (diag) |d| d.* = p.makeDiag(.MismatchedTag, "closing tag does not match the opening tag");
+            return error.MismatchedTag;
+        }
+
+        const children = try children_list.toOwnedSlice(p.alloc);
+        return NodeDesc{
+            .tag = tag,
+            .classes = classes,
+            .attrs = attrs,
+            .children = children,
+            .role = role,
+            .aria_label = aria_label,
+            .aria_description = aria_description,
+        };
+    }
+};
+
+fn isWs(c: u8) bool {
+    return c == ' ' or c == '\t' or c == '\n' or c == '\r';
+}
+
+fn isNameChar(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.';
+}
+
+/// Parse `.ui` markup into a descriptor tree rooted at the returned NodeDesc.
+/// Backward-compatible 2-arg version (used by existing tests). Internally uses null diag.
+pub fn parse(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+) ParseError!NodeDesc {
+    return parseWithDiag(allocator, source, null);
+}
+
+/// Parse `.ui` markup with error diagnostics. (R54)
+/// On success returns the root NodeDesc. On failure, writes a ParseDiagnostic to
+/// `*diag` (if non-null) and returns the ParseError variant.
+/// One function, two uses: build-time codegen and hot-reload (INV-4.4).
+pub fn parseWithDiag(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    diag: ?*ParseDiagnostic,
+) ParseError!NodeDesc {
+    var p = Parser.init(allocator, source);
+    p.skipWs();
+    return p.parseNode(diag);
+}
+
+// ---------------------------------------------------------------------------
+// Tailwind-subset resolver (classes -> style + layout)
+// ---------------------------------------------------------------------------
+
+/// The class string resolved into a style patch and a layout patch. Only class-derived
+/// fields are set; everything else is left at struct defaults.
+pub const Resolved = struct {
+    style: ComputedStyle = .{},
+    layout: LayoutNode = .{},
+};
+
+// Static fr-track arrays for grid-cols-{n} (1..12). Used to avoid heap allocation.
+const fr1 = [1]store.TrackSize{.{ .fr = 1 }};
+const fr2 = [2]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 } };
+const fr3 = [3]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr4 = [4]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr5 = [5]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr6 = [6]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr7 = [7]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr8 = [8]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr9 = [9]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr10 = [10]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr11 = [11]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+const fr12 = [12]store.TrackSize{ .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 }, .{ .fr = 1 } };
+
+/// Resolve a space-separated class string against theme tokens (see spec.md "Tailwind
+/// subset"). Order-independent except last-wins on direct conflict. Unknown classes ignored.
+/// Spacing/gap/sizing use the fixed n*4 px scale; color/radius/font-size use tokens.
+pub fn resolveClasses(classes: []const u8, tokens: Tokens) Resolved {
+    var result = Resolved{};
+    var it = std.mem.tokenizeScalar(u8, classes, ' ');
+    while (it.next()) |cls| {
+        applyClass(cls, tokens, &result);
+    }
+    return result;
+}
+
+fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
+    // --- R51 Group A: Visibility ---
+    if (std.mem.eql(u8, cls, "hidden")) {
+        r.layout.display = .none;
+
+        // --- RG5: sr-only (screen-reader-only) ---
+    } else if (std.mem.eql(u8, cls, "sr-only")) {
+        // Make element fully transparent and zero-size, but keep in accessibility tree
+        r.style.opacity = 0.0;
+        r.layout.width = .{ .px = 0 };
+        r.layout.height = .{ .px = 0 };
+        r.layout.overflow = .hidden;
+
+        // --- R51 Group B: Overflow ---
+    } else if (std.mem.eql(u8, cls, "overflow-hidden")) {
+        r.layout.overflow = .hidden;
+
+        // --- Layout display ---
+    } else if (std.mem.eql(u8, cls, "flex")) {
+        r.layout.display = .flex;
+    } else if (std.mem.eql(u8, cls, "grid")) {
+        r.layout.display = .grid;
+    } else if (std.mem.eql(u8, cls, "block")) {
+        r.layout.display = .block;
+
+        // --- Flex direction ---
+    } else if (std.mem.eql(u8, cls, "flex-row")) {
+        r.layout.direction = .row;
+    } else if (std.mem.eql(u8, cls, "flex-col")) {
+        r.layout.direction = .column;
+
+        // --- Justify content ---
+    } else if (std.mem.eql(u8, cls, "justify-start")) {
+        r.layout.justify_content = .start;
+    } else if (std.mem.eql(u8, cls, "justify-center")) {
+        r.layout.justify_content = .center;
+    } else if (std.mem.eql(u8, cls, "justify-end")) {
+        r.layout.justify_content = .end;
+    } else if (std.mem.eql(u8, cls, "justify-between")) {
+        r.layout.justify_content = .space_between;
+
+        // --- Align items ---
+    } else if (std.mem.eql(u8, cls, "items-start")) {
+        r.layout.align_items = .start;
+    } else if (std.mem.eql(u8, cls, "items-center")) {
+        r.layout.align_items = .center;
+    } else if (std.mem.eql(u8, cls, "items-end")) {
+        r.layout.align_items = .end;
+    } else if (std.mem.eql(u8, cls, "items-stretch")) {
+        r.layout.align_items = .stretch;
+
+        // --- R51 Group C: Sizing constraints ---
+    } else if (std.mem.startsWith(u8, cls, "min-w-")) {
+        if (parseUint(cls[6..])) |n| r.layout.min_size.w = @as(f32, @floatFromInt(n)) * 4.0;
+    } else if (std.mem.startsWith(u8, cls, "max-w-")) {
+        if (std.mem.eql(u8, cls[6..], "none")) {
+            r.layout.max_size.w = std.math.inf(f32);
+        } else if (parseUint(cls[6..])) |n| {
+            r.layout.max_size.w = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+    } else if (std.mem.startsWith(u8, cls, "min-h-")) {
+        if (parseUint(cls[6..])) |n| r.layout.min_size.h = @as(f32, @floatFromInt(n)) * 4.0;
+    } else if (std.mem.startsWith(u8, cls, "max-h-")) {
+        if (std.mem.eql(u8, cls[6..], "none")) {
+            r.layout.max_size.h = std.math.inf(f32);
+        } else if (parseUint(cls[6..])) |n| {
+            r.layout.max_size.h = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+
+        // --- Sizing: w-{n}, h-{n} (absorbs old w-full/h-full) ---
+    } else if (std.mem.startsWith(u8, cls, "w-")) {
+        if (std.mem.eql(u8, cls[2..], "full")) {
+            r.layout.width = .{ .percent = 100 };
+        } else if (std.mem.eql(u8, cls[2..], "auto")) {
+            r.layout.width = .auto;
+        } else if (parseUint(cls[2..])) |n| {
+            r.layout.width = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+    } else if (std.mem.startsWith(u8, cls, "h-")) {
+        if (std.mem.eql(u8, cls[2..], "full")) {
+            r.layout.height = .{ .percent = 100 };
+        } else if (std.mem.eql(u8, cls[2..], "auto")) {
+            r.layout.height = .auto;
+        } else if (parseUint(cls[2..])) |n| {
+            r.layout.height = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // --- Flex shorthand ---
+    } else if (std.mem.eql(u8, cls, "flex-1")) {
+        r.layout.flex_grow = 1;
+        r.layout.flex_basis = .{ .px = 0 };
+
+        // --- Gap: gap-{n} ---
+    } else if (std.mem.startsWith(u8, cls, "gap-")) {
+        if (parseUint(cls[4..])) |n| {
+            r.layout.gap = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+
+        // --- Grid columns: grid-cols-{n} ---
+    } else if (std.mem.startsWith(u8, cls, "grid-cols-")) {
+        if (parseUint(cls[10..])) |n| {
+            r.layout.grid_template_columns = switch (n) {
+                1 => &fr1,
+                2 => &fr2,
+                3 => &fr3,
+                4 => &fr4,
+                5 => &fr5,
+                6 => &fr6,
+                7 => &fr7,
+                8 => &fr8,
+                9 => &fr9,
+                10 => &fr10,
+                11 => &fr11,
+                12 => &fr12,
+                else => &.{},
+            };
+        }
+
+        // --- Padding ---
+    } else if (std.mem.startsWith(u8, cls, "p-")) {
+        if (parseUint(cls[2..])) |n| {
+            const v = @as(f32, @floatFromInt(n)) * 4.0;
+            r.style.padding.top = v;
+            r.style.padding.right = v;
+            r.style.padding.bottom = v;
+            r.style.padding.left = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "px-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v = @as(f32, @floatFromInt(n)) * 4.0;
+            r.style.padding.left = v;
+            r.style.padding.right = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "py-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v = @as(f32, @floatFromInt(n)) * 4.0;
+            r.style.padding.top = v;
+            r.style.padding.bottom = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "pt-")) {
+        if (parseUint(cls[3..])) |n| {
+            r.style.padding.top = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+    } else if (std.mem.startsWith(u8, cls, "pr-")) {
+        if (parseUint(cls[3..])) |n| {
+            r.style.padding.right = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+    } else if (std.mem.startsWith(u8, cls, "pb-")) {
+        if (parseUint(cls[3..])) |n| {
+            r.style.padding.bottom = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+    } else if (std.mem.startsWith(u8, cls, "pl-")) {
+        if (parseUint(cls[3..])) |n| {
+            r.style.padding.left = @as(f32, @floatFromInt(n)) * 4.0;
+        }
+
+        // --- R51 Group D: Margin / horizontal centering ---
+    } else if (std.mem.eql(u8, cls, "mx-auto")) {
+        r.layout.margin.left = .auto;
+        r.layout.margin.right = .auto;
+    } else if (std.mem.startsWith(u8, cls, "m-")) {
+        if (parseUint(cls[2..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin = .{ .top = v, .right = v, .bottom = v, .left = v };
+        }
+    } else if (std.mem.startsWith(u8, cls, "mx-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin.left = v;
+            r.layout.margin.right = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "my-")) {
+        if (parseUint(cls[3..])) |n| {
+            const v: store.MarginValue = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.margin.top = v;
+            r.layout.margin.bottom = v;
+        }
+    } else if (std.mem.startsWith(u8, cls, "mt-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.top = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "mr-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.right = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "mb-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.bottom = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+    } else if (std.mem.startsWith(u8, cls, "ml-")) {
+        if (parseUint(cls[3..])) |n| r.layout.margin.left = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+
+        // --- R51 Group E: Flex modifiers ---
+    } else if (std.mem.eql(u8, cls, "shrink-0")) {
+        r.layout.flex_shrink = 0;
+    } else if (std.mem.eql(u8, cls, "grow-0")) {
+        r.layout.flex_grow = 0;
+    } else if (std.mem.eql(u8, cls, "grow")) {
+        r.layout.flex_grow = 1;
+    } else if (std.mem.eql(u8, cls, "shrink")) {
+        r.layout.flex_shrink = 1;
+    } else if (std.mem.eql(u8, cls, "self-auto")) {
+        r.layout.align_self = .auto;
+    } else if (std.mem.eql(u8, cls, "self-start")) {
+        r.layout.align_self = .start;
+    } else if (std.mem.eql(u8, cls, "self-center")) {
+        r.layout.align_self = .center;
+    } else if (std.mem.eql(u8, cls, "self-end")) {
+        r.layout.align_self = .end;
+    } else if (std.mem.eql(u8, cls, "self-stretch")) {
+        r.layout.align_self = .stretch;
+
+        // --- R51 Group F: Grid span ---
+    } else if (std.mem.startsWith(u8, cls, "col-span-")) {
+        if (parseUint(cls[9..])) |n| r.layout.col_span = @intCast(@min(n, 12));
+    } else if (std.mem.startsWith(u8, cls, "row-span-")) {
+        if (parseUint(cls[9..])) |n| r.layout.row_span = @intCast(@min(n, 12));
+
+        // --- Background colors ---
+    } else if (std.mem.eql(u8, cls, "bg-canvas")) {
+        r.style.background = tokens.bg_canvas;
+    } else if (std.mem.eql(u8, cls, "bg-surface")) {
+        r.style.background = tokens.bg_surface;
+    } else if (std.mem.eql(u8, cls, "bg-raised")) {
+        r.style.background = tokens.bg_raised;
+    } else if (std.mem.eql(u8, cls, "bg-accent")) {
+        r.style.background = tokens.accent;
+    } else if (std.mem.eql(u8, cls, "bg-transparent")) {
+        r.style.background = theme.transparent;
+
+        // --- M13-01 RD0: Gradient direction classes ---
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-r")) {
+        r.style.gradient_direction = 1; // right
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-b")) {
+        r.style.gradient_direction = 2; // bottom
+    } else if (std.mem.eql(u8, cls, "bg-gradient-to-br")) {
+        r.style.gradient_direction = 3; // bottom_right
+
+        // --- Text colors ---
+    } else if (std.mem.eql(u8, cls, "text-body")) {
+        r.style.text_color = tokens.text_body;
+    } else if (std.mem.eql(u8, cls, "text-muted")) {
+        r.style.text_color = tokens.text_muted;
+    } else if (std.mem.eql(u8, cls, "text-accent")) {
+        r.style.text_color = tokens.accent;
+
+        // --- Font sizes ---
+    } else if (std.mem.eql(u8, cls, "text-xs")) {
+        r.style.font_size = tokens.text_xs;
+    } else if (std.mem.eql(u8, cls, "text-sm")) {
+        r.style.font_size = tokens.text_sm;
+    } else if (std.mem.eql(u8, cls, "text-base")) {
+        r.style.font_size = tokens.text_base;
+    } else if (std.mem.eql(u8, cls, "text-lg")) {
+        r.style.font_size = tokens.text_lg;
+    } else if (std.mem.eql(u8, cls, "text-xl")) {
+        r.style.font_size = tokens.text_xl;
+
+        // --- Font weight/style (R60) ---
+    } else if (std.mem.eql(u8, cls, "font-bold")) {
+        r.style.font_bold = true;
+    } else if (std.mem.eql(u8, cls, "font-normal")) {
+        r.style.font_bold = false;
+    } else if (std.mem.eql(u8, cls, "font-italic") or std.mem.eql(u8, cls, "italic")) {
+        r.style.font_italic = true;
+    } else if (std.mem.eql(u8, cls, "not-italic")) {
+        r.style.font_italic = false;
+
+        // --- Borders ---
+    } else if (std.mem.eql(u8, cls, "border")) {
+        r.style.border_width = 1;
+    } else if (std.mem.eql(u8, cls, "border-subtle")) {
+        r.style.border_color = tokens.border_subtle;
+    } else if (std.mem.eql(u8, cls, "border-default")) {
+        r.style.border_color = tokens.border_default;
+    } else if (std.mem.eql(u8, cls, "border-strong")) {
+        r.style.border_color = tokens.border_strong;
+
+        // --- Border radius ---
+    } else if (std.mem.eql(u8, cls, "rounded-sm")) {
+        r.style.radius = tokens.radius_sm;
+    } else if (std.mem.eql(u8, cls, "rounded-md")) {
+        r.style.radius = tokens.radius_md;
+    } else if (std.mem.eql(u8, cls, "rounded-lg")) {
+        r.style.radius = tokens.radius_lg;
+    } else if (std.mem.eql(u8, cls, "rounded-full")) {
+        r.style.radius = 9999;
+
+        // --- Opacity (R45) ---
+    } else if (std.mem.eql(u8, cls, "opacity-0")) {
+        r.style.opacity = 0.0;
+    } else if (std.mem.eql(u8, cls, "opacity-25")) {
+        r.style.opacity = 0.25;
+    } else if (std.mem.eql(u8, cls, "opacity-50")) {
+        r.style.opacity = 0.5;
+    } else if (std.mem.eql(u8, cls, "opacity-75")) {
+        r.style.opacity = 0.75;
+    } else if (std.mem.eql(u8, cls, "opacity-100")) {
+        r.style.opacity = 1.0;
+
+        // --- Text truncation (R44) ---
+    } else if (std.mem.eql(u8, cls, "truncate")) {
+        r.style.truncate = true;
+
+        // --- Box shadow (R46) ---
+    } else if (std.mem.eql(u8, cls, "shadow-sm")) {
+        r.style.shadow_blur = 4;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 1;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 20 };
+    } else if (std.mem.eql(u8, cls, "shadow")) {
+        r.style.shadow_blur = 6;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 2;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 30 };
+    } else if (std.mem.eql(u8, cls, "shadow-md")) {
+        r.style.shadow_blur = 8;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 4;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 45 };
+    } else if (std.mem.eql(u8, cls, "shadow-lg")) {
+        r.style.shadow_blur = 16;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 8;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 50 };
+    } else if (std.mem.eql(u8, cls, "shadow-xl")) {
+        r.style.shadow_blur = 24;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 10;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 55 };
+    } else if (std.mem.eql(u8, cls, "shadow-none")) {
+        r.style.shadow_blur = 0;
+        r.style.shadow_offset_x = 0;
+        r.style.shadow_offset_y = 0;
+        r.style.shadow_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+
+        // --- M14-02 Transition classes ---
+    } else if (std.mem.eql(u8, cls, "transition-opacity")) {
+        r.style.transition_opacity = true;
+    } else if (std.mem.eql(u8, cls, "transition-background")) {
+        r.style.transition_background = true;
+    } else if (std.mem.eql(u8, cls, "transition-colors")) {
+        r.style.transition_opacity = true;
+        r.style.transition_background = true;
+    } else if (cls.len > 9 and std.mem.eql(u8, cls[0..9], "duration-")) {
+        const val = std.fmt.parseInt(u32, cls[9..], 10) catch { return; };
+        r.style.transition_duration = val;
+        return;
+        // --- M14-03 Enter/exit classes ---
+    } else if (std.mem.eql(u8, cls, "animate-in")) {
+        r.style.animate_in = true;
+    } else if (std.mem.eql(u8, cls, "animate-out")) {
+        r.style.animate_out = true;
+    } else if (std.mem.eql(u8, cls, "fade-in")) {
+        r.style.fade_in = true;
+    } else if (std.mem.eql(u8, cls, "fade-out")) {
+        r.style.fade_out = true;
+    } else if (std.mem.eql(u8, cls, "slide-in-from-top")) {
+        r.style.slide_in_from_top = true;
+    } else if (std.mem.eql(u8, cls, "slide-in-from-bottom")) {
+        r.style.slide_in_from_bottom = true;
+    } else if (std.mem.eql(u8, cls, "slide-out-to-top")) {
+        r.style.slide_out_to_top = true;
+    } else if (std.mem.eql(u8, cls, "slide-out-to-bottom")) {
+        r.style.slide_out_to_bottom = true;
+
+        // --- M12 RC0 — absolute positioning classes ---
+    } else if (std.mem.eql(u8, cls, "absolute")) {
+        r.layout.position = .absolute;
+    } else if (std.mem.eql(u8, cls, "static")) {
+        r.layout.position = .static;
+
+        // RC1 — sticky positioning
+    } else if (std.mem.eql(u8, cls, "sticky")) {
+        r.layout.position = .sticky;
+
+        // RC0 — inset-{n} sets all four insets
+    } else if (std.mem.startsWith(u8, cls, "inset-")) {
+        if (parseUint(cls[6..])) |n| {
+            const v: store.Dimension = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+            r.layout.inset_top    = v;
+            r.layout.inset_right  = v;
+            r.layout.inset_bottom = v;
+            r.layout.inset_left   = v;
+        }
+
+        // RC0 — top-{n}
+    } else if (std.mem.startsWith(u8, cls, "top-")) {
+        if (parseUint(cls[4..])) |n| {
+            r.layout.inset_top = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — right-{n}
+    } else if (std.mem.startsWith(u8, cls, "right-")) {
+        if (parseUint(cls[6..])) |n| {
+            r.layout.inset_right = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — bottom-{n}
+    } else if (std.mem.startsWith(u8, cls, "bottom-")) {
+        if (parseUint(cls[7..])) |n| {
+            r.layout.inset_bottom = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC0 — left-{n} (guard: must not overlap existing "ml-" prefix)
+    } else if (std.mem.startsWith(u8, cls, "left-")) {
+        if (parseUint(cls[5..])) |n| {
+            r.layout.inset_left = .{ .px = @as(f32, @floatFromInt(n)) * 4.0 };
+        }
+
+        // RC2 — flex-wrap / flex-nowrap
+    } else if (std.mem.eql(u8, cls, "flex-wrap")) {
+        r.layout.flex_wrap = true;
+    } else if (std.mem.eql(u8, cls, "flex-nowrap")) {
+        r.layout.flex_wrap = false;
+
+        // RC3 — aspect ratio
+    } else if (std.mem.eql(u8, cls, "aspect-square")) {
+        r.layout.aspect_ratio = 1.0;
+    } else if (std.mem.eql(u8, cls, "aspect-video")) {
+        r.layout.aspect_ratio = 16.0 / 9.0;
+    } else if (std.mem.eql(u8, cls, "aspect-auto")) {
+        r.layout.aspect_ratio = 0;
+
+        // RC4 — z-index
+    } else if (std.mem.eql(u8, cls, "z-0")) {
+        r.layout.z_index = 0;
+    } else if (std.mem.eql(u8, cls, "z-10")) {
+        r.layout.z_index = 10;
+    } else if (std.mem.eql(u8, cls, "z-20")) {
+        r.layout.z_index = 20;
+    } else if (std.mem.eql(u8, cls, "z-30")) {
+        r.layout.z_index = 30;
+    } else if (std.mem.eql(u8, cls, "z-40")) {
+        r.layout.z_index = 40;
+    } else if (std.mem.eql(u8, cls, "z-50")) {
+        r.layout.z_index = 50;
+
+        // M15-04: RTL layout direction
+    } else if (std.mem.eql(u8, cls, "direction-rtl")) {
+        r.layout.layout_direction = .rtl;
+    } else if (std.mem.eql(u8, cls, "direction-ltr")) {
+        r.layout.layout_direction = .ltr;
+    }
+    // Unknown classes: silently ignore (last-wins via sequential application)
+}
+
+// ---------------------------------------------------------------------------
+// R50 — Inline style helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a #RRGGBB or #RRGGBBAA hex color string.
+/// Returns null if the string is not a valid hex color.
+pub fn parseHexColor(s: []const u8) ?theme.Color {
+    if (s.len == 0 or s[0] != '#') return null;
+    const digits = s[1..];
+    switch (digits.len) {
+        6 => {
+            const rgb = std.fmt.parseInt(u24, digits, 16) catch return null;
+            return theme.Color.hex(rgb);
+        },
+        8 => {
+            const rgba = std.fmt.parseInt(u32, digits, 16) catch return null;
+            return theme.Color{
+                .r = @intCast((rgba >> 24) & 0xFF),
+                .g = @intCast((rgba >> 16) & 0xFF),
+                .b = @intCast((rgba >> 8) & 0xFF),
+                .a = @intCast(rgba & 0xFF),
+            };
+        },
+        else => return null,
+    }
+}
+
+/// Parse a decimal float string (e.g. "12", "1.5"). Returns null on failure.
+pub fn parseFloat(s: []const u8) ?f32 {
+    return std.fmt.parseFloat(f32, s) catch null;
+}
+
+/// Parse an unsigned integer from a string. Returns null on failure.
+fn parseUint(s: []const u8) ?u32 {
+    if (s.len == 0) return null;
+    var result: u32 = 0;
+    for (s) |c| {
+        if (!std.ascii.isDigit(c)) return null;
+        result = result * 10 + (c - '0');
+    }
+    return result;
+}

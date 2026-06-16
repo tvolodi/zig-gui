@@ -424,6 +424,7 @@ the seven features required to build financial dashboard and data-product UIs.
 | M27-RN5 | **Maskable value widget** — `MaskableValueState`, `setMaskableVisible`, fixed-width toggle | M7 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
 | M27-RN6 | **Trend badge** — `TrendBadgeState`, `TrendDirection`, `setTrendValue`, token-sourced colors | M7 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
 | M27-RN7 | **Chart crosshair** — `CrosshairOptions`, `CrosshairState`, `updateCrosshairX`, dashed polyline rendering | M26 | [RN0](requirements/RN0_dashboard_gap_analysis.md) | `done` |
+| M27-RN8 | **Dashboard demo screen** — Showcase screen 11 demonstrating all M27 (RN1–RN7) features in a financial dashboard layout | M27 | [RN8](requirements/RN8_dashboard_demo_screen.md) | `done` |
 
 ---
 

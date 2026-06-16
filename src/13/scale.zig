@@ -129,7 +129,10 @@ fn logTicks(domain_min: f64, domain_max: f64, target_count: u32, allocator: std.
 fn bandTicks(categories: []const []const u8, allocator: std.mem.Allocator) ![]Tick {
     const result = try allocator.alloc(Tick, categories.len);
     for (categories, 0..) |cat, i| {
-        result[i] = .{ .value = @floatFromInt(i), .label = cat };
+        // Duplicate label so the caller can uniformly free all tick labels
+        // (consistent with linearTicks / logTicks / timeTicks).
+        const label = try allocator.dupe(u8, cat);
+        result[i] = .{ .value = @floatFromInt(i), .label = label };
     }
     return result;
 }

@@ -19,13 +19,10 @@ const std = @import("std");
 // Re-export BackendKind from module 01 (the canonical home of the Surface union)
 pub const BackendKind = @import("../01/types.zig").BackendKind;
 
-pub const AtlasHandle = struct { backend_obj: *anyopaque };
-
-pub const AtlasHandles = struct {
-    glyph: AtlasHandle,
-    sdf: AtlasHandle,
-    image: AtlasHandle,
-};
+// Re-export AtlasHandle/AtlasHandles from mod01 (canonical home) so callers using
+// mod10 get the same nominal type that VulkanBackend.drawFrame expects.
+pub const AtlasHandle = @import("../01/types.zig").AtlasHandle;
+pub const AtlasHandles = @import("../01/types.zig").AtlasHandles;
 
 pub const PresentModeSet = u8; // Bitmask; concrete definition TBD from Vulkan enum
 

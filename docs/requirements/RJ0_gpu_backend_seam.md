@@ -55,8 +55,8 @@ others (INV-2.1-v2 forbids private modes):
 
 ```
 mode 0: solid rect            mode 4: SDF icon (RD3)
-mode 1: bordered rect         mode 5: gradient (RD0)
-mode 2: glyph (atlas-sampled) mode 6: AA filled circle (RD4)
+mode 1: glyph (atlas-sampled) mode 5: gradient (RD0)
+mode 2: bordered rect         mode 6: AA filled circle (RD4)
 mode 3: image rect (RGBA)     mode 7: subpixel glyph (RD2)
                               mode 8: curve/polyline (RM0, added by charts)
 ```
@@ -87,8 +87,8 @@ pub const BackendKind = enum { vulkan, metal, dx12, webgpu };
 pub const GpuBackend = ...; // see above
 pub const AtlasHandle = struct { backend_obj: *anyopaque };
 
-// Module 01: Platform.createSurface generalized
-pub fn createSurface(self: *Platform, backend: BackendKind, instance: ?*anyopaque) PlatformError!*anyopaque;
+// Module 01: Platform.createSurface generalized (RJ5)
+pub fn createSurface(self: *Platform, backend: BackendKind, instance: ?*anyopaque) PlatformError!Surface;
 ```
 
 ## Behavioral contract

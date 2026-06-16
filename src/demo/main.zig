@@ -23,6 +23,9 @@ const layout_screen = @import("screens/layout.zig");
 const state_screen  = @import("screens/state.zig");
 const m12_screen    = @import("screens/m12.zig");
 const m13_screen    = @import("screens/m13.zig");
+const dashboard_screen = @import("screens/dashboard.zig");
+const ecommerce_screen = @import("screens/ecommerce.zig");
+const components_screen = @import("screens/components.zig");
 
 /// Combined per-frame tick: runs all screen ticks. Each guards against wrong-screen.
 fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
@@ -84,6 +87,9 @@ fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
         &ai.overlay,
         ai.gpa,
     ) catch {};
+
+    // RN11 — Render ecommerce charts into ai.chart_cmds (no-op when screen not active).
+    ecommerce_screen.renderCharts(ai) catch {};
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -129,7 +135,7 @@ pub fn main(init: std.process.Init) !void {
         .window = .{
             .title  = "zig-gui Showcase",
             .width  = 1024,
-            .height = 768,
+            .height = 1100,
         },
     });
     defer app.deinit();
@@ -163,6 +169,9 @@ pub fn main(init: std.process.Init) !void {
     var state_ctx   = state_screen.StateCtx{  .global = undefined };
     var m12_ctx     = m12_screen.M12Ctx{      .global = undefined };
     var m13_ctx     = m13_screen.M13Ctx{      .global = undefined };
+    var dashboard_ctx = dashboard_screen.DashboardCtx{ .global = undefined };
+    var ecommerce_ctx = ecommerce_screen.EcommerceCtx{ .global = undefined };
+    var components_ctx = components_screen.ComponentsCtx{ .global = undefined };
 
     // -----------------------------------------------------------------------
     // GlobalState — wire everything together.
@@ -182,6 +191,9 @@ pub fn main(init: std.process.Init) !void {
     global.state_ctx   = &state_ctx;
     global.m12_ctx     = &m12_ctx;
     global.m13_ctx     = &m13_ctx;
+    global.dashboard_ctx = &dashboard_ctx;
+    global.ecommerce_ctx   = &ecommerce_ctx;
+    global.components_ctx  = &components_ctx;
 
     home_ctx.global    = &global;
     text_ctx.global    = &global;
@@ -193,6 +205,9 @@ pub fn main(init: std.process.Init) !void {
     state_ctx.global   = &global;
     m12_ctx.global     = &global;
     m13_ctx.global     = &global;
+    dashboard_ctx.global = &global;
+    ecommerce_ctx.global = &global;
+    components_ctx.global = &global;
 
     global.sidebar_cbs = SidebarCbs{
         .home          = SidebarCb{ .global = &global, .screen_name = "home" },
@@ -205,6 +220,9 @@ pub fn main(init: std.process.Init) !void {
         .state         = SidebarCb{ .global = &global, .screen_name = "state" },
         .m12           = SidebarCb{ .global = &global, .screen_name = "m12" },
         .m13           = SidebarCb{ .global = &global, .screen_name = "m13" },
+        .dashboard     = SidebarCb{ .global = &global, .screen_name = "dashboard" },
+        .ecommerce     = SidebarCb{ .global = &global, .screen_name = "ecommerce" },
+        .components    = SidebarCb{ .global = &global, .screen_name = "components" },
     };
 
     // -----------------------------------------------------------------------
@@ -220,6 +238,9 @@ pub fn main(init: std.process.Init) !void {
     try nav.register("state",         state_screen.build);
     try nav.register("m12",           m12_screen.build);
     try nav.register("m13",           m13_screen.build);
+    try nav.register("dashboard",     dashboard_screen.build);
+    try nav.register("ecommerce",     ecommerce_screen.build);
+    try nav.register("components",    components_screen.build);
 
     // Request initial screen — drainPending fires on the first frame.
     // --initial-screen <name> selects which screen to start on (default: home).
@@ -241,6 +262,12 @@ pub fn main(init: std.process.Init) !void {
         nav.requestPush("m12", &m12_ctx);
     } else if (std.mem.eql(u8, initial_screen, "m13")) {
         nav.requestPush("m13", &m13_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "dashboard")) {
+        nav.requestPush("dashboard", &dashboard_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "ecommerce")) {
+        nav.requestPush("ecommerce", &ecommerce_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "components")) {
+        nav.requestPush("components", &components_ctx);
     } else {
         nav.requestPush("home", &home_ctx);
     }

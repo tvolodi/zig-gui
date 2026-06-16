@@ -33,8 +33,11 @@ pub const GlobalState = struct {
     notif_ctx:  ?*anyopaque = null,
     layout_ctx: ?*anyopaque = null,
     state_ctx:  ?*anyopaque = null,
-    m12_ctx:    ?*anyopaque = null,
-    m13_ctx:    ?*anyopaque = null,
+    m12_ctx:       ?*anyopaque = null,
+    m13_ctx:       ?*anyopaque = null,
+    dashboard_ctx: ?*anyopaque = null,
+    ecommerce_ctx:   ?*anyopaque = null,
+    components_ctx:  ?*anyopaque = null,
     /// Toast manager — set by main.zig after ToastManager.init; nil-safe (no-op when null).
     toasts: ?*ToastManager = null,
     /// AppInner pointer — set by main.zig; used by callbacks to read frame_time_ms etc.
@@ -69,6 +72,9 @@ pub const SidebarCbs = struct {
     state:         SidebarCb,
     m12:           SidebarCb,
     m13:           SidebarCb,
+    dashboard:     SidebarCb,
+    ecommerce:     SidebarCb,
+    components:    SidebarCb,
 };
 
 fn ctxForScreen(global: *GlobalState, name: []const u8) ?*anyopaque {
@@ -82,6 +88,9 @@ fn ctxForScreen(global: *GlobalState, name: []const u8) ?*anyopaque {
     if (std.mem.eql(u8, name, "state"))         return global.state_ctx;
     if (std.mem.eql(u8, name, "m12"))           return global.m12_ctx;
     if (std.mem.eql(u8, name, "m13"))           return global.m13_ctx;
+    if (std.mem.eql(u8, name, "dashboard"))     return global.dashboard_ctx;
+    if (std.mem.eql(u8, name, "ecommerce"))     return global.ecommerce_ctx;
+    if (std.mem.eql(u8, name, "components"))    return global.components_ctx;
     return null;
 }
 
@@ -92,7 +101,7 @@ fn ctxForScreen(global: *GlobalState, name: []const u8) ?*anyopaque {
 /// `active_btn_idx` is the element index of the currently displayed screen's button (2–11).
 /// Bug 4 fix: set accent background + accent_text color on the active button.
 pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens, active_btn_idx: u32) !void {
-    const pairs = [10]struct { idx: u32, cb: *SidebarCb }{
+    const pairs = [13]struct { idx: u32, cb: *SidebarCb }{
         .{ .idx = 2,  .cb = &global.sidebar_cbs.home },
         .{ .idx = 3,  .cb = &global.sidebar_cbs.text },
         .{ .idx = 4,  .cb = &global.sidebar_cbs.forms },
@@ -103,6 +112,9 @@ pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens,
         .{ .idx = 9,  .cb = &global.sidebar_cbs.state },
         .{ .idx = 10, .cb = &global.sidebar_cbs.m12 },
         .{ .idx = 11, .cb = &global.sidebar_cbs.m13 },
+        .{ .idx = 12, .cb = &global.sidebar_cbs.dashboard },
+        .{ .idx = 13, .cb = &global.sidebar_cbs.ecommerce },
+        .{ .idx = 14, .cb = &global.sidebar_cbs.components },
     };
     for (pairs) |p| {
         try scene.setButtonCallback(p.idx, CallbackFn{
@@ -116,7 +128,7 @@ pub fn wireSidebarCallbacks(scene: *Scene, global: *GlobalState, tokens: Tokens,
         }
     }
     // Active button: accent background + accent text.
-    if (active_btn_idx >= 2 and active_btn_idx <= 11 and active_btn_idx < scene._style.items.len) {
+    if (active_btn_idx >= 2 and active_btn_idx <= 14 and active_btn_idx < scene._style.items.len) {
         scene._style.items[active_btn_idx].background = tokens.accent;
         scene._style.items[active_btn_idx].text_color = tokens.accent_text;
     }

@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const Th = @import("../../docs/specs/05.types.zig");
+const Th = @import("../05/types.zig");
 
 fn luminance(c: Th.Color) f32 {
     return 0.299 * @as(f32, @floatFromInt(c.r)) +
@@ -63,20 +63,20 @@ test "Palette.default is deterministic" {
 test "Palette.default accent values" {
     const p = Th.Palette.default();
 
-    // accent_200 = 0x5DCAA5
-    try testing.expectEqual(@as(u8, 0x5D), p.accent_200.r);
-    try testing.expectEqual(@as(u8, 0xCA), p.accent_200.g);
-    try testing.expectEqual(@as(u8, 0xA5), p.accent_200.b);
+    // accent_200 = 0xE4E4E7 (zinc-200 — subtle interactive tint)
+    try testing.expectEqual(@as(u8, 0xE4), p.accent_200.r);
+    try testing.expectEqual(@as(u8, 0xE4), p.accent_200.g);
+    try testing.expectEqual(@as(u8, 0xE7), p.accent_200.b);
 
-    // accent_400 = 0x1D9E75
-    try testing.expectEqual(@as(u8, 0x1D), p.accent_400.r);
-    try testing.expectEqual(@as(u8, 0x9E), p.accent_400.g);
-    try testing.expectEqual(@as(u8, 0x75), p.accent_400.b);
+    // accent_400 = 0x18181B (zinc-900 — shadcn primary button color)
+    try testing.expectEqual(@as(u8, 0x18), p.accent_400.r);
+    try testing.expectEqual(@as(u8, 0x18), p.accent_400.g);
+    try testing.expectEqual(@as(u8, 0x1B), p.accent_400.b);
 
-    // accent_600 = 0x0F6E56
-    try testing.expectEqual(@as(u8, 0x0F), p.accent_600.r);
-    try testing.expectEqual(@as(u8, 0x6E), p.accent_600.g);
-    try testing.expectEqual(@as(u8, 0x56), p.accent_600.b);
+    // accent_600 = 0x09090B (zinc-950)
+    try testing.expectEqual(@as(u8, 0x09), p.accent_600.r);
+    try testing.expectEqual(@as(u8, 0x09), p.accent_600.g);
+    try testing.expectEqual(@as(u8, 0x0B), p.accent_600.b);
 }
 
 // ---------------------------------------------------------------------------

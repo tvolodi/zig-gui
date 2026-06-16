@@ -122,9 +122,17 @@ Every step in every workflow follows this loop:
                 └─────────────────────────────────┘
 ```
 
-**Escalation** = write `docs/.agent-context/YYYYMMDD_escalation.md` with the exact blocker,
-what was tried, and what decision is needed from the human. Do NOT guess. Do NOT work around
-constitution invariants.
+**Two distinct outcomes when blocked:**
+
+- **Constitution blocker** (a task contradicts an invariant; an invariant is ambiguous, absent,
+  or "phantom"; a frozen contract must change; a new dependency/tool/platform is needed) →
+  **do NOT escalate.** Apply the **Autonomous Amendment Procedure** (constitution §8, and
+  Workflow 5 below): amend `00_constitution.md`, append a row to `docs/specs/AMENDMENTS_LOG.md`,
+  then continue from DO. No human pause.
+- **Hard blocker that no amendment can fix** (e.g. a missing external resource the agent cannot
+  obtain, repeated unrecoverable failure after the redo cap) → **Escalation** = write
+  `docs/.agent-context/YYYYMMDD_escalation.md` with the exact blocker, what was tried, and what
+  the human must provide. Do NOT guess silently.
 
 ---
 
@@ -163,7 +171,9 @@ VALIDATE — pass criteria:
   ✓ All terms resolvable from glossary
   ✓ All dependencies are pre-approved
 
-FAIL → escalate immediately. Record contradiction in escalation file.
+FAIL → resolve via the Autonomous Amendment Procedure (Workflow 5 / constitution §8): amend the
+       constitution (or add the missing glossary term / approve the dependency), log it in
+       AMENDMENTS_LOG.md, then PASS. Do NOT escalate a constitution conflict.
 PASS → handoff context to Implementer, proceed to step 2.
 
 ────────────────────────────────────────────────────
@@ -205,7 +215,10 @@ PASS → proceed to step 4.
 STEP 4 — Design unit tests              [Test Designer]
 ────────────────────────────────────────────────────
 DO:
-  - Read NN.spec.md and NN.acceptance_test.zig (do NOT modify acceptance_test.zig)
+  - Read NN.spec.md and NN.acceptance_test.zig (do NOT modify acceptance_test.zig
+    except under the contract-amendment procedure, INV-5.3 — i.e. only in the same
+    change as a types.zig signature evolution, and only to keep call sites matching
+    the new contract; record via an (AGENT AMENDMENT …) marker or AMENDMENTS_LOG.md row)
   - Write comprehensive unit tests to `src/NN/NN_test.zig`
   - Cover edge cases, error paths, and boundary conditions not in acceptance_test.zig
   - Ensure tests are deterministic (no random, no wall-clock time)
@@ -344,8 +357,9 @@ VALIDATE — pass criteria:
   ✓ No inter-requirement conflicts
 
 FAIL → document each issue; resolve non-blocking issues in place (e.g. add glossary entries);
-       escalate blocking issues (invariant contradictions, missing dependencies) before
-       proceeding.
+       resolve blocking issues (invariant contradictions, missing/needed dependencies) via the
+       Autonomous Amendment Procedure (Workflow 5 / constitution §8) — amend, log, continue.
+       Do NOT escalate a constitution conflict.
 PASS → produce an explicit list of: files to create, files to modify, and validator-resolved
        clarifications. Hand this list to Implementer.
 
@@ -545,7 +559,9 @@ VALIDATE — pass criteria:
   ✓ Fix is within spec scope and respects all invariants
   ✓ No invariant violation required to fix
 
-FAIL → escalate (out-of-scope or invariant conflict requires human decision).
+FAIL → if the fix needs an invariant changed (out-of-scope under current rules, frozen contract,
+       new dependency): resolve it via the Autonomous Amendment Procedure (Workflow 5 /
+       constitution §8) — amend, log, continue. Escalate only a hard blocker no amendment fixes.
 PASS → write analysis context; route to Tester for reproduction.
 
 ────────────────────────────────────────────────────
@@ -719,18 +735,21 @@ environment config, toolchain updates.
 STEP 1 — Validate change against invariants   [Infra + Validator]
 ────────────────────────────────────────────────────
 DO:
-  - Read 00_constitution.md sections 1, 2, 5 (INV-1.x, INV-2.x, INV-5.6)
-  - If change requires a new external dependency:
-      → STOP immediately. Write escalation file. Await human approval.
-      → Only after explicit human approval: proceed with recording the dep in constitution.
+  - Read 00_constitution.md sections 1, 2, 5 (INV-1.x, INV-2.x, INV-5.6), and §8 (AAP)
+  - If change requires a new external dependency, build tool, or target platform:
+      → Do NOT escalate or wait for approval. Apply the Autonomous Amendment Procedure
+        (Workflow 5 / constitution §8): add the dependency/tool/platform to INV-5.6 (pin a
+        specific version, fetched reproducibly via build.zig.zon), mark it
+        `(AGENT AMENDMENT YYYY-MM-DD: …)`, append a row to AMENDMENTS_LOG.md, then proceed.
   - If change is build config / plumbing only: proceed
 
 VALIDATE — pass criteria:
-  ✓ No new unapproved dependency
-  ✓ Change stays within approved tool set (GLFW, Vulkan SDK, stb_truetype, std)
-  ✓ Platforms affected: Windows and Linux only (INV-1.2)
+  ✓ Any new dependency/tool/platform is recorded in INV-5.6 and AMENDMENTS_LOG.md (pinned)
+  ✓ Change otherwise stays within the approved tool set
+  ✓ Platforms affected are within INV-1.2-v2 (Windows, Linux, macOS, Web), or the amendment
+    extending platform scope is logged
 
-FAIL → escalate.
+FAIL → resolve via AAP (amend + log) and proceed; escalate only a hard blocker no amendment fixes.
 PASS → proceed to step 2.
 
 ────────────────────────────────────────────────────
@@ -775,14 +794,14 @@ PASS → proceed to step 5.
 STEP 5 — Update constitution if needed  [Infra]
 ────────────────────────────────────────────────────
 DO:
-  - If a new approved dependency was added (human-approved in step 1):
-      update INV-5.6 in 00_constitution.md
-  - If build tool changed: update the approved-tools list
+  - If a new dependency was added (recorded via AAP in step 1): confirm INV-5.6 in
+    00_constitution.md and the AMENDMENTS_LOG.md row are both present and pinned
+  - If build tool changed: confirm the approved-tools list and the log row reflect it
   - Write a one-paragraph change summary to docs/.agent-context/
 
 VALIDATE — pass criteria:
   ✓ Constitution reflects current approved dep set
-  ✓ No silent additions
+  ✓ Every addition has a matching AMENDMENTS_LOG.md row (no silent additions)
 
 PASS → Orchestrator marks infra change complete.
 ```
@@ -897,8 +916,15 @@ a MATCH / MISMATCH verdict.
 
 ## 11. Escalation protocol
 
-Any agent may escalate at any time. Do NOT work around a blocker by guessing or violating
-an invariant.
+Escalation is now **narrow**. A constitution conflict, ambiguity, absent/phantom invariant,
+frozen-contract change, or new-dependency/tool/platform decision is **never** an escalation —
+it is resolved by the agent under Workflow 5 (Autonomous Amendment Procedure). Do NOT write an
+`_escalation.md` for any of those.
+
+Escalate **only** a hard blocker that no amendment can resolve — for example a missing external
+resource the agent cannot obtain, credentials it lacks, or repeated unrecoverable failure after
+the redo cap (3 cycles). Do NOT guess silently; if a decision can be made and recorded, amend
+and log it instead.
 
 Write `docs/.agent-context/YYYYMMDD_HHMMSS_escalation.md` with:
 
@@ -909,15 +935,15 @@ Write `docs/.agent-context/YYYYMMDD_HHMMSS_escalation.md` with:
 <which workflow and step>
 
 ## Blocker
-<exact description of what cannot proceed>
+<exact description of what cannot proceed, and why no amendment can resolve it>
 
 ## What was tried
 1. …
 2. …
 3. …
 
-## Decision needed from human
-<specific yes/no or choice required — be concrete>
+## What the human must provide
+<the external resource, credential, or decision only the human can supply — be concrete>
 
 ## Relevant files
 - <path>
@@ -927,13 +953,58 @@ After writing the file: stop all work on this task. Do NOT attempt further steps
 
 ---
 
+## 11a. Workflow 5 — Autonomous Constitution Amendment (AAP)
+
+**Trigger:** any workflow step that cannot proceed under the rules as written — a task/invariant
+contradiction, an ambiguous/absent/"phantom" invariant, a frozen contract that must evolve, or a
+needed new dependency/build-tool/target-platform.
+
+**Owner:** the agent that hit the blocker performs all steps inline. **No second-agent review,
+no orchestrator pause, no owner approval.** This is a single-pass sub-workflow folded into the
+step that triggered it; on completion the agent returns to that step and continues.
+
+```
+STEP 1 — Draft the amendment
+  - Write the exact change: old text → new text, or the new invariant.
+  - Keep the discipline: prefer a successor that bounds the wider scope (use the -vN convention)
+    over deleting a guardrail. Delete a guardrail only when it is itself the blocker.
+
+STEP 2 — Apply it
+  - Edit docs/specs/00_constitution.md inline.
+  - Mark the change: (AGENT AMENDMENT YYYY-MM-DD: <one-line reason>).
+  - For a frozen-contract change, update the types.zig signature AND its acceptance_test.zig
+    call sites in the same pass (never weaken an assertion).
+
+STEP 3 — Log it (REQUIRED — the one entrenched rule)
+  - Append a row to docs/specs/AMENDMENTS_LOG.md:
+    date · agent/role · section/invariant · old→new summary · reason · task/run id.
+
+STEP 4 — Glossary (if needed)
+  - If a new term was introduced, add it to docs/specs/glossary.md (INV-5.5).
+
+STEP 5 — Resume
+  - Return to the triggering step and continue. The amendment is effective immediately.
+```
+
+**Validate — pass criteria:**
+```
+✓ 00_constitution.md updated with an (AGENT AMENDMENT …) marker
+✓ A matching row exists in AMENDMENTS_LOG.md
+✓ New terms (if any) added to glossary.md
+✓ The original task can now proceed
+```
+
+The owner reviews AMENDMENTS_LOG.md asynchronously and may revert. Agents never wait for that.
+
+---
+
 ## 12. Corrections to the user's original proposal
 
 | Original idea | Correction |
 |---|---|
 | "agents communicate through handoff files" | **Correct, but now formalized.** In Copilot, native same-session communication is via **subagent invocation** (`agents:` frontmatter + `agent` tool). For cross-session state, agents write structured handoff files to `docs/.agent-context/` with `created_at`, `to_agent`, `status` (PASS/FAIL), and `artifacts` fields. Use `registry.json` to track workflow state. This is the My-Fab pattern. |
-| "develop tests" step in module workflow | **Corrected and ADDED.** "Do NOT modify `acceptance_test.zig`" means: don't touch the frozen contract spec. But you MUST **create unit test files** like `src/NN/NN_test.zig`. There IS a **test-designer agent** who writes tests while the implementer writes code. Tests become obsolete when code changes — they're updated/maintained like any other code through normal review. |
+| "develop tests" step in module workflow | **Corrected and ADDED.** "Do NOT modify `acceptance_test.zig`" now means: don't touch the frozen contract spec *outside the contract-amendment procedure (INV-5.3)*. When a `types.zig` signature evolves, the matching `acceptance_test.zig` call sites are updated in the same change under INV-5.3 — never to weaken an assertion, only to keep call sites matching the new contract — and the change is recorded via an `(AGENT AMENDMENT …)` marker or `AMENDMENTS_LOG.md` row. But you MUST **create unit test files** like `src/NN/NN_test.zig`. There IS a **test-designer agent** who writes tests while the implementer writes code. Tests become obsolete when code changes — they're updated/maintained like any other code through normal review. |
 | Orchestrator does not do actual work | **Correct.** The orchestrator only creates handoff files, updates registry.json, and routes to subagents. Never writes code or runs commands. |
 | do → validate → redo loop | **Correct.** This is the right operating model. |
-| Minimize manual calls to human | **Correct.** Escalate only when a genuine decision is needed (e.g., new dependency, constitution conflict). |
+| Minimize manual calls to human | **Now near-zero.** Constitution conflicts and new-dependency decisions are no longer escalated — agents amend the constitution themselves under the AAP (§8 / Workflow 5) and log it. Escalate only a hard blocker no amendment can resolve. |
 | Visual validation loop | **ADDED.** See §10. Runs after automated tests pass. Visual Tester screenshots the running app, analyzes against spec visual criteria, and either reports VISUAL_PASS or produces a diff report for Implementer. Max 3 iterations before escalation. |

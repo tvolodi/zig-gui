@@ -12,7 +12,7 @@ const std = @import("std");
 const binding_mod = @import("binding.zig");
 const m07 = @import("../07/types.zig");
 const signal_mod = @import("signal.zig");
-const m05 = @import("../../docs/specs/05.types.zig");
+const m05 = @import("../05/types.zig");
 const markup_mod = @import("../06/types.zig");
 const m03 = @import("../03/types.zig");
 

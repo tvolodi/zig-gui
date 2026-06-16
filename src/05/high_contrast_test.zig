@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const Th = @import("../../docs/specs/05.types.zig");
+const Th = @import("../05/types.zig");
 
 const Palette = Th.Palette;
 const Tokens = Th.Tokens;
