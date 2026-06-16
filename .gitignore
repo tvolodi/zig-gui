@@ -26,6 +26,12 @@ build/
 *.exe
 *.dll
 
+# Agent working notes (never committed)
+docs/.agent-context/
+
+# Package artifacts
+dist/
+
 # Exception: wgpu-native stub archive (empty .lib for linker stub — no real SDK needed for tests)
 !vendor/wgpu-native/lib/wgpu_native.lib
 
