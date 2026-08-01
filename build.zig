@@ -103,9 +103,9 @@ pub fn build(b: *std.Build) void {
         "winsdk_ver",
         "Windows SDK version (e.g. 10.0.26100.0)",
     ) orelse "10.0.26100.0";
-    const winsdk_include_um     = b.fmt("{s}\\Include\\{s}\\um",     .{winsdk_root, winsdk_ver});
-    const winsdk_include_shared = b.fmt("{s}\\Include\\{s}\\shared", .{winsdk_root, winsdk_ver});
-    const winsdk_lib_x64        = b.fmt("{s}\\Lib\\{s}\\um\\x64",   .{winsdk_root, winsdk_ver});
+    const winsdk_include_um = b.fmt("{s}\\Include\\{s}\\um", .{ winsdk_root, winsdk_ver });
+    const winsdk_include_shared = b.fmt("{s}\\Include\\{s}\\shared", .{ winsdk_root, winsdk_ver });
+    const winsdk_lib_x64 = b.fmt("{s}\\Lib\\{s}\\um\\x64", .{ winsdk_root, winsdk_ver });
 
     // -----------------------------------------------------------------------
     // GLFW — compiled from source (fetched via build.zig.zon).
@@ -156,139 +156,113 @@ pub fn build(b: *std.Build) void {
     // -----------------------------------------------------------------------
 
     const modules = [_]ModuleDesc{
-        .{ .name = "mod01_platform",      .root = "src/01/types.zig",          .needs_gpu = true },
-        .{ .name = "mod02_text",          .root = "src/02/types.zig",          .needs_stb = true },
+        .{ .name = "mod01_platform", .root = "src/01/types.zig", .needs_gpu = true },
+        .{ .name = "mod02_text", .root = "src/02/types.zig", .needs_stb = true },
         .{ .name = "mod03_element_store", .root = "src/03/types.zig" },
-        .{ .name = "mod04_layout_engine", .root = "src/04/types.zig",
-            .deps = &.{"mod03_element_store"},
-            .extra_imports = &.{
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-            } },
-        .{ .name = "mod05_theme",         .root = "src/05/types.zig",
-            .deps = &.{"mod03_element_store"},
-            .extra_imports = &.{
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-            } },
-        .{ .name = "mod06_markup",        .root = "src/06/types.zig",
-            .deps = &.{ "mod03_element_store", "mod05_theme" },
-            .extra_imports = &.{
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-                ialias("../05_theme/types.zig",         "mod05_theme"),
-            } },
-        .{ .name = "mod07_components",    .root = "src/07/types.zig",
-            .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod06_markup", "mod_font_family" },
-            .extra_imports = &.{
-                ialias("../01/types.zig", "mod01_platform"),
-                ialias("../02/types.zig", "mod02_text"),
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../06/types.zig", "mod06_markup"),
-                ialias("../app/font_family.zig", "mod_font_family"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-                ialias("../05_theme/types.zig",         "mod05_theme"),
-                ialias("../06_markup_style/types.zig",  "mod06_markup"),
-                ialias("../02_text/types.zig",          "mod02_text"),
-            } },
-        .{ .name = "mod08_schema_forms",  .root = "src/08/types.zig",
-            .deps = &.{ "mod03_element_store", "mod05_theme", "mod07_components" },
-            .extra_imports = &.{
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../07/types.zig", "mod07_components"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-                ialias("../05_theme/types.zig",         "mod05_theme"),
-                ialias("../07_components/types.zig",    "mod07_components"),
-            } },
-        .{ .name = "mod09_renderer",      .root = "src/09/types.zig",
-            .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod07_components", "mod_image_atlas", "mod_font_family" },
-            .extra_imports = &.{
-                ialias("../01/types.zig", "mod01_platform"),
-                ialias("../02/types.zig", "mod02_text"),
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../07/types.zig", "mod07_components"),
-                ialias("../app/image_atlas.zig", "mod_image_atlas"),
-                ialias("../app/font_family.zig", "mod_font_family"),
-                ialias("../03_element_store/types.zig", "mod03_element_store"),
-                ialias("../05_theme/types.zig",         "mod05_theme"),
-                ialias("../07_components/types.zig",    "mod07_components"),
-                ialias("../06_markup_style/types.zig",  "mod06_markup"),
-                ialias("../01_platform/types.zig",      "mod01_platform"),
-                ialias("../04_layout_engine/types.zig", "mod04_layout_engine"),
-            } },
-        .{ .name = "mod10_gpu_backend",   .root = "src/10/backend.zig",
-            .deps = &.{ "mod01_platform", "mod02_text", "mod09_renderer" },
-            .extra_imports = &.{
-                ialias("../01/types.zig", "mod01_platform"),
-                ialias("../02/types.zig", "mod02_text"),
-                ialias("../09/types.zig", "mod09_renderer"),
-            } },
+        .{ .name = "mod04_layout_engine", .root = "src/04/types.zig", .deps = &.{"mod03_element_store"}, .extra_imports = &.{
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+        } },
+        .{ .name = "mod05_theme", .root = "src/05/types.zig", .deps = &.{"mod03_element_store"}, .extra_imports = &.{
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+        } },
+        .{ .name = "mod06_markup", .root = "src/06/types.zig", .deps = &.{ "mod03_element_store", "mod05_theme" }, .extra_imports = &.{
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+            ialias("../05_theme/types.zig", "mod05_theme"),
+        } },
+        .{ .name = "mod07_components", .root = "src/07/types.zig", .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod06_markup", "mod_font_family" }, .extra_imports = &.{
+            ialias("../01/types.zig", "mod01_platform"),
+            ialias("../02/types.zig", "mod02_text"),
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../06/types.zig", "mod06_markup"),
+            ialias("../app/font_family.zig", "mod_font_family"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+            ialias("../05_theme/types.zig", "mod05_theme"),
+            ialias("../06_markup_style/types.zig", "mod06_markup"),
+            ialias("../02_text/types.zig", "mod02_text"),
+        } },
+        .{ .name = "mod08_schema_forms", .root = "src/08/types.zig", .deps = &.{ "mod03_element_store", "mod05_theme", "mod07_components" }, .extra_imports = &.{
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../07/types.zig", "mod07_components"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+            ialias("../05_theme/types.zig", "mod05_theme"),
+            ialias("../07_components/types.zig", "mod07_components"),
+        } },
+        .{ .name = "mod09_renderer", .root = "src/09/types.zig", .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod07_components", "mod_image_atlas", "mod_font_family" }, .extra_imports = &.{
+            ialias("../01/types.zig", "mod01_platform"),
+            ialias("../02/types.zig", "mod02_text"),
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../07/types.zig", "mod07_components"),
+            ialias("../app/image_atlas.zig", "mod_image_atlas"),
+            ialias("../app/font_family.zig", "mod_font_family"),
+            ialias("../03_element_store/types.zig", "mod03_element_store"),
+            ialias("../05_theme/types.zig", "mod05_theme"),
+            ialias("../07_components/types.zig", "mod07_components"),
+            ialias("../06_markup_style/types.zig", "mod06_markup"),
+            ialias("../01_platform/types.zig", "mod01_platform"),
+            ialias("../04_layout_engine/types.zig", "mod04_layout_engine"),
+        } },
+        .{ .name = "mod10_gpu_backend", .root = "src/10/backend.zig", .deps = &.{ "mod01_platform", "mod02_text", "mod09_renderer" }, .extra_imports = &.{
+            ialias("../01/types.zig", "mod01_platform"),
+            ialias("../02/types.zig", "mod02_text"),
+            ialias("../09/types.zig", "mod09_renderer"),
+        } },
         // App helper modules.
-        .{ .name = "mod_font_family",     .root = "src/app/font_family.zig",   .deps = &.{"mod02_text"},
-            .extra_imports = &.{ ialias("../02/types.zig", "mod02_text") } },
-        .{ .name = "mod_image_atlas",     .root = "src/app/image_atlas.zig" },
-        .{ .name = "mod_overlay",         .root = "src/app/overlay.zig",       .deps = &.{"mod01_platform"},
-            .extra_imports = &.{ ialias("../01/types.zig", "mod01_platform") } },
-        .{ .name = "mod_events",          .root = "src/app/events.zig",        .deps = &.{"mod01_platform"},
-            .extra_imports = &.{ ialias("../01/types.zig", "mod01_platform") } },
-        .{ .name = "mod_binding",         .root = "src/app/binding.zig",       .deps = &.{"mod07_components"},
-            .extra_imports = &.{ ialias("../07/types.zig", "mod07_components") } },
+        .{ .name = "mod_font_family", .root = "src/app/font_family.zig", .deps = &.{"mod02_text"}, .extra_imports = &.{ialias("../02/types.zig", "mod02_text")} },
+        .{ .name = "mod_image_atlas", .root = "src/app/image_atlas.zig" },
+        .{ .name = "mod_overlay", .root = "src/app/overlay.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
+        .{ .name = "mod_events", .root = "src/app/events.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
+        .{ .name = "mod_binding", .root = "src/app/binding.zig", .deps = &.{"mod07_components"}, .extra_imports = &.{ialias("../07/types.zig", "mod07_components")} },
         // Module 13 — Chart and data visualization (M26/M27). Used by demo ecommerce screen.
-        .{ .name = "mod13_charts",        .root = "src/13/chart.zig",          .deps = &.{"mod01_platform"},
-            .extra_imports = &.{ ialias("../01/types.zig", "mod01_platform") } },
-        .{ .name = "mod_navigator",       .root = "src/app/navigator.zig",     .deps = &.{ "mod07_components", "mod05_theme", "mod_error_boundary" },
-            .extra_imports = &.{
-                ialias("../07/types.zig", "mod07_components"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("error_boundary.zig", "mod_error_boundary"),
-            } },
+        .{ .name = "mod13_charts", .root = "src/13/chart.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
+        .{ .name = "mod_navigator", .root = "src/app/navigator.zig", .deps = &.{ "mod07_components", "mod05_theme", "mod_error_boundary" }, .extra_imports = &.{
+            ialias("../07/types.zig", "mod07_components"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("error_boundary.zig", "mod_error_boundary"),
+        } },
         .{ .name = "mod_persistent_settings", .root = "src/app/persistent_settings.zig" },
-        .{ .name = "mod_file_logger",     .root = "src/app/file_logger.zig" },
-        .{ .name = "mod_logger",          .root = "src/app/logger.zig",        .deps = &.{"mod_file_logger"},
-            .extra_imports = &.{ ialias("file_logger.zig", "mod_file_logger") } },
-        .{ .name = "mod_budgeted_arena",  .root = "src/app/budgeted_arena.zig" },
-        .{ .name = "mod_window_state",    .root = "src/app/window_state.zig",  .deps = &.{ "mod_persistent_settings", "mod01_platform" },
-            .extra_imports = &.{
-                ialias("../01/types.zig", "mod01_platform"),
-                ialias("persistent_settings.zig", "mod_persistent_settings"),
-            } },
-        .{ .name = "mod_error_boundary",  .root = "src/app/error_boundary.zig",.deps = &.{ "mod07_components", "mod05_theme", "mod06_markup" },
-            .extra_imports = &.{
-                ialias("../07/types.zig", "mod07_components"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../06/types.zig", "mod06_markup"),
-            } },
-        .{ .name = "mod_startup_error",   .root = "src/app/startup_error.zig" },
+        .{ .name = "mod_file_logger", .root = "src/app/file_logger.zig" },
+        .{ .name = "mod_logger", .root = "src/app/logger.zig", .deps = &.{"mod_file_logger"}, .extra_imports = &.{ialias("file_logger.zig", "mod_file_logger")} },
+        .{ .name = "mod_budgeted_arena", .root = "src/app/budgeted_arena.zig" },
+        .{ .name = "mod_window_state", .root = "src/app/window_state.zig", .deps = &.{ "mod_persistent_settings", "mod01_platform" }, .extra_imports = &.{
+            ialias("../01/types.zig", "mod01_platform"),
+            ialias("persistent_settings.zig", "mod_persistent_settings"),
+        } },
+        .{ .name = "mod_error_boundary", .root = "src/app/error_boundary.zig", .deps = &.{ "mod07_components", "mod05_theme", "mod06_markup" }, .extra_imports = &.{
+            ialias("../07/types.zig", "mod07_components"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../06/types.zig", "mod06_markup"),
+        } },
+        .{ .name = "mod_startup_error", .root = "src/app/startup_error.zig" },
         // M19 auto-update modules.
-        .{ .name = "mod_bspatch",         .root = "src/tools/bspatch.zig" },
-        .{ .name = "mod_update_check",    .root = "src/tools/update_check.zig" },
-        .{ .name = "mod_staged_update",   .root = "src/tools/staged_update.zig" },
-        .{ .name = "mod_delta_download",  .root = "src/tools/delta_download.zig",
-            .deps = &.{"mod_bspatch"},
-            .extra_imports = &.{ ialias("bspatch.zig", "mod_bspatch") } },
-        .{ .name = "mod_update_ui",       .root = "src/app/update_ui.zig",
-            .deps = &.{ "mod_update_check", "mod_delta_download", "mod_staged_update" },
-            .extra_imports = &.{
-                ialias("../tools/update_check.zig", "mod_update_check"),
-                ialias("../tools/delta_download.zig", "mod_delta_download"),
-                ialias("../tools/staged_update.zig", "mod_staged_update"),
-            } },
-        .{ .name = "mod_tray",            .root = "src/app/tray.zig",          .deps = &.{"mod07_components"},
-            .extra_imports = &.{ ialias("../07/types.zig", "mod07_components") } },
+        .{ .name = "mod_bspatch", .root = "src/tools/bspatch.zig" },
+        .{ .name = "mod_update_check", .root = "src/tools/update_check.zig" },
+        .{ .name = "mod_staged_update", .root = "src/tools/staged_update.zig" },
+        .{ .name = "mod_delta_download", .root = "src/tools/delta_download.zig", .deps = &.{"mod_bspatch"}, .extra_imports = &.{ialias("bspatch.zig", "mod_bspatch")} },
+        .{ .name = "mod_update_ui", .root = "src/app/update_ui.zig", .deps = &.{ "mod_update_check", "mod_delta_download", "mod_staged_update" }, .extra_imports = &.{
+            ialias("../tools/update_check.zig", "mod_update_check"),
+            ialias("../tools/delta_download.zig", "mod_delta_download"),
+            ialias("../tools/staged_update.zig", "mod_staged_update"),
+        } },
+        .{ .name = "mod_tray", .root = "src/app/tray.zig", .deps = &.{"mod07_components"}, .extra_imports = &.{ialias("../07/types.zig", "mod07_components")} },
         // mod_app_impl.
-        .{ .name = "mod_app_impl",        .root = "src/app/app.zig",           .deps = &.{
-            "mod01_platform", "mod02_text", "mod03_element_store", "mod04_layout_engine",
-            "mod05_theme", "mod06_markup", "mod07_components", "mod08_schema_forms",
-            "mod09_renderer", "mod10_gpu_backend",
-            "mod_overlay", "mod_binding", "mod_image_atlas", "mod_font_family",
-            "mod_events", "mod_navigator", "mod_persistent_settings",
-            "mod_file_logger", "mod_logger", "mod_budgeted_arena",
-            "mod_window_state", "mod_error_boundary", "mod_startup_error", "mod_tray",
-        },
+        .{
+            .name = "mod_app_impl",
+            .root = "src/app/app.zig",
+            .deps = &.{
+                "mod01_platform",          "mod02_text",         "mod03_element_store", "mod04_layout_engine",
+                "mod05_theme",             "mod06_markup",       "mod07_components",    "mod08_schema_forms",
+                "mod09_renderer",          "mod10_gpu_backend",  "mod_overlay",         "mod_binding",
+                "mod_image_atlas",         "mod_font_family",    "mod_events",          "mod_navigator",
+                "mod_persistent_settings", "mod_file_logger",    "mod_logger",          "mod_budgeted_arena",
+                "mod_window_state",        "mod_error_boundary", "mod_startup_error",   "mod_tray",
+            },
             .extra_imports = &.{
                 ialias("../01/types.zig", "mod01_platform"),
                 ialias("../02/types.zig", "mod02_text"),
@@ -313,31 +287,31 @@ pub fn build(b: *std.Build) void {
                 ialias("error_boundary.zig", "mod_error_boundary"),
                 ialias("startup_error.zig", "mod_startup_error"),
                 ialias("tray.zig", "mod_tray"),
-            } },
+            },
+        },
         // Module 11 — complex script shaping and bidi (M24).
         // HarfBuzz include path and library are wired below after the module map is built.
-        .{ .name = "mod11_shaping",       .root = "src/11/types.zig" },
+        .{ .name = "mod11_shaping", .root = "src/11/types.zig" },
 
         // mod_app — public root module.
-        .{ .name = "mod_app",             .root = "src/app/types.zig",         .deps = &.{
-            "mod01_platform", "mod02_text", "mod03_element_store", "mod04_layout_engine",
-            "mod05_theme", "mod06_markup", "mod07_components", "mod08_schema_forms",
-            "mod09_renderer",
-            "mod_app_impl", "mod_events", "mod_navigator", "mod_overlay", "mod_binding",
-        },
-            .extra_imports = &.{
-                ialias("../01/types.zig", "mod01_platform"),
-                ialias("../02/types.zig", "mod02_text"),
-                ialias("../03/types.zig", "mod03_element_store"),
-                ialias("../05/types.zig", "mod05_theme"),
-                ialias("../06/types.zig", "mod06_markup"),
-                ialias("../07/types.zig", "mod07_components"),
-                ialias("app.zig", "mod_app_impl"),
-                ialias("events.zig", "mod_events"),
-                ialias("navigator.zig", "mod_navigator"),
-                ialias("overlay.zig", "mod_overlay"),
-                ialias("binding.zig", "mod_binding"),
-            } },
+        .{ .name = "mod_app", .root = "src/app/types.zig", .deps = &.{
+            "mod01_platform", "mod02_text",   "mod03_element_store", "mod04_layout_engine",
+            "mod05_theme",    "mod06_markup", "mod07_components",    "mod08_schema_forms",
+            "mod09_renderer", "mod_app_impl", "mod_events",          "mod_navigator",
+            "mod_overlay",    "mod_binding",
+        }, .extra_imports = &.{
+            ialias("../01/types.zig", "mod01_platform"),
+            ialias("../02/types.zig", "mod02_text"),
+            ialias("../03/types.zig", "mod03_element_store"),
+            ialias("../05/types.zig", "mod05_theme"),
+            ialias("../06/types.zig", "mod06_markup"),
+            ialias("../07/types.zig", "mod07_components"),
+            ialias("app.zig", "mod_app_impl"),
+            ialias("events.zig", "mod_events"),
+            ialias("navigator.zig", "mod_navigator"),
+            ialias("overlay.zig", "mod_overlay"),
+            ialias("binding.zig", "mod_binding"),
+        } },
     };
 
     // -----------------------------------------------------------------------
@@ -460,22 +434,22 @@ pub fn build(b: *std.Build) void {
 
     const accept_01 = createTest(b, target, optimize, &module_map, "01-smoke-test", "docs/specs/01.smoke_test.zig", &.{ia("types.zig", "mod01_platform")}, false, false);
     addGpuLinks(accept_01.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
-    const unit_01   = createTest(b, target, optimize, &module_map, "01-unit-test", "src/01/01_test.zig", &.{ia("types.zig", "mod01_platform")}, false, false);
+    const unit_01 = createTest(b, target, optimize, &module_map, "01-unit-test", "src/01/01_test.zig", &.{ia("types.zig", "mod01_platform")}, false, false);
     addGpuLinks(unit_01.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
     const accept_02 = createTest(b, target, optimize, &module_map, "02-acceptance-test", "docs/specs/02.acceptance_test.zig", &.{ia("types.zig", "mod02_text")}, false, false);
-    const unit_02   = createTest(b, target, optimize, &module_map, "02-unit-test", "src/02/02_test.zig", &.{ia("types.zig", "mod02_text")}, false, true);
+    const unit_02 = createTest(b, target, optimize, &module_map, "02-unit-test", "src/02/02_test.zig", &.{ia("types.zig", "mod02_text")}, false, true);
     const accept_03 = createTest(b, target, optimize, &module_map, "03-acceptance-test", "docs/specs/03.acceptance_test.zig", &.{ia("types.zig", "mod03_element_store")}, false, false);
-    const unit_03   = createTest(b, target, optimize, &module_map, "03-unit-test", "src/03/03_test.zig", &.{ia("types.zig", "mod03_element_store")}, false, false);
+    const unit_03 = createTest(b, target, optimize, &module_map, "03-unit-test", "src/03/03_test.zig", &.{ia("types.zig", "mod03_element_store")}, false, false);
     const accept_04 = createTest(b, target, optimize, &module_map, "04-acceptance-test", "docs/specs/04.acceptance_test.zig", &.{
         ia("types.zig", "mod04_layout_engine"),
         ia("../03_element_store/types.zig", "mod03_element_store"),
     }, false, false);
-    const unit_04   = createTest(b, target, optimize, &module_map, "04-unit-test", "src/04/04_test.zig", &.{
+    const unit_04 = createTest(b, target, optimize, &module_map, "04-unit-test", "src/04/04_test.zig", &.{
         ia("types.zig", "mod04_layout_engine"),
         ia("../03_element_store/types.zig", "mod03_element_store"),
     }, false, false);
     const accept_05 = createTest(b, target, optimize, &module_map, "05-acceptance-test", "docs/specs/05.acceptance_test.zig", &.{ia("types.zig", "mod05_theme")}, false, false);
-    const unit_05   = createTest(b, target, optimize, &module_map, "05-unit-test", "src/05/05_test.zig", &.{
+    const unit_05 = createTest(b, target, optimize, &module_map, "05-unit-test", "src/05/05_test.zig", &.{
         ia("../05/types.zig", "mod05_theme"),
         ia("../03/types.zig", "mod03_element_store"),
     }, false, false);
@@ -484,7 +458,7 @@ pub fn build(b: *std.Build) void {
         ia("../03_element_store/types.zig", "mod03_element_store"),
         ia("../05_theme/types.zig", "mod05_theme"),
     }, false, false);
-    const unit_06   = createTest(b, target, optimize, &module_map, "06-unit-test", "src/06/06_test.zig", &.{
+    const unit_06 = createTest(b, target, optimize, &module_map, "06-unit-test", "src/06/06_test.zig", &.{
         ia("../06/types.zig", "mod06_markup"),
         ia("../03/types.zig", "mod03_element_store"),
         ia("../05/types.zig", "mod05_theme"),
@@ -497,7 +471,7 @@ pub fn build(b: *std.Build) void {
         ia("../02_text/types.zig", "mod02_text"),
         ia("../app/font_family.zig", "mod_font_family"),
     }, false, false);
-    const unit_07   = createTest(b, target, optimize, &module_map, "07-unit-test", "src/07/07_test.zig", &.{
+    const unit_07 = createTest(b, target, optimize, &module_map, "07-unit-test", "src/07/07_test.zig", &.{
         ia("types.zig", "mod07_components"),
         ia("../03/types.zig", "mod03_element_store"),
         ia("../05/types.zig", "mod05_theme"),
@@ -509,12 +483,12 @@ pub fn build(b: *std.Build) void {
         ia("../07_components/types.zig", "mod07_components"),
         ia("../05_theme/types.zig", "mod05_theme"),
     }, false, false);
-    const unit_08   = createTest(b, target, optimize, &module_map, "08-unit-test", "src/08/08_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const unit_08 = createTest(b, target, optimize, &module_map, "08-unit-test", "src/08/08_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
     // M18 sub-requirement unit tests
-    const m18_combinator_test_     = createTest(b, target, optimize, &module_map, "08-combinator-test",     "src/08/combinator_test.zig",     &.{ia("types.zig", "mod08_schema_forms")}, false, false);
-    const m18_dep_required_test_   = createTest(b, target, optimize, &module_map, "08-dep-required-test",   "src/08/dependent_required_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
-    const m18_conditional_test_    = createTest(b, target, optimize, &module_map, "08-conditional-test",    "src/08/conditional_test.zig",    &.{ia("types.zig", "mod08_schema_forms")}, false, false);
-    const m18_array_field_test_    = createTest(b, target, optimize, &module_map, "08-array-field-test",    "src/08/array_field_test.zig",    &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_combinator_test_ = createTest(b, target, optimize, &module_map, "08-combinator-test", "src/08/combinator_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_dep_required_test_ = createTest(b, target, optimize, &module_map, "08-dep-required-test", "src/08/dependent_required_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_conditional_test_ = createTest(b, target, optimize, &module_map, "08-conditional-test", "src/08/conditional_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
+    const m18_array_field_test_ = createTest(b, target, optimize, &module_map, "08-array-field-test", "src/08/array_field_test.zig", &.{ia("types.zig", "mod08_schema_forms")}, false, false);
     const accept_09 = createTest(b, target, optimize, &module_map, "09-acceptance-test", "docs/specs/09.acceptance_test.zig", &.{
         ia("types.zig", "mod09_renderer"),
         ia("../03_element_store/types.zig", "mod03_element_store"),
@@ -526,7 +500,7 @@ pub fn build(b: *std.Build) void {
         ia("../app/font_family.zig", "mod_font_family"),
     }, false, false);
     addGpuLinks(accept_09.root_module, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
-    const unit_09   = createTest(b, target, optimize, &module_map, "09-unit-test", "src/09/09_test.zig", &.{
+    const unit_09 = createTest(b, target, optimize, &module_map, "09-unit-test", "src/09/09_test.zig", &.{
         ia("types.zig", "mod09_renderer"),
         ia("../03/types.zig", "mod03_element_store"),
         ia("../05/types.zig", "mod05_theme"),
@@ -572,45 +546,45 @@ pub fn build(b: *std.Build) void {
     }
 
     // App tests
-    const app_test_           = createTest(b, target, optimize, &module_map, "app-test",           "src/app/app_test.zig",           &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
-    const events_test         = createTest(b, target, optimize, &module_map, "events-test",        "src/app/events_test.zig",        &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
-    const signal_test_        = createTest(b, target, optimize, &module_map, "signal-test",        "src/app/signal_test.zig",        &.{}, false, false);
+    const app_test_ = createTest(b, target, optimize, &module_map, "app-test", "src/app/app_test.zig", &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
+    const events_test = createTest(b, target, optimize, &module_map, "events-test", "src/app/events_test.zig", &.{ ia("types.zig", "mod_app"), ia("../01/types.zig", "mod01_platform"), ia("events.zig", "mod_events") }, false, false);
+    const signal_test_ = createTest(b, target, optimize, &module_map, "signal-test", "src/app/signal_test.zig", &.{}, false, false);
     const anim_timeline_test_ = createTest(b, target, optimize, &module_map, "anim-timeline-test", "src/app/anim_timeline_test.zig", &.{}, false, false);
-    const overlay_test        = createTest(b, target, optimize, &module_map, "overlay-test",       "src/app/overlay_test.zig",       &.{ ia("overlay.zig", "mod_overlay"), ia("../01/types.zig", "mod01_platform") }, false, false);
-    const binding_test        = createTest(b, target, optimize, &module_map, "binding-test",       "src/app/binding_test.zig",       &.{ ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../03/types.zig", "mod03_element_store") }, false, true);
-    const m7_widget_test      = createTest(b, target, optimize, &module_map, "m7-widget-test",     "src/07/m7_widget_test.zig",      &.{ ia("types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
-    const toast_test          = createTest(b, target, optimize, &module_map, "toast-test",         "src/app/toast_test.zig",         &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("overlay.zig", "mod_overlay") }, false, true);
-    const dialog_test         = createTest(b, target, optimize, &module_map, "dialog-test",        "src/app/dialog_test.zig",        &.{ ia("../01/types.zig", "mod01_platform"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("overlay.zig", "mod_overlay"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
-    const date_util_test      = createTest(b, target, optimize, &module_map, "date-util-test",     "src/app/date_util_test.zig",     &.{ ia("../07/types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
-    const locale_test_        = createTest(b, target, optimize, &module_map, "locale-test",        "src/app/locale_test.zig",        &.{}, false, false);
-    const context_menu_test   = createTest(b, target, optimize, &module_map, "context-menu-test",  "src/app/context_menu_test.zig",  &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("overlay.zig", "mod_overlay"), ia("font_family.zig", "mod_font_family") }, false, true);
-    const nav_test            = createTest(b, target, optimize, &module_map, "nav-test",           "src/app/navigator_test.zig",     &.{ ia("types.zig", "mod_app"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme") }, false, true);
-    const tooltip_test        = createTest(b, target, optimize, &module_map, "tooltip-test",       "src/app/tooltip_test.zig",       &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("../07/types.zig", "mod07_components"), ia("overlay.zig", "mod_overlay"), ia("font_family.zig", "mod_font_family") }, false, true);
-    const app_state_test_     = createTest(b, target, optimize, &module_map, "app-state-test",     "src/app/app_state_test.zig",     &.{}, false, false);
-    const settings_test_      = createTest(b, target, optimize, &module_map, "settings-test",      "src/app/persistent_settings_test.zig", &.{}, false, false);
-    const multi_window_test_  = createTest(b, target, optimize, &module_map, "multi-window-test",  "src/app/multi_window_test.zig",  &.{ ia("../01/types.zig", "mod01_platform"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../03/types.zig", "mod03_element_store"), ia("../app/font_family.zig", "mod_font_family"), ia("overlay.zig", "mod_overlay"), ia("binding.zig", "mod_binding"), ia("events.zig", "mod_events"), ia("navigator.zig", "mod_navigator") }, false, true);
+    const overlay_test = createTest(b, target, optimize, &module_map, "overlay-test", "src/app/overlay_test.zig", &.{ ia("overlay.zig", "mod_overlay"), ia("../01/types.zig", "mod01_platform") }, false, false);
+    const binding_test = createTest(b, target, optimize, &module_map, "binding-test", "src/app/binding_test.zig", &.{ ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../03/types.zig", "mod03_element_store") }, false, true);
+    const m7_widget_test = createTest(b, target, optimize, &module_map, "m7-widget-test", "src/07/m7_widget_test.zig", &.{ ia("types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
+    const toast_test = createTest(b, target, optimize, &module_map, "toast-test", "src/app/toast_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("overlay.zig", "mod_overlay") }, false, true);
+    const dialog_test = createTest(b, target, optimize, &module_map, "dialog-test", "src/app/dialog_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("overlay.zig", "mod_overlay"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
+    const date_util_test = createTest(b, target, optimize, &module_map, "date-util-test", "src/app/date_util_test.zig", &.{ ia("../07/types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../app/font_family.zig", "mod_font_family") }, false, true);
+    const locale_test_ = createTest(b, target, optimize, &module_map, "locale-test", "src/app/locale_test.zig", &.{}, false, false);
+    const context_menu_test = createTest(b, target, optimize, &module_map, "context-menu-test", "src/app/context_menu_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("overlay.zig", "mod_overlay"), ia("font_family.zig", "mod_font_family") }, false, true);
+    const nav_test = createTest(b, target, optimize, &module_map, "nav-test", "src/app/navigator_test.zig", &.{ ia("types.zig", "mod_app"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme") }, false, true);
+    const tooltip_test = createTest(b, target, optimize, &module_map, "tooltip-test", "src/app/tooltip_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("../07/types.zig", "mod07_components"), ia("overlay.zig", "mod_overlay"), ia("font_family.zig", "mod_font_family") }, false, true);
+    const app_state_test_ = createTest(b, target, optimize, &module_map, "app-state-test", "src/app/app_state_test.zig", &.{}, false, false);
+    const settings_test_ = createTest(b, target, optimize, &module_map, "settings-test", "src/app/persistent_settings_test.zig", &.{}, false, false);
+    const multi_window_test_ = createTest(b, target, optimize, &module_map, "multi-window-test", "src/app/multi_window_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../07/types.zig", "mod07_components"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../03/types.zig", "mod03_element_store"), ia("../app/font_family.zig", "mod_font_family"), ia("overlay.zig", "mod_overlay"), ia("binding.zig", "mod_binding"), ia("events.zig", "mod_events"), ia("navigator.zig", "mod_navigator") }, false, true);
     const debug_overlay_test_ = createTest(b, target, optimize, &module_map, "debug-overlay-test", "src/app/debug_overlay_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme"), ia("../07/types.zig", "mod07_components") }, false, true);
-    const scene_dump_test_    = createTest(b, target, optimize, &module_map, "scene-dump-test",    "src/07/debug_test.zig",           &.{ia("types.zig", "mod07_components")}, false, false);
-    const perf_hud_test_      = createTest(b, target, optimize, &module_map, "perf-hud-test",      "src/app/perf_hud_test.zig",      &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme") }, false, true);
-    const theme_swap_test_    = createTest(b, target, optimize, &module_map, "theme-swap-test",    "src/app/theme_swap_test.zig",    &.{ia("../05/types.zig", "mod05_theme")}, false, false);
-    const font_scale_test_    = createTest(b, target, optimize, &module_map, "font-scale-test",    "src/app/font_scale_test.zig",    &.{ia("../05/types.zig", "mod05_theme")}, false, false);
+    const scene_dump_test_ = createTest(b, target, optimize, &module_map, "scene-dump-test", "src/07/debug_test.zig", &.{ia("types.zig", "mod07_components")}, false, false);
+    const perf_hud_test_ = createTest(b, target, optimize, &module_map, "perf-hud-test", "src/app/perf_hud_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../02/types.zig", "mod02_text"), ia("../05/types.zig", "mod05_theme") }, false, true);
+    const theme_swap_test_ = createTest(b, target, optimize, &module_map, "theme-swap-test", "src/app/theme_swap_test.zig", &.{ia("../05/types.zig", "mod05_theme")}, false, false);
+    const font_scale_test_ = createTest(b, target, optimize, &module_map, "font-scale-test", "src/app/font_scale_test.zig", &.{ia("../05/types.zig", "mod05_theme")}, false, false);
     const high_contrast_test_ = createTest(b, target, optimize, &module_map, "high-contrast-test", "src/05/high_contrast_test.zig", &.{ ia("../05/types.zig", "mod05_theme"), ia("../03/types.zig", "mod03_element_store") }, false, false);
 
     // M10 hardening tests.
-    const file_logger_test_    = createTest(b, target, optimize, &module_map, "file-logger-test",    "src/app/file_logger_test.zig",    &.{ ia("file_logger.zig", "mod_file_logger"), ia("app.zig", "mod_app_impl") }, false, false);
-    const budget_arena_test_   = createTest(b, target, optimize, &module_map, "budget-arena-test",   "src/app/budgeted_arena_test.zig", &.{ ia("budgeted_arena.zig", "mod_budgeted_arena"), ia("app.zig", "mod_app_impl") }, false, false);
-    const startup_error_test_  = createTest(b, target, optimize, &module_map, "startup-error-test",  "src/app/startup_error_test.zig",  &.{ia("startup_error.zig", "mod_startup_error")}, false, false);
-    const window_state_test_   = createTest(b, target, optimize, &module_map, "window-state-test",   "src/app/window_state_test.zig",   &.{ ia("window_state.zig", "mod_window_state"), ia("persistent_settings.zig", "mod_persistent_settings"), ia("app.zig", "mod_app_impl") }, false, false);
+    const file_logger_test_ = createTest(b, target, optimize, &module_map, "file-logger-test", "src/app/file_logger_test.zig", &.{ ia("file_logger.zig", "mod_file_logger"), ia("app.zig", "mod_app_impl") }, false, false);
+    const budget_arena_test_ = createTest(b, target, optimize, &module_map, "budget-arena-test", "src/app/budgeted_arena_test.zig", &.{ ia("budgeted_arena.zig", "mod_budgeted_arena"), ia("app.zig", "mod_app_impl") }, false, false);
+    const startup_error_test_ = createTest(b, target, optimize, &module_map, "startup-error-test", "src/app/startup_error_test.zig", &.{ia("startup_error.zig", "mod_startup_error")}, false, false);
+    const window_state_test_ = createTest(b, target, optimize, &module_map, "window-state-test", "src/app/window_state_test.zig", &.{ ia("window_state.zig", "mod_window_state"), ia("persistent_settings.zig", "mod_persistent_settings"), ia("app.zig", "mod_app_impl") }, false, false);
     const error_boundary_test_ = createTest(b, target, optimize, &module_map, "error-boundary-test", "src/app/error_boundary_test.zig", &.{ ia("error_boundary.zig", "mod_error_boundary"), ia("../05/types.zig", "mod05_theme"), ia("../07/types.zig", "mod07_components"), ia("app.zig", "mod_app_impl") }, false, true);
-    const m11_test_            = createTest(b, target, optimize, &module_map, "m11-test",            "src/app/m11_test.zig",            &.{ ia("../01/types.zig", "mod01_platform"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../07/types.zig", "mod07_components"), ia("app.zig", "mod_app_impl") }, false, true);
-    const m12_test_            = createTest(b, target, optimize, &module_map, "m12-test",            "src/app/m12_test.zig",            &.{ ia("../01/types.zig", "mod01_platform"), ia("../03/types.zig", "mod03_element_store"), ia("../04/types.zig", "mod04_layout_engine"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../07/types.zig", "mod07_components"), ia("../09/types.zig", "mod09_renderer"), ia("app.zig", "mod_app_impl") }, false, true);
-    const m16_test_            = createTest(b, target, optimize, &module_map, "m16-test",            "src/app/m16_test.zig",            &.{ ia("../01/types.zig", "mod01_platform"), ia("../05/types.zig", "mod05_theme"), ia("app.zig", "mod_app_impl") }, false, false);
-    const m17_test_            = createTest(b, target, optimize, &module_map, "m17-test",            "src/app/m17_test.zig",            &.{ ia("../07/types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup") }, false, true);
-    const tray_test_           = createTest(b, target, optimize, &module_map, "tray-test",           "src/app/tray_test.zig",           &.{ ia("tray.zig", "mod_tray"), ia("app.zig", "mod_app_impl") }, false, true);
+    const m11_test_ = createTest(b, target, optimize, &module_map, "m11-test", "src/app/m11_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../07/types.zig", "mod07_components"), ia("app.zig", "mod_app_impl") }, false, true);
+    const m12_test_ = createTest(b, target, optimize, &module_map, "m12-test", "src/app/m12_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../03/types.zig", "mod03_element_store"), ia("../04/types.zig", "mod04_layout_engine"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup"), ia("../07/types.zig", "mod07_components"), ia("../09/types.zig", "mod09_renderer"), ia("app.zig", "mod_app_impl") }, false, true);
+    const m16_test_ = createTest(b, target, optimize, &module_map, "m16-test", "src/app/m16_test.zig", &.{ ia("../01/types.zig", "mod01_platform"), ia("../05/types.zig", "mod05_theme"), ia("app.zig", "mod_app_impl") }, false, false);
+    const m17_test_ = createTest(b, target, optimize, &module_map, "m17-test", "src/app/m17_test.zig", &.{ ia("../07/types.zig", "mod07_components"), ia("../03/types.zig", "mod03_element_store"), ia("../05/types.zig", "mod05_theme"), ia("../06/types.zig", "mod06_markup") }, false, true);
+    const tray_test_ = createTest(b, target, optimize, &module_map, "tray-test", "src/app/tray_test.zig", &.{ ia("tray.zig", "mod_tray"), ia("app.zig", "mod_app_impl") }, false, true);
 
     // M19 auto-update tests (pure — no network, no GPU).
-    const update_check_test_ = createTest(b, target, optimize, &module_map, "test-update-check", "src/tools/update_check_test.zig", &.{ ia("update_check.zig", "mod_update_check") }, false, false);
-    const bspatch_test_      = createTest(b, target, optimize, &module_map, "test-bspatch",      "src/tools/bspatch_test.zig",      &.{ ia("bspatch.zig",      "mod_bspatch") },      false, false);
+    const update_check_test_ = createTest(b, target, optimize, &module_map, "test-update-check", "src/tools/update_check_test.zig", &.{ia("update_check.zig", "mod_update_check")}, false, false);
+    const bspatch_test_ = createTest(b, target, optimize, &module_map, "test-bspatch", "src/tools/bspatch_test.zig", &.{ia("bspatch.zig", "mod_bspatch")}, false, false);
 
     // M24: module 11 complex-script shaping + bidi unit tests (pure, no GPU, no font required).
     const unit_11 = createTest(b, target, optimize, &module_map, "11-unit-test", "src/11/11_test.zig", &.{
@@ -669,86 +643,81 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Aggregate green-build gate: run every module test (constitution 7, SR-06)");
     inline for (.{
-        accept_01, unit_01, accept_02, unit_02, accept_03, unit_03,
-        accept_04, unit_04, accept_05, unit_05, accept_06, unit_06,
-        accept_07, unit_07, accept_08, unit_08,
-        m18_combinator_test_, m18_dep_required_test_, m18_conditional_test_, m18_array_field_test_,
-        accept_09, unit_09,
-        accept_10, unit_10,
-        app_test_, events_test, signal_test_, anim_timeline_test_, overlay_test,
-        binding_test, m7_widget_test, toast_test, dialog_test, date_util_test,
-        locale_test_, context_menu_test, nav_test, tooltip_test,
-        app_state_test_, settings_test_, multi_window_test_, debug_overlay_test_,
-        scene_dump_test_, perf_hud_test_, theme_swap_test_, font_scale_test_,
-        high_contrast_test_, file_logger_test_, budget_arena_test_,
-        startup_error_test_, window_state_test_, error_boundary_test_,
-        m11_test_, m12_test_, m16_test_, m17_test_, tray_test_,
-        update_check_test_, bspatch_test_,
+        accept_01,             unit_01,               accept_02,          unit_02,              accept_03,            unit_03,
+        accept_04,             unit_04,               accept_05,          unit_05,              accept_06,            unit_06,
+        accept_07,             unit_07,               accept_08,          unit_08,              m18_combinator_test_, m18_dep_required_test_,
+        m18_conditional_test_, m18_array_field_test_, accept_09,          unit_09,              accept_10,            unit_10,
+        app_test_,             events_test,           signal_test_,       anim_timeline_test_,  overlay_test,         binding_test,
+        m7_widget_test,        toast_test,            dialog_test,        date_util_test,       locale_test_,         context_menu_test,
+        nav_test,              tooltip_test,          app_state_test_,    settings_test_,       multi_window_test_,   debug_overlay_test_,
+        scene_dump_test_,      perf_hud_test_,        theme_swap_test_,   font_scale_test_,     high_contrast_test_,  file_logger_test_,
+        budget_arena_test_,    startup_error_test_,   window_state_test_, error_boundary_test_, m11_test_,            m12_test_,
+        m16_test_,             m17_test_,             tray_test_,         update_check_test_,   bspatch_test_,
     }) |t| {
         test_step.dependOn(&t.step);
     }
 
-    _ = addTestStep(b, "test-01",          "Run module 01 smoke tests (needs GPU)", accept_01);
-    _ = addTestStep(b, "test-01-unit",     "Run module 01 unit tests (GPU tests auto-skip)", unit_01);
-    _ = addTestStep(b, "test-02",          "Run module 02 acceptance tests", accept_02);
-    _ = addTestStep(b, "test-02-unit",     "Run module 02 unit tests", unit_02);
-    _ = addTestStep(b, "test-03",          "Run module 03 acceptance tests", accept_03);
-    _ = addTestStep(b, "test-03-unit",     "Run module 03 unit tests", unit_03);
-    _ = addTestStep(b, "test-04",          "Run module 04 acceptance tests", accept_04);
-    _ = addTestStep(b, "test-04-unit",     "Run module 04 unit tests", unit_04);
-    _ = addTestStep(b, "test-05",          "Run module 05 acceptance tests", accept_05);
-    _ = addTestStep(b, "test-05-unit",     "Run module 05 unit tests", unit_05);
-    _ = addTestStep(b, "test-06",          "Run module 06 acceptance tests", accept_06);
-    _ = addTestStep(b, "test-06-unit",     "Run module 06 unit tests", unit_06);
-    _ = addTestStep(b, "test-07",          "Run module 07 acceptance tests", accept_07);
-    _ = addTestStep(b, "test-07-unit",     "Run module 07 unit tests", unit_07);
-    _ = addTestStep(b, "test-08",                    "Run module 08 acceptance tests", accept_08);
-    _ = addTestStep(b, "test-08-unit",               "Run module 08 unit tests", unit_08);
-    _ = addTestStep(b, "test-08-combinator",         "Run M18-03 allOf/anyOf/oneOf combinator tests (pure)", m18_combinator_test_);
-    _ = addTestStep(b, "test-08-dep-required",       "Run M18-04 dependentRequired tests (pure)", m18_dep_required_test_);
-    _ = addTestStep(b, "test-08-conditional",        "Run M18-05 if/then/else conditional schema tests (pure)", m18_conditional_test_);
-    _ = addTestStep(b, "test-08-array-field",        "Run M18-06 array field validation tests (pure)", m18_array_field_test_);
-    _ = addTestStep(b, "test-09",          "Run module 09 tests (GPU tests skip if unavailable)", accept_09);
-    _ = addTestStep(b, "test-09-unit",     "Run module 09 unit tests (pure CPU)", unit_09);
-    _ = addTestStep(b, "test-10",          "Run module 10 GPU backend seam tests", accept_10);
-    _ = addTestStep(b, "test-10-unit",     "Run module 10 DX12 unit tests (compile-time + struct, no GPU)", unit_10);
-    _ = addTestStep(b, "test-10-webgpu",   "Run module 10 WebGPU backend unit tests (M23-01, compile-time + struct)", unit_10_webgpu);
-    _ = addTestStep(b, "test-app",         "Run app layer unit tests (headless, no GPU)", app_test_);
-    _ = addTestStep(b, "test-events",      "Run EventQueue unit tests (no GPU, no GLFW)", events_test);
-    _ = addTestStep(b, "test-signal",      "Run Signal/Computed unit tests (pure, no GPU)", signal_test_);
+    _ = addTestStep(b, "test-01", "Run module 01 smoke tests (needs GPU)", accept_01);
+    _ = addTestStep(b, "test-01-unit", "Run module 01 unit tests (GPU tests auto-skip)", unit_01);
+    _ = addTestStep(b, "test-02", "Run module 02 acceptance tests", accept_02);
+    _ = addTestStep(b, "test-02-unit", "Run module 02 unit tests", unit_02);
+    _ = addTestStep(b, "test-03", "Run module 03 acceptance tests", accept_03);
+    _ = addTestStep(b, "test-03-unit", "Run module 03 unit tests", unit_03);
+    _ = addTestStep(b, "test-04", "Run module 04 acceptance tests", accept_04);
+    _ = addTestStep(b, "test-04-unit", "Run module 04 unit tests", unit_04);
+    _ = addTestStep(b, "test-05", "Run module 05 acceptance tests", accept_05);
+    _ = addTestStep(b, "test-05-unit", "Run module 05 unit tests", unit_05);
+    _ = addTestStep(b, "test-06", "Run module 06 acceptance tests", accept_06);
+    _ = addTestStep(b, "test-06-unit", "Run module 06 unit tests", unit_06);
+    _ = addTestStep(b, "test-07", "Run module 07 acceptance tests", accept_07);
+    _ = addTestStep(b, "test-07-unit", "Run module 07 unit tests", unit_07);
+    _ = addTestStep(b, "test-08", "Run module 08 acceptance tests", accept_08);
+    _ = addTestStep(b, "test-08-unit", "Run module 08 unit tests", unit_08);
+    _ = addTestStep(b, "test-08-combinator", "Run M18-03 allOf/anyOf/oneOf combinator tests (pure)", m18_combinator_test_);
+    _ = addTestStep(b, "test-08-dep-required", "Run M18-04 dependentRequired tests (pure)", m18_dep_required_test_);
+    _ = addTestStep(b, "test-08-conditional", "Run M18-05 if/then/else conditional schema tests (pure)", m18_conditional_test_);
+    _ = addTestStep(b, "test-08-array-field", "Run M18-06 array field validation tests (pure)", m18_array_field_test_);
+    _ = addTestStep(b, "test-09", "Run module 09 tests (GPU tests skip if unavailable)", accept_09);
+    _ = addTestStep(b, "test-09-unit", "Run module 09 unit tests (pure CPU)", unit_09);
+    _ = addTestStep(b, "test-10", "Run module 10 GPU backend seam tests", accept_10);
+    _ = addTestStep(b, "test-10-unit", "Run module 10 DX12 unit tests (compile-time + struct, no GPU)", unit_10);
+    _ = addTestStep(b, "test-10-webgpu", "Run module 10 WebGPU backend unit tests (M23-01, compile-time + struct)", unit_10_webgpu);
+    _ = addTestStep(b, "test-app", "Run app layer unit tests (headless, no GPU)", app_test_);
+    _ = addTestStep(b, "test-events", "Run EventQueue unit tests (no GPU, no GLFW)", events_test);
+    _ = addTestStep(b, "test-signal", "Run Signal/Computed unit tests (pure, no GPU)", signal_test_);
     _ = addTestStep(b, "test-anim-timeline", "Run AnimTimeline unit tests (pure, no GPU)", anim_timeline_test_);
-    _ = addTestStep(b, "test-overlay",     "Run OverlayLayer unit tests (no GPU, no GLFW)", overlay_test);
-    _ = addTestStep(b, "test-binding",     "Run BindingSet unit tests (no GPU, no GLFW)", binding_test);
-    _ = addTestStep(b, "test-m7-widget",   "Run Milestone 7 widget unit tests (R70-R79)", m7_widget_test);
-    _ = addTestStep(b, "test-toast",       "Run ToastManager unit tests (R74, no GPU)", toast_test);
-    _ = addTestStep(b, "test-dialog",      "Run DialogManager unit tests (R75, no GPU)", dialog_test);
-    _ = addTestStep(b, "test-date-util",   "Run date utility unit tests (R78, pure)", date_util_test);
-    _ = addTestStep(b, "test-locale",      "Run locale/date formatting unit tests (M15, pure)", locale_test_);
-    _ = addTestStep(b, "test-context-menu","Run ContextMenuManager unit tests (R7D, no GPU)", context_menu_test);
-    _ = addTestStep(b, "test-nav",         "Run Navigator unit tests (R80, headless)", nav_test);
-    _ = addTestStep(b, "test-tooltip",     "Run TooltipManager unit tests (R7C, no GPU)", tooltip_test);
-    _ = addTestStep(b, "test-app-state",   "Run AppState unit tests (R81, pure)", app_state_test_);
-    _ = addTestStep(b, "test-settings",    "Run PersistentSettings unit tests (R82, file I/O)", settings_test_);
-    _ = addTestStep(b, "test-multi-window","Run MultiWindowApp unit tests (R83, headless)", multi_window_test_);
-    _ = addTestStep(b, "test-debug-overlay","Run DebugOverlay unit tests (R90, no GPU)", debug_overlay_test_);
-    _ = addTestStep(b, "test-scene-dump",  "Run Scene dump unit tests (R91, no GPU)", scene_dump_test_);
-    _ = addTestStep(b, "test-perf-hud",    "Run PerfHud unit tests (R92, no GPU)", perf_hud_test_);
-    _ = addTestStep(b, "test-theme-swap",  "Run Theme live-swap unit tests (R93, pure)", theme_swap_test_);
-    _ = addTestStep(b, "test-font-scale",  "Run font-scale unit tests (R94, pure)", font_scale_test_);
-    _ = addTestStep(b, "test-high-contrast","Run high-contrast palette unit tests (R95, pure)", high_contrast_test_);
+    _ = addTestStep(b, "test-overlay", "Run OverlayLayer unit tests (no GPU, no GLFW)", overlay_test);
+    _ = addTestStep(b, "test-binding", "Run BindingSet unit tests (no GPU, no GLFW)", binding_test);
+    _ = addTestStep(b, "test-m7-widget", "Run Milestone 7 widget unit tests (R70-R79)", m7_widget_test);
+    _ = addTestStep(b, "test-toast", "Run ToastManager unit tests (R74, no GPU)", toast_test);
+    _ = addTestStep(b, "test-dialog", "Run DialogManager unit tests (R75, no GPU)", dialog_test);
+    _ = addTestStep(b, "test-date-util", "Run date utility unit tests (R78, pure)", date_util_test);
+    _ = addTestStep(b, "test-locale", "Run locale/date formatting unit tests (M15, pure)", locale_test_);
+    _ = addTestStep(b, "test-context-menu", "Run ContextMenuManager unit tests (R7D, no GPU)", context_menu_test);
+    _ = addTestStep(b, "test-nav", "Run Navigator unit tests (R80, headless)", nav_test);
+    _ = addTestStep(b, "test-tooltip", "Run TooltipManager unit tests (R7C, no GPU)", tooltip_test);
+    _ = addTestStep(b, "test-app-state", "Run AppState unit tests (R81, pure)", app_state_test_);
+    _ = addTestStep(b, "test-settings", "Run PersistentSettings unit tests (R82, file I/O)", settings_test_);
+    _ = addTestStep(b, "test-multi-window", "Run MultiWindowApp unit tests (R83, headless)", multi_window_test_);
+    _ = addTestStep(b, "test-debug-overlay", "Run DebugOverlay unit tests (R90, no GPU)", debug_overlay_test_);
+    _ = addTestStep(b, "test-scene-dump", "Run Scene dump unit tests (R91, no GPU)", scene_dump_test_);
+    _ = addTestStep(b, "test-perf-hud", "Run PerfHud unit tests (R92, no GPU)", perf_hud_test_);
+    _ = addTestStep(b, "test-theme-swap", "Run Theme live-swap unit tests (R93, pure)", theme_swap_test_);
+    _ = addTestStep(b, "test-font-scale", "Run font-scale unit tests (R94, pure)", font_scale_test_);
+    _ = addTestStep(b, "test-high-contrast", "Run high-contrast palette unit tests (R95, pure)", high_contrast_test_);
     _ = addTestStep(b, "test-file-logger", "Run FileLogger unit tests (RA2, file I/O)", file_logger_test_);
-    _ = addTestStep(b, "test-budget-arena","Run BudgetedArena unit tests (RA1, pure)", budget_arena_test_);
-    _ = addTestStep(b, "test-startup-error","Run startup_error unit tests (RA3)", startup_error_test_);
-    _ = addTestStep(b, "test-window-state","Run WindowStateManager unit tests (RA4, headless)", window_state_test_);
-    _ = addTestStep(b, "test-error-boundary","Run ErrorBoundary unit tests (RA0, headless)", error_boundary_test_);
-    _ = addTestStep(b, "test-m11",         "Run M11 input completeness unit tests (RB0-RB5, headless)", m11_test_);
-    _ = addTestStep(b, "test-m12",         "Run M12 layout extension tests (RC0-RC4, headless)", m12_test_);
-    _ = addTestStep(b, "test-m16",         "Run M16 platform integration unit tests (RF1-RF4, headless)", m16_test_);
-    _ = addTestStep(b, "test-m17",         "Run M17 accessibility unit tests (RG1, RG4, RG5, headless)", m17_test_);
-    _ = addTestStep(b, "test-tray",         "Run Tray unit tests (RF0, headless)", tray_test_);
+    _ = addTestStep(b, "test-budget-arena", "Run BudgetedArena unit tests (RA1, pure)", budget_arena_test_);
+    _ = addTestStep(b, "test-startup-error", "Run startup_error unit tests (RA3)", startup_error_test_);
+    _ = addTestStep(b, "test-window-state", "Run WindowStateManager unit tests (RA4, headless)", window_state_test_);
+    _ = addTestStep(b, "test-error-boundary", "Run ErrorBoundary unit tests (RA0, headless)", error_boundary_test_);
+    _ = addTestStep(b, "test-m11", "Run M11 input completeness unit tests (RB0-RB5, headless)", m11_test_);
+    _ = addTestStep(b, "test-m12", "Run M12 layout extension tests (RC0-RC4, headless)", m12_test_);
+    _ = addTestStep(b, "test-m16", "Run M16 platform integration unit tests (RF1-RF4, headless)", m16_test_);
+    _ = addTestStep(b, "test-m17", "Run M17 accessibility unit tests (RG1, RG4, RG5, headless)", m17_test_);
+    _ = addTestStep(b, "test-tray", "Run Tray unit tests (RF0, headless)", tray_test_);
     _ = addTestStep(b, "test-update-check", "Run M19-01 update manifest check unit tests (pure, no network)", update_check_test_);
-    _ = addTestStep(b, "test-bspatch",      "Run M19-02 bspatch unit tests (pure, no I/O)", bspatch_test_);
-    _ = addTestStep(b, "test-11",           "Run M24 complex-script shaping + bidi unit tests (pure, no GPU)", unit_11);
+    _ = addTestStep(b, "test-bspatch", "Run M19-02 bspatch unit tests (pure, no I/O)", bspatch_test_);
+    _ = addTestStep(b, "test-11", "Run M24 complex-script shaping + bidi unit tests (pure, no GPU)", unit_11);
 
     // M26: Chart and data visualization unit tests (pure CPU, no GPU required).
     const unit_13 = createTest(b, target, optimize, &module_map, "13-unit-test", "src/13/13_test.zig", &.{
@@ -904,6 +873,22 @@ pub fn build(b: *std.Build) void {
         const manifest_step = b.step("run-generate-manifest", "Generate update manifest for a package");
         manifest_step.dependOn(&b.addRunArtifact(manifest_exe).step);
     }
+
+    // -------------------------------------------------------------------
+    // clean — remove temporary artifacts scattered across the project tree.
+    // Wired to src/tools/clean.zig (pure Zig, no shell scripts required).
+    // Idempotent: missing directories are warnings, not errors.
+    // -------------------------------------------------------------------
+    {
+        const clean_mod = b.createModule(.{
+            .root_source_file = b.path("src/tools/clean.zig"),
+            .target = b.resolveTargetQuery(.{}),
+            .optimize = .Debug,
+        });
+        const clean_exe = b.addExecutable(.{ .name = "clean", .root_module = clean_mod });
+        const clean_step = b.step("clean", "Remove std.testing.TmpDir artifacts, docs/.agent-context, dist, test-results, build caches");
+        clean_step.dependOn(&b.addRunArtifact(clean_exe).step);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -982,7 +967,7 @@ fn compileDxilShader(
     cmd.addFileArg(b.path(src));
     cmd.addArgs(&.{ "-E", entry });
     cmd.addArgs(&.{ "-T", profile });
-    cmd.addArgs(&.{ "-Fo" });
+    cmd.addArgs(&.{"-Fo"});
     return cmd.addOutputFileArg(out);
 }
 
@@ -1066,10 +1051,10 @@ fn buildGlfw(
     glfw_mod.addIncludePath(.{ .cwd_relative = vulkan_include });
 
     const common = [_][]const u8{
-        "src/context.c", "src/init.c", "src/input.c", "src/monitor.c",
-        "src/platform.c", "src/vulkan.c", "src/window.c",
-        "src/egl_context.c", "src/osmesa_context.c",
-        "src/null_init.c", "src/null_joystick.c", "src/null_monitor.c", "src/null_window.c",
+        "src/context.c",        "src/init.c",      "src/input.c",         "src/monitor.c",
+        "src/platform.c",       "src/vulkan.c",    "src/window.c",        "src/egl_context.c",
+        "src/osmesa_context.c", "src/null_init.c", "src/null_joystick.c", "src/null_monitor.c",
+        "src/null_window.c",
     };
     for (common) |src| glfw_mod.addCSourceFile(.{ .file = dep.path(src), .flags = platform_flags });
 
@@ -1079,18 +1064,18 @@ fn buildGlfw(
             glfw_mod.linkSystemLibrary("user32", .{});
             glfw_mod.linkSystemLibrary("shell32", .{});
             const win = [_][]const u8{
-                "src/win32_init.c", "src/win32_joystick.c", "src/win32_module.c",
-                "src/win32_monitor.c", "src/win32_thread.c", "src/win32_time.c",
-                "src/win32_window.c", "src/wgl_context.c",
+                "src/win32_init.c",    "src/win32_joystick.c", "src/win32_module.c",
+                "src/win32_monitor.c", "src/win32_thread.c",   "src/win32_time.c",
+                "src/win32_window.c",  "src/wgl_context.c",
             };
             for (win) |src| glfw_mod.addCSourceFile(.{ .file = dep.path(src), .flags = platform_flags });
         },
         .linux => {
             glfw_mod.linkSystemLibrary("X11", .{});
             const linux = [_][]const u8{
-                "src/posix_module.c", "src/posix_poll.c", "src/posix_thread.c",
-                "src/posix_time.c", "src/x11_init.c", "src/x11_monitor.c",
-                "src/x11_window.c", "src/xkb_unicode.c", "src/glx_context.c",
+                "src/posix_module.c",   "src/posix_poll.c",  "src/posix_thread.c",
+                "src/posix_time.c",     "src/x11_init.c",    "src/x11_monitor.c",
+                "src/x11_window.c",     "src/xkb_unicode.c", "src/glx_context.c",
                 "src/linux_joystick.c",
             };
             for (linux) |src| glfw_mod.addCSourceFile(.{ .file = dep.path(src), .flags = platform_flags });
