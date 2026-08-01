@@ -388,6 +388,65 @@ that mirrors a real-world asset management UI.
 
 ---
 
+### Screen 14 — AI-Qadam visual analog
+
+**Purpose:** Demonstrate layout fidelity and dark-theme styling by rendering a visual
+analog of the AI-Qadam community platform website (https://aiqadam.org). This screen
+proves the framework can faithfully reproduce real-world website layouts using NodeDesc
+trees, the semantic token model, and responsive grid/flex layout.
+
+**Content:**
+
+- **Header**: Sticky top bar (64 px, bottom border) with:
+  - Logo on left: teal-accented "AI Qadam" mono text (using `tokens.accent_teal`).
+  - Nav links center-left: "Events", "Leaderboard" (plain text).
+  - Selectors + buttons on right: country pill "🇺🇿 Uzbekistan", language pill "English",
+    "Register" outlined button, "Sign in" filled-teal button.
+
+- **Hero**: Centered section with:
+  - Eyebrow: "AI QADAM — COMMUNITY PLATFORM" (mono, letter-spaced, small, muted).
+  - Heading: "AI engineers, building together across Central Asia." (large, bold, white).
+  - Subtitle: "Multi-tenant community platform for AI engineers across Central Asia." (muted).
+  - Two CTAs: "Browse events" (filled teal) and "Join on Telegram" (outlined dark surface).
+
+- **Stats row**: Three equal-width columns, center-aligned:
+  - "COUNTRIES SERVED" (eyebrow) / "3" (value).
+  - "OPERATOR TENANTS" (eyebrow) / "uz · kz · tj" (value).
+  - "CHANNEL" (eyebrow) / "Open community" (value).
+  - Eyebrows: small mono muted. Values: large mono bold.
+
+- **Newsletter card**: Full-width card with:
+  - Heading: "Get events in your city".
+  - Sub: "Monthly digest. No spam. Unsubscribe in one click."
+  - Email label + input (placeholder "you@domain.com").
+  - City (optional) label + input.
+  - Topics (optional) label + wrapped row of 11 pill buttons
+    (AI/ML, LLMs, fintech, robotics, devtools, infra, data, computer-vision, nlp, mlops,
+    hands-on-builder).
+  - "Send me a confirmation" button (filled teal, disabled).
+
+- **Footer**: Three-column grid + bottom strip:
+  - Column 1: "AI Qadam" (large bold) + tagline + "3 countries served" (small mono).
+  - Column 2: "FOLLOW" (eyebrow) + "Telegram ↗" (link).
+  - Column 3: "CONTACT" (eyebrow) + "Partners" + "Press" (links).
+  - Bottom: "© 2026 AI Qadam · Community-as-platform for Central Asian AI engineers"
+    (small mono muted, full-width).
+
+**Theme:** Dark palette (near-black bg, white/light grey text) with teal accent (#2dd4bf)
+on primary CTAs and logo.
+
+**Framework features exercised:** `Text` (multiple sizes and styles via tokens + classes),
+`Button` (filled + outlined styles), `Card`, `Row`, `Column`, `Input`, wrapped layout,
+semantic tokens (`accent_teal`, `text_muted`, `bg_canvas`, `border_subtle`), dark mode
+via `Tokens.dark()`, responsive grid (3-column stats row, full-width newsletter).
+
+**Non-goals (v1):** No backend integration, no working form submission, no interactive
+topic toggling, no real HTTP calls, no i18n switching. All data is hard-coded.
+
+See [RAI_aiqadam_visual_analog.md](RAI_aiqadam_visual_analog.md) for the full specification.
+
+---
+
 ## 4. Persistent sidebar
 
 The sidebar is a `Column` (`w-36 bg-surface`) with one `Button` per screen in ghost style.

@@ -60,6 +60,10 @@ pub const Palette = struct {
     accent_400: Color,
     accent_600: Color,
 
+    // RAI — teal accent palette stop (added 2026-08-01 under AAP §8 for the
+    // AI-Qadam visual analog; additive only, no invariant change).
+    teal_400: Color,
+
     // status
     ok_400: Color,
     warn_400: Color,
@@ -76,7 +80,7 @@ pub const Palette = struct {
     /// out of the box. Implemented here because it is data, not logic.
     pub fn default() Palette {
         return .{
-            .gray_50  = Color.hex(0xFAFAFA), // zinc-50
+            .gray_50 = Color.hex(0xFAFAFA), // zinc-50
             .gray_100 = Color.hex(0xF4F4F5), // zinc-100
             .gray_200 = Color.hex(0xE4E4E7), // zinc-200
             .gray_400 = Color.hex(0xA1A1AA), // zinc-400
@@ -88,9 +92,11 @@ pub const Palette = struct {
             .accent_400 = Color.hex(0x18181B), // zinc-900 = shadcn primary button color
             .accent_600 = Color.hex(0x09090B), // zinc-950
 
-            .ok_400   = Color.hex(0x16A34A), // green-600
+            .teal_400 = Color.hex(0x2DD4BF), // RAI — teal-400 (AI-Qadam primary accent)
+
+            .ok_400 = Color.hex(0x16A34A), // green-600
             .warn_400 = Color.hex(0xD97706), // amber-600
-            .err_400  = Color.hex(0xDC2626), // red-600
+            .err_400 = Color.hex(0xDC2626), // red-600
             .info_400 = Color.hex(0x2563EB), // blue-600
 
             .white = Color.hex(0xFFFFFF),
@@ -113,6 +119,8 @@ pub const Palette = struct {
             .accent_200 = Color.hex(0x4A90D9),
             .accent_400 = Color.hex(0x0055CC),
             .accent_600 = Color.hex(0x003D99),
+
+            .teal_400 = Color.hex(0x4DD0C0),
 
             .ok_400 = Color.hex(0x1A6B00),
             .warn_400 = Color.hex(0x7A4F00),
@@ -139,6 +147,8 @@ pub const Palette = struct {
             .accent_200 = Color.hex(0xFFE066),
             .accent_400 = Color.hex(0xFFCC00),
             .accent_600 = Color.hex(0xCC9900),
+
+            .teal_400 = Color.hex(0x66E0CC),
 
             .ok_400 = Color.hex(0x66DD00),
             .warn_400 = Color.hex(0xFFAA00),
@@ -176,6 +186,12 @@ pub const Tokens = struct {
     accent: Color,
     accent_hover: Color,
     accent_text: Color,
+
+    // RAI — teal accent semantic token (added 2026-08-01 under AAP §8 for the
+    // AI-Qadam visual analog). Mirrors the role of `accent` but makes the
+    // brand-specific teal available without disturbing the default zinc palette
+    // used by other showcase screens.
+    accent_teal: Color,
 
     // semantic status colors
     ok: Color,
@@ -221,6 +237,8 @@ pub const Tokens = struct {
             .accent_hover = p.accent_600,
             .accent_text = p.white,
 
+            .accent_teal = p.teal_400,
+
             .ok = p.ok_400,
             .warn = p.warn_400,
             .err = p.err_400,
@@ -262,6 +280,8 @@ pub const Tokens = struct {
             .accent = p.accent_400,
             .accent_hover = p.accent_200,
             .accent_text = p.white,
+
+            .accent_teal = p.teal_400,
 
             .ok = p.ok_400,
             .warn = p.warn_400,

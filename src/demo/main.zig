@@ -3,29 +3,30 @@
 const std = @import("std");
 const app_types = @import("app");
 
-const App        = app_types.App;
+const App = app_types.App;
 const AppOptions = app_types.AppOptions;
-const Navigator  = app_types.Navigator;
+const Navigator = app_types.Navigator;
 const ToastManager = app_types.ToastManager;
 
-const shared      = @import("shared/types.zig");
+const shared = @import("shared/types.zig");
 const GlobalState = shared.GlobalState;
-const SidebarCb   = shared.SidebarCb;
-const SidebarCbs  = shared.SidebarCbs;
+const SidebarCb = shared.SidebarCb;
+const SidebarCbs = shared.SidebarCbs;
 
-const home_screen   = @import("screens/home.zig");
-const text_screen   = @import("screens/text.zig");
-const forms_screen  = @import("screens/forms.zig");
-const data_screen   = @import("screens/data.zig");
-const theme_screen  = @import("screens/theme.zig");
-const notif_screen  = @import("screens/notifications.zig");
+const home_screen = @import("screens/home.zig");
+const text_screen = @import("screens/text.zig");
+const forms_screen = @import("screens/forms.zig");
+const data_screen = @import("screens/data.zig");
+const theme_screen = @import("screens/theme.zig");
+const notif_screen = @import("screens/notifications.zig");
 const layout_screen = @import("screens/layout.zig");
-const state_screen  = @import("screens/state.zig");
-const m12_screen    = @import("screens/m12.zig");
-const m13_screen    = @import("screens/m13.zig");
+const state_screen = @import("screens/state.zig");
+const m12_screen = @import("screens/m12.zig");
+const m13_screen = @import("screens/m13.zig");
 const dashboard_screen = @import("screens/dashboard.zig");
 const ecommerce_screen = @import("screens/ecommerce.zig");
 const components_screen = @import("screens/components.zig");
+const aiqadam_screen = @import("screens/aiqadam.zig");
 
 /// Combined per-frame tick: runs all screen ticks. Each guards against wrong-screen.
 fn combinedTick(scene: *@import("../07/types.zig").Scene) void {
@@ -38,8 +39,8 @@ var _g_toasts: ?*ToastManager = null;
 
 // --click-idx / --click-count support: fire N synthetic button clicks on a given element
 // index on the second rendered frame (after nav drains). Used for automated screenshot testing.
-var _click_idx:   u32  = 0;
-var _click_count: u32  = 0;
+var _click_idx: u32 = 0;
+var _click_count: u32 = 0;
 var _click_fired: bool = false;
 
 /// Per-frame app-level tick: update toast expiry, tooltip visibility, and rebuild overlay slots.
@@ -102,7 +103,7 @@ pub fn main(init: std.process.Init) !void {
     var screenshot_frames: u32 = 0;
     var screenshot_out: []const u8 = "testdata/screenshot_actual.png";
     var initial_screen: []const u8 = "home";
-    _click_idx   = 0;
+    _click_idx = 0;
     _click_count = 0;
     _click_fired = false;
     {
@@ -128,13 +129,13 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var app = try App.init(gpa, AppOptions{
-        .font_path         = "testdata/DejaVuSans.ttf",
-        .font_size_px      = 14,
+        .font_path = "testdata/DejaVuSans.ttf",
+        .font_size_px = 14,
         .screenshot_frames = screenshot_frames,
-        .screenshot_out    = screenshot_out,
+        .screenshot_out = screenshot_out,
         .window = .{
-            .title  = "zig-gui Showcase",
-            .width  = 1024,
+            .title = "zig-gui Showcase",
+            .width = 1024,
             .height = 1100,
         },
     });
@@ -151,7 +152,10 @@ pub fn main(init: std.process.Init) !void {
     // Wire toast expiry/render tick. Runs every frame before overlay flatten.
     _g_toasts = &toasts;
     app._inner.per_frame_app_fn = toastAppTick;
-    defer { _g_toasts = null; app._inner.per_frame_app_fn = null; }
+    defer {
+        _g_toasts = null;
+        app._inner.per_frame_app_fn = null;
+    }
 
     var nav = Navigator.init(gpa);
     defer nav.deinit();
@@ -159,88 +163,93 @@ pub fn main(init: std.process.Init) !void {
     // -----------------------------------------------------------------------
     // Per-screen context structs — stack-allocated (program lifetime).
     // -----------------------------------------------------------------------
-    var home_ctx    = home_screen.HomeCtx{    .global = undefined };
-    var text_ctx    = text_screen.TextCtx{    .global = undefined };
-    var forms_ctx   = forms_screen.FormsCtx{  .global = undefined };
-    var data_ctx    = data_screen.DataCtx{    .global = undefined };
-    var theme_ctx   = theme_screen.ThemeCtx{  .global = undefined };
-    var notif_ctx   = notif_screen.NotifCtx{  .global = undefined };
-    var layout_ctx  = layout_screen.LayoutCtx{ .global = undefined };
-    var state_ctx   = state_screen.StateCtx{  .global = undefined };
-    var m12_ctx     = m12_screen.M12Ctx{      .global = undefined };
-    var m13_ctx     = m13_screen.M13Ctx{      .global = undefined };
+    var home_ctx = home_screen.HomeCtx{ .global = undefined };
+    var text_ctx = text_screen.TextCtx{ .global = undefined };
+    var forms_ctx = forms_screen.FormsCtx{ .global = undefined };
+    var data_ctx = data_screen.DataCtx{ .global = undefined };
+    var theme_ctx = theme_screen.ThemeCtx{ .global = undefined };
+    var notif_ctx = notif_screen.NotifCtx{ .global = undefined };
+    var layout_ctx = layout_screen.LayoutCtx{ .global = undefined };
+    var state_ctx = state_screen.StateCtx{ .global = undefined };
+    var m12_ctx = m12_screen.M12Ctx{ .global = undefined };
+    var m13_ctx = m13_screen.M13Ctx{ .global = undefined };
     var dashboard_ctx = dashboard_screen.DashboardCtx{ .global = undefined };
     var ecommerce_ctx = ecommerce_screen.EcommerceCtx{ .global = undefined };
     var components_ctx = components_screen.ComponentsCtx{ .global = undefined };
+    var aiqadam_ctx = aiqadam_screen.AiQadamCtx{ .global = undefined };
 
     // -----------------------------------------------------------------------
     // GlobalState — wire everything together.
     // -----------------------------------------------------------------------
     var global = GlobalState{
-        .nav       = &nav,
-        .toasts    = &toasts,
+        .nav = &nav,
+        .toasts = &toasts,
         .app_inner = &app._inner,
     };
-    global.home_ctx    = &home_ctx;
-    global.text_ctx    = &text_ctx;
-    global.forms_ctx   = &forms_ctx;
-    global.data_ctx    = &data_ctx;
-    global.theme_ctx   = &theme_ctx;
-    global.notif_ctx   = &notif_ctx;
-    global.layout_ctx  = &layout_ctx;
-    global.state_ctx   = &state_ctx;
-    global.m12_ctx     = &m12_ctx;
-    global.m13_ctx     = &m13_ctx;
+    global.home_ctx = &home_ctx;
+    global.text_ctx = &text_ctx;
+    global.forms_ctx = &forms_ctx;
+    global.data_ctx = &data_ctx;
+    global.theme_ctx = &theme_ctx;
+    global.notif_ctx = &notif_ctx;
+    global.layout_ctx = &layout_ctx;
+    global.state_ctx = &state_ctx;
+    global.m12_ctx = &m12_ctx;
+    global.m13_ctx = &m13_ctx;
     global.dashboard_ctx = &dashboard_ctx;
-    global.ecommerce_ctx   = &ecommerce_ctx;
-    global.components_ctx  = &components_ctx;
+    global.ecommerce_ctx = &ecommerce_ctx;
+    global.components_ctx = &components_ctx;
+    global.aiqadam_ctx = &aiqadam_ctx;
 
-    home_ctx.global    = &global;
-    text_ctx.global    = &global;
-    forms_ctx.global   = &global;
-    data_ctx.global    = &global;
-    theme_ctx.global   = &global;
-    notif_ctx.global   = &global;
-    layout_ctx.global  = &global;
-    state_ctx.global   = &global;
-    m12_ctx.global     = &global;
-    m13_ctx.global     = &global;
+    home_ctx.global = &global;
+    text_ctx.global = &global;
+    forms_ctx.global = &global;
+    data_ctx.global = &global;
+    theme_ctx.global = &global;
+    notif_ctx.global = &global;
+    layout_ctx.global = &global;
+    state_ctx.global = &global;
+    m12_ctx.global = &global;
+    m13_ctx.global = &global;
     dashboard_ctx.global = &global;
     ecommerce_ctx.global = &global;
     components_ctx.global = &global;
+    aiqadam_ctx.global = &global;
 
     global.sidebar_cbs = SidebarCbs{
-        .home          = SidebarCb{ .global = &global, .screen_name = "home" },
-        .text          = SidebarCb{ .global = &global, .screen_name = "text" },
-        .forms         = SidebarCb{ .global = &global, .screen_name = "forms" },
-        .data          = SidebarCb{ .global = &global, .screen_name = "data" },
-        .theme         = SidebarCb{ .global = &global, .screen_name = "theme" },
+        .home = SidebarCb{ .global = &global, .screen_name = "home" },
+        .text = SidebarCb{ .global = &global, .screen_name = "text" },
+        .forms = SidebarCb{ .global = &global, .screen_name = "forms" },
+        .data = SidebarCb{ .global = &global, .screen_name = "data" },
+        .theme = SidebarCb{ .global = &global, .screen_name = "theme" },
         .notifications = SidebarCb{ .global = &global, .screen_name = "notifications" },
-        .layout        = SidebarCb{ .global = &global, .screen_name = "layout" },
-        .state         = SidebarCb{ .global = &global, .screen_name = "state" },
-        .m12           = SidebarCb{ .global = &global, .screen_name = "m12" },
-        .m13           = SidebarCb{ .global = &global, .screen_name = "m13" },
-        .dashboard     = SidebarCb{ .global = &global, .screen_name = "dashboard" },
-        .ecommerce     = SidebarCb{ .global = &global, .screen_name = "ecommerce" },
-        .components    = SidebarCb{ .global = &global, .screen_name = "components" },
+        .layout = SidebarCb{ .global = &global, .screen_name = "layout" },
+        .state = SidebarCb{ .global = &global, .screen_name = "state" },
+        .m12 = SidebarCb{ .global = &global, .screen_name = "m12" },
+        .m13 = SidebarCb{ .global = &global, .screen_name = "m13" },
+        .dashboard = SidebarCb{ .global = &global, .screen_name = "dashboard" },
+        .ecommerce = SidebarCb{ .global = &global, .screen_name = "ecommerce" },
+        .components = SidebarCb{ .global = &global, .screen_name = "components" },
+        .aiqadam = SidebarCb{ .global = &global, .screen_name = "aiqadam" },
     };
 
     // -----------------------------------------------------------------------
     // Register screens.
     // -----------------------------------------------------------------------
-    try nav.register("home",          home_screen.build);
-    try nav.register("text",          text_screen.build);
-    try nav.register("forms",         forms_screen.build);
-    try nav.register("data",          data_screen.build);
-    try nav.register("theme",         theme_screen.build);
+    try nav.register("home", home_screen.build);
+    try nav.register("text", text_screen.build);
+    try nav.register("forms", forms_screen.build);
+    try nav.register("data", data_screen.build);
+    try nav.register("theme", theme_screen.build);
     try nav.register("notifications", notif_screen.build);
-    try nav.register("layout",        layout_screen.build);
-    try nav.register("state",         state_screen.build);
-    try nav.register("m12",           m12_screen.build);
-    try nav.register("m13",           m13_screen.build);
-    try nav.register("dashboard",     dashboard_screen.build);
-    try nav.register("ecommerce",     ecommerce_screen.build);
-    try nav.register("components",    components_screen.build);
+    try nav.register("layout", layout_screen.build);
+    try nav.register("state", state_screen.build);
+    try nav.register("m12", m12_screen.build);
+    try nav.register("m13", m13_screen.build);
+    try nav.register("dashboard", dashboard_screen.build);
+    try nav.register("ecommerce", ecommerce_screen.build);
+    try nav.register("components", components_screen.build);
+    try nav.register("aiqadam", aiqadam_screen.build);
 
     // Request initial screen — drainPending fires on the first frame.
     // --initial-screen <name> selects which screen to start on (default: home).
@@ -268,6 +277,8 @@ pub fn main(init: std.process.Init) !void {
         nav.requestPush("ecommerce", &ecommerce_ctx);
     } else if (std.mem.eql(u8, initial_screen, "components")) {
         nav.requestPush("components", &components_ctx);
+    } else if (std.mem.eql(u8, initial_screen, "aiqadam")) {
+        nav.requestPush("aiqadam", &aiqadam_ctx);
     } else {
         nav.requestPush("home", &home_ctx);
     }

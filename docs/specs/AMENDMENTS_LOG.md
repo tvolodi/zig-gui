@@ -13,6 +13,14 @@
 
 ## Entries
 
+### 2026-08-01 · implementer · §5 INV-5.1 (additive — Palette + Tokens, src/05/types.zig) — `teal_400` palette stop + `accent_teal` semantic token for the AI-Qadam visual analog (RAI)
+- **Old:** `Palette` carried only `accent_200/400/600` (zinc neutrals). `Tokens` carried `accent`/`accent_hover`/`accent_text` with no brand-specific teal alternative. INV-4.3 forbids hex literals on widgets, so any teal accent on the AI-Qadam screen would have required a literal.
+- **New:** Added `teal_400: Color = Color.hex(0x2DD4BF)` to `Palette` (also propagated to `Palette.highContrast()` and `Palette.highContrastDark()`). Added `accent_teal: Color` to `Tokens` and wired it in both `Tokens.light(p)` and `Tokens.dark(p)` as `.accent_teal = p.teal_400`.
+- **Reason:** RAI (AI-Qadam visual analog) requires a teal accent on logo, "Sign in" button, "Browse events" CTA, and "Send me a confirmation" button. The existing zinc `accent` would either force a literal (violating INV-4.3) or give the wrong color (`zinc_900` reads as black, not teal). The additive `accent_teal` field lets the AI-Qadam screen reference a brand token without disturbing `accent` for every other showcase screen.
+- **No invariant was weakened.** No widget references the new token by a hex literal. INV-5.1 is satisfied: pubic Types signatures are unchanged (only new fields). INV-4.3 is satisfied: widgets reference `tokens.accent_teal`, not raw values.
+- **Files changed:** `src/05/types.zig` (Palette + Palette.highContrast + Palette.highContrastDark + Tokens struct + Tokens.light + Tokens.dark).
+- **Authority:** enacted under the AAP (§8). No owner sign-off. task: RAI.
+
 ### 2026-06-15 · validator · §5 INV-5.4 + glossary.md (RN-AAP-01 — M27 RN1–RN7 pre-implementation validation)
 - **Old INV-5.4:** "Do NOT implement them [non-goals], even if they seem helpful or trivial."  
   No exception clause for "post-vN" deferrals that have been superseded by new requirement documents.
