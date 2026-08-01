@@ -103,6 +103,7 @@ pub fn main(init: std.process.Init) !void {
     var screenshot_frames: u32 = 0;
     var screenshot_out: []const u8 = "testdata/screenshot_actual.png";
     var initial_screen: []const u8 = "home";
+    var dark_mode = false;
     _click_idx = 0;
     _click_count = 0;
     _click_fired = false;
@@ -124,6 +125,8 @@ pub fn main(init: std.process.Init) !void {
             } else if (std.mem.eql(u8, proc_args[i], "--click-count") and i + 1 < proc_args.len) {
                 i += 1;
                 _click_count = std.fmt.parseInt(u32, proc_args[i], 10) catch 0;
+            } else if (std.mem.eql(u8, proc_args[i], "--dark")) {
+                dark_mode = true;
             }
         }
     }
@@ -133,9 +136,10 @@ pub fn main(init: std.process.Init) !void {
         .font_size_px = 14,
         .screenshot_frames = screenshot_frames,
         .screenshot_out = screenshot_out,
+        .default_theme_mode = if (dark_mode) .dark else .light,
         .window = .{
             .title = "zig-gui Showcase",
-            .width = 1024,
+            .width = 1180,
             .height = 1100,
         },
     });

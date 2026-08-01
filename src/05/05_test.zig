@@ -59,24 +59,25 @@ test "Palette.default is deterministic" {
 
 // ---------------------------------------------------------------------------
 // 4. Palette.default() accent values — verify exact hex values from spec
+//    (RN14, 2026-08-01: AI-Qadam teal accent replaces the RN12 zinc primary.)
 // ---------------------------------------------------------------------------
 test "Palette.default accent values" {
     const p = Th.Palette.default();
 
-    // accent_200 = 0xE4E4E7 (zinc-200 — subtle interactive tint)
-    try testing.expectEqual(@as(u8, 0xE4), p.accent_200.r);
-    try testing.expectEqual(@as(u8, 0xE4), p.accent_200.g);
-    try testing.expectEqual(@as(u8, 0xE7), p.accent_200.b);
+    // accent_200 = 0x5FC4C0 (lighter teal tint — dark-mode hover state)
+    try testing.expectEqual(@as(u8, 0x5F), p.accent_200.r);
+    try testing.expectEqual(@as(u8, 0xC4), p.accent_200.g);
+    try testing.expectEqual(@as(u8, 0xC0), p.accent_200.b);
 
-    // accent_400 = 0x18181B (zinc-900 — shadcn primary button color)
-    try testing.expectEqual(@as(u8, 0x18), p.accent_400.r);
-    try testing.expectEqual(@as(u8, 0x18), p.accent_400.g);
-    try testing.expectEqual(@as(u8, 0x1B), p.accent_400.b);
+    // accent_400 = 0x39B3AF (AI-Qadam primary teal, dark mode)
+    try testing.expectEqual(@as(u8, 0x39), p.accent_400.r);
+    try testing.expectEqual(@as(u8, 0xB3), p.accent_400.g);
+    try testing.expectEqual(@as(u8, 0xAF), p.accent_400.b);
 
-    // accent_600 = 0x09090B (zinc-950)
-    try testing.expectEqual(@as(u8, 0x09), p.accent_600.r);
-    try testing.expectEqual(@as(u8, 0x09), p.accent_600.g);
-    try testing.expectEqual(@as(u8, 0x0B), p.accent_600.b);
+    // accent_600 = 0x008D89 (AI-Qadam primary teal, light mode — darker)
+    try testing.expectEqual(@as(u8, 0x00), p.accent_600.r);
+    try testing.expectEqual(@as(u8, 0x8D), p.accent_600.g);
+    try testing.expectEqual(@as(u8, 0x89), p.accent_600.b);
 }
 
 // ---------------------------------------------------------------------------

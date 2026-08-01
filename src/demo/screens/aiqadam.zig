@@ -63,8 +63,8 @@ var _topics_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Topic
 var _submit_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Send me a confirmation" } }};
 
 var _topics = [_][]const u8{
-    "AI/ML", "LLMs", "fintech", "robotics", "devtools", "infra", "data",
-    "computer-vision", "nlp", "mlops", "hands-on-builder",
+    "AI/ML",           "LLMs", "fintech", "robotics",         "devtools", "infra", "data",
+    "computer-vision", "nlp",  "mlops",   "hands-on-builder",
 };
 
 var _footer_brand_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "AI Qadam" } }};

@@ -534,8 +534,16 @@ pub const AppInner = struct {
             .max_h = @floatFromInt(fb.height),
         };
 
-        // Build default tokens (light theme from default palette).
-        const default_tokens = mod05.Tokens.light(mod05.Palette.default());
+        // Build default tokens from default palette, honoring opts.default_theme_mode.
+        // (AGENT AMENDMENT 2026-08-01: RN14 visual-analog task — AppOptions.default_theme_mode
+        // was declared (RF3-AC9) but never read; AppInner.init hard-coded .light regardless of
+        // the option, making it a phantom field. Wired here so callers (e.g. the demo's --dark
+        // flag) can actually select dark mode at startup. Non-breaking: default remains .light,
+        // matching the existing m16_test.zig contract.)
+        const default_tokens = switch (opts.default_theme_mode) {
+            .light => mod05.Tokens.light(mod05.Palette.default()),
+            .dark => mod05.Tokens.dark(mod05.Palette.default()),
+        };
 
         // Initialize ImageAtlas (CPU side).
         var image_atlas = try ImageAtlas.init(gpa);
@@ -566,7 +574,7 @@ pub const AppInner = struct {
             .tokens = default_tokens,
             .watcher = if (hot_reload) FileWatcher.init(gpa) else {},
             ._current_palette = mod05.Palette.default(),
-            ._current_mode = .light,
+            ._current_mode = opts.default_theme_mode,
         };
 
         // Register GLFW event queue (R11).

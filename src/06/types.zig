@@ -611,6 +611,12 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         // --- Font weight/style (R60) ---
     } else if (std.mem.eql(u8, cls, "font-bold")) {
         r.style.font_bold = true;
+        // RN14 (2026-08-01, AAP §8): `font-medium` (weight 500, e.g. AI-Qadam buttons) is a
+        // trivial mirror of `font-bold` — ComputedStyle.font_bold is a bool (no numeric weight
+        // scale exists yet), so this is the closest available approximation, not a distinct
+        // rendering. Kept as its own class (not an alias) so call sites document intent.
+    } else if (std.mem.eql(u8, cls, "font-medium")) {
+        r.style.font_bold = true;
     } else if (std.mem.eql(u8, cls, "font-normal")) {
         r.style.font_bold = false;
     } else if (std.mem.eql(u8, cls, "font-italic") or std.mem.eql(u8, cls, "italic")) {
@@ -620,7 +626,24 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
 
         // --- Borders ---
     } else if (std.mem.eql(u8, cls, "border")) {
+        // (BUG FIX 2026-08-01, Workflow 2 issue resolution — not a constitution amendment;
+        // supersedes the 2026-08-01 RN14 workaround below.) The renderer-side root cause this workaround
+        // described is now fixed: the Vulkan consumer (src/01/types.zig buildDrawList,
+        // .border_rect case) expands a border into 4 edge-stroke quads instead of one solid
+        // whole-rect fill. A bare "border" class can safely default border_color again — it no
+        // longer produces a solid filled block, it produces a real 1px stroke. Left
+        // border_color unset here would now render as a genuinely invisible (transparent)
+        // border, which is wrong for every consumer of the bare "border" utility (outline
+        // buttons, cards, badges, inputs) now that the stroke geometry is correct.
+        //
+        // Original RN14 note (2026-08-01, now stale): "attempted in iteration 2 to default
+        // border_color here... reverted: quad.frag case 2 ('bordered rect') is an unimplemented
+        // stub that falls back to outColor = fragColor, i.e. it fills the WHOLE quad solid
+        // instead of stroking a 1px edge... left border_width-only until the shader's border
+        // stroke path is actually implemented." See docs/.agent-context/aiqadam_components_v1/
+        // visual/iteration_2_analysis.md for the original analysis this now resolves.
         r.style.border_width = 1;
+        r.style.border_color = tokens.border_default;
     } else if (std.mem.eql(u8, cls, "border-subtle")) {
         r.style.border_color = tokens.border_subtle;
     } else if (std.mem.eql(u8, cls, "border-default")) {
@@ -635,6 +658,8 @@ fn applyClass(cls: []const u8, tokens: Tokens, r: *Resolved) void {
         r.style.radius = tokens.radius_md;
     } else if (std.mem.eql(u8, cls, "rounded-lg")) {
         r.style.radius = tokens.radius_lg;
+    } else if (std.mem.eql(u8, cls, "rounded-xl")) {
+        r.style.radius = tokens.radius_xl;
     } else if (std.mem.eql(u8, cls, "rounded-full")) {
         r.style.radius = 9999;
 

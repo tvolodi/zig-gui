@@ -2288,6 +2288,18 @@ fn vkCreateSwapchain(impl: *VulkanImpl) !void {
     try vkCreateImageViews(impl);
 }
 
+// (BUG FIX 2026-08-01, Workflow 2 issue resolution — not a constitution amendment, no
+// AAP invoked.) Prefer VK_FORMAT_B8G8R8A8_UNORM, not
+// VK_FORMAT_B8G8R8A8_SRGB. CPU-side color prep (Color09 / Color.hex) copies raw
+// sRGB-encoded u8 bytes into vertex color data with zero transformation, and the
+// vertex attribute format for color/color_b is VK_FORMAT_R8G8B8A8_UNORM (a linear
+// normalized read) — so fragColor in quad.frag is already sRGB-encoded bytes/255,
+// not linear. quad.frag writes that straight to outColor with no de-gamma. An
+// _SRGB swapchain format then re-encodes linear->sRGB on store, double-encoding
+// already-encoded values (measured pixel ~= intended^(1/2.2)). UNORM makes the
+// already-encoded bytes pass through the pipeline unchanged. VK_COLOR_SPACE_SRGB_
+// NONLINEAR_KHR is kept as the color space — that's an output/EDID hint, not a
+// store-time transform, and is still the only color space we query for.
 fn chooseSwapFormat(impl: *VulkanImpl) c.VkSurfaceFormatKHR {
     var count: u32 = 0;
     _ = c.vkGetPhysicalDeviceSurfaceFormatsKHR(impl.physical_device, impl.surface, &count, null);
@@ -2295,7 +2307,7 @@ fn chooseSwapFormat(impl: *VulkanImpl) c.VkSurfaceFormatKHR {
     var actual: u32 = @min(count, 16);
     _ = c.vkGetPhysicalDeviceSurfaceFormatsKHR(impl.physical_device, impl.surface, &actual, &buf);
     for (buf[0..actual]) |fmt| {
-        if (fmt.format == c.VK_FORMAT_B8G8R8A8_SRGB and
+        if (fmt.format == c.VK_FORMAT_B8G8R8A8_UNORM and
             fmt.colorSpace == c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
         {
             return fmt;
@@ -3434,8 +3446,12 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
     const H = @as(f32, @floatFromInt(impl.swapchain_extent.height));
 
     // Scissor draw-range tracking (R42), extended with clip_rounded state (RD1).
+    // (BUG FIX 2026-08-01, Workflow 2 — bumped from 64 to 512. Per-quad rounded
+    // corners (filled_rect/aa_filled_rect radius, see below) now open+close a range
+    // boundary around every individual radius'd quad, so a busy screen with many
+    // rounded cards/buttons/badges can exceed a 64-range budget. See AMENDMENTS_LOG.md.)
     const ScissorRange = struct { scissor: c.VkRect2D, first_vert: u32, clip_rounded: ?ClipRounded = null };
-    var scissor_ranges: [64]ScissorRange = undefined;
+    var scissor_ranges: [512]ScissorRange = undefined;
     var scissor_range_count: u32 = 0;
 
     // Scissor stack.
@@ -3477,7 +3493,7 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     .extent = .{ .width = iw, .height = ih },
                 };
                 // Start a new draw-range for the new scissor (carry forward clip state).
-                if (scissor_range_count < 64) {
+                if (scissor_range_count < scissor_ranges.len) {
                     scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
                     scissor_range_count += 1;
                 }
@@ -3488,14 +3504,14 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     current_scissor = scissor_stack[scissor_depth];
                 }
                 // Start a new draw-range for the restored scissor (carry forward clip state).
-                if (scissor_range_count < 64) {
+                if (scissor_range_count < scissor_ranges.len) {
                     scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
                     scissor_range_count += 1;
                 }
             },
             .clip_rounded_begin => |cr| {
                 // RD1: Start new range with rounded clip enabled.
-                if (scissor_range_count < 64) {
+                if (scissor_range_count < scissor_ranges.len) {
                     current_clip = cr;
                     scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
                     scissor_range_count += 1;
@@ -3503,20 +3519,59 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
             },
             .clip_rounded_end => {
                 // RD1: Start new range with rounded clip disabled.
-                if (scissor_range_count < 64) {
+                if (scissor_range_count < scissor_ranges.len) {
                     current_clip = null;
                     scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = null };
                     scissor_range_count += 1;
                 }
             },
+            // (BUG FIX 2026-08-01, Workflow 2) filled_rect.radius was declared on
+            // the DrawCommand contract but silently dropped by this consumer. Corners
+            // now render using the SAME rounded-corner discard mechanism the scrollview
+            // scissor-stack already uses (clipRadii/clipEnabled push constants in
+            // quad.frag) — scoped to just this one quad's bounds via a bracketing pair
+            // of scissor-range boundaries, then restored to whatever clip state was
+            // active before (carries clip_rounded_begin/set_scissor state correctly).
             .filled_rect => |r| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
+                    if (r.radius > 0 and scissor_range_count + 2 <= scissor_ranges.len) {
+                        const saved_clip = current_clip;
+                        current_clip = .{ .rect = r.rect, .radius_tl = r.radius, .radius_tr = r.radius, .radius_br = r.radius, .radius_bl = r.radius };
+                        scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                        scissor_range_count += 1;
+                        emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
+                        current_clip = saved_clip;
+                        scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                        scissor_range_count += 1;
+                    } else {
+                        emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
+                    }
                 }
             },
+            // (BUG FIX 2026-08-01, Workflow 2) border_rect.width previously emitted
+            // a single opaque quad covering the WHOLE element rect instead of a stroke
+            // around the edge. Expand to 4 edge quads (same geometry as the tested
+            // src/09 expandBorderToQuads/clampBorderWidth helpers — reimplemented here,
+            // not imported, because src/01 is lower-numbered than src/09 and INV-3.4
+            // forbids an upward import). src/09's buildDrawList still emits a single
+            // .border_rect DrawCommand unchanged (frozen acceptance-test contract,
+            // docs/specs/09.acceptance_test.zig: "element with border emits border_rect
+            // command") — only this consumer's interpretation of it changes.
             .border_rect => |br| {
-                if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, br.rect, .{}, br.color, .{ 0, 0, 0, 0 }, 0);
+                const max_w = @min(br.rect.w, br.rect.h) / 2.0;
+                const bw = if (br.width <= max_w) br.width else max_w;
+                if (bw > 0) {
+                    const edges = [4]Rect09{
+                        .{ .x = br.rect.x, .y = br.rect.y, .w = br.rect.w, .h = bw }, // top
+                        .{ .x = br.rect.x, .y = br.rect.y + br.rect.h - bw, .w = br.rect.w, .h = bw }, // bottom
+                        .{ .x = br.rect.x, .y = br.rect.y + bw, .w = bw, .h = br.rect.h - 2.0 * bw }, // left
+                        .{ .x = br.rect.x + br.rect.w - bw, .y = br.rect.y + bw, .w = bw, .h = br.rect.h - 2.0 * bw }, // right
+                    };
+                    for (edges) |edge| {
+                        if (vert_count + VERTS_PER_QUAD <= max_verts) {
+                            emitQuad(verts, &vert_count, edge, .{}, br.color, .{ 0, 0, 0, 0 }, 0);
+                        }
+                    }
                 }
             },
             .glyph => |g| {
@@ -3534,6 +3589,22 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                     emitQuad(verts, &vert_count, si.dst, si.uv, si.color, .{ 0, 0, 0, 0 }, 4);
                 }
             },
+            // (BUG FIX 2026-08-01, Workflow 2) mode-number mapping between this
+            // CPU-side dispatch and quad.frag's switch is now documented and corrected:
+            //   0 = solid rect (filled_rect, aa_filled_rect, border edges, image tint-less path)
+            //   1 = glyph (grayscale atlas alpha mask)
+            //   2 = [reserved; no CPU emitter currently targets this case]
+            //   3 = image rect (RGBA atlas sample * tint)
+            //   4 = SDF icon
+            //   5 = gradient (two-stop lerp driven by UV)
+            //   6 = AA filled circle (per-pixel distance feather)
+            //   7 = subpixel glyph (RGB coverage atlas)
+            // gradient_rect previously emitted mode 2 (the unimplemented "bordered
+            // rect" stub in quad.frag's case 2) instead of mode 5 (the shader's actual
+            // gradient case) — gradients rendered as a flat, wrong, unblended color.
+            // This mapping is identical across all three backends' shaders (quad.frag,
+            // quad.hlsl, quad.wgsl all agree case 5 = gradient), so no shader edit is
+            // needed here — only this CPU-side dispatch number.
             .gradient_rect => |gr| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
                     const col_b = [4]u8{ gr.color_b.r, gr.color_b.g, gr.color_b.b, gr.color_b.a };
@@ -3542,12 +3613,34 @@ fn vkDrawFrame(impl: *VulkanImpl, commands: []const DrawCommand, atlas: *const G
                         .bottom => Rect09{ .x = 0, .y = 0, .w = 0, .h = 1 },
                         .bottom_right => Rect09{ .x = 0, .y = 0, .w = 1, .h = 1 },
                     };
-                    emitQuad(verts, &vert_count, gr.rect, uv, gr.color_a, col_b, 2);
+                    emitQuad(verts, &vert_count, gr.rect, uv, gr.color_a, col_b, 5);
                 }
             },
+            // (BUG FIX 2026-08-01, Workflow 2) aa_filled_rect previously also
+            // emitted mode 5, colliding with gradient_rect (both hit the shader's
+            // gradient-lerp case, so an aa_filled_rect rendered as a color blend
+            // toward whatever color_b happened to be, i.e. black, instead of a solid
+            // fill). There is no dedicated "antialiased filled rect" fragment case in
+            // quad.frag/quad.hlsl/quad.wgsl — unlike aa_filled_circle, which needs a
+            // true per-pixel distance feather for its round silhouette, a rect's only
+            // "antialiasing" in this codebase is corner rounding, which is handled by
+            // the same clipRadii/clipEnabled discard mechanism as filled_rect above.
+            // Route aa_filled_rect to mode 0 (solid) and give it the identical
+            // per-quad rounded-clip treatment when radius > 0.
             .aa_filled_rect => |r| {
                 if (vert_count + VERTS_PER_QUAD <= max_verts) {
-                    emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 5);
+                    if (r.radius > 0 and scissor_range_count + 2 <= scissor_ranges.len) {
+                        const saved_clip = current_clip;
+                        current_clip = .{ .rect = r.rect, .radius_tl = r.radius, .radius_tr = r.radius, .radius_br = r.radius, .radius_bl = r.radius };
+                        scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                        scissor_range_count += 1;
+                        emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
+                        current_clip = saved_clip;
+                        scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+                        scissor_range_count += 1;
+                    } else {
+                        emitQuad(verts, &vert_count, r.rect, .{}, r.color, .{ 0, 0, 0, 0 }, 0);
+                    }
                 }
             },
             .aa_filled_circle => |circ| {

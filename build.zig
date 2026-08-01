@@ -219,6 +219,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "mod_overlay", .root = "src/app/overlay.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
         .{ .name = "mod_events", .root = "src/app/events.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
         .{ .name = "mod_binding", .root = "src/app/binding.zig", .deps = &.{"mod07_components"}, .extra_imports = &.{ialias("../07/types.zig", "mod07_components")} },
+        // RN13/RN14 — ui/ component class-string library (zero-runtime-code constants only).
+        .{ .name = "mod_ui", .root = "src/app/ui/mod.zig" },
         // Module 13 — Chart and data visualization (M26/M27). Used by demo ecommerce screen.
         .{ .name = "mod13_charts", .root = "src/13/chart.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },
         .{ .name = "mod_navigator", .root = "src/app/navigator.zig", .deps = &.{ "mod07_components", "mod05_theme", "mod_error_boundary" }, .extra_imports = &.{
@@ -779,6 +781,7 @@ pub fn build(b: *std.Build) void {
         const mod_app = module_map.get("mod_app").?;
         const mod_nav = module_map.get("mod_navigator").?;
         const mod_ev = module_map.get("mod_events").?;
+        const mod_ui = module_map.get("mod_ui").?;
 
         const demo_mod = b.createModule(.{
             .root_source_file = b.path("src/demo/main.zig"),
@@ -798,6 +801,7 @@ pub fn build(b: *std.Build) void {
         demo_mod.addImport("events.zig", mod_ev);
         demo_mod.addImport("build_options", build_options.createModule());
         demo_mod.addImport("../strings.zig", strings_mod);
+        demo_mod.addImport("../../app/ui/mod.zig", mod_ui);
         addGpuLinks(demo_mod, glfw_dep, vulkan_include, vulkan_lib, glfw_lib, target);
 
         const demo_exe = b.addExecutable(.{ .name = "showcase", .root_module = demo_mod });

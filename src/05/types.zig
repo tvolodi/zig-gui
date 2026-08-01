@@ -55,6 +55,11 @@ pub const Palette = struct {
     gray_800: Color,
     gray_900: Color,
 
+    // RN15 — additive stop (2026-08-01, AAP §8): AI-Qadam's distinct dark-mode "card"
+    // surface (#171717), separate from the muted/border stop (gray_800, #262626). See
+    // Tokens.dark() amendment note below for why this was added.
+    gray_850: Color = Color.hex(0x171717),
+
     // accent ramp
     accent_200: Color,
     accent_400: Color,
@@ -76,28 +81,38 @@ pub const Palette = struct {
     // base spacing unit (px); scale steps are multiples of this
     base: f32 = 4,
 
-    /// A working default palette (gray + teal accent + status), so there is a usable theme
-    /// out of the box. Implemented here because it is data, not logic.
+    /// A working default palette, derived from AI-Qadam's actual tokens.css/components.css
+    /// (OKLCH source values converted to sRGB hex). AI-Qadam is dark-first; dark-mode stops
+    /// are treated as primary. Implemented here because it is data, not logic.
+    /// (AGENT AMENDMENT 2026-08-01: RN14 visual-analog task — replaced the zinc-based RN12
+    /// default with AI-Qadam-derived hex stops. See docs/specs/AMENDMENTS_LOG.md.)
     pub fn default() Palette {
         return .{
-            .gray_50 = Color.hex(0xFAFAFA), // zinc-50
-            .gray_100 = Color.hex(0xF4F4F5), // zinc-100
-            .gray_200 = Color.hex(0xE4E4E7), // zinc-200
-            .gray_400 = Color.hex(0xA1A1AA), // zinc-400
-            .gray_600 = Color.hex(0x52525B), // zinc-600
-            .gray_800 = Color.hex(0x27272A), // zinc-800
-            .gray_900 = Color.hex(0x18181B), // zinc-900
+            // gray scale — 7 stops carry both light- and dark-mode AI-Qadam surface/text/
+            // border values (Tokens.light/dark select which role each stop plays).
+            // Light: bg #FFFFFF, card #FCFCFC, muted #F5F5F5, border #E5E5E5,
+            //        muted-fg #737373, fg #0A0A0A.
+            // Dark:  bg #0A0A0A, card #171717, muted/border #262626, muted-fg #A1A1A1,
+            //        fg #FAFAFA.
+            .gray_50 = Color.hex(0xFAFAFA), // light background (~white) / dark foreground
+            .gray_100 = Color.hex(0xF5F5F5), // light muted
+            .gray_200 = Color.hex(0xE5E5E5), // light border
+            .gray_400 = Color.hex(0x737373), // light muted-foreground
+            .gray_600 = Color.hex(0xA1A1A1), // dark muted-foreground
+            .gray_800 = Color.hex(0x262626), // dark muted / dark border
+            .gray_850 = Color.hex(0x171717), // dark card surface (RN15 — distinct from border)
+            .gray_900 = Color.hex(0x0A0A0A), // dark background / light foreground
 
-            .accent_200 = Color.hex(0xE4E4E7), // zinc-200 for subtle interactive tints
-            .accent_400 = Color.hex(0x18181B), // zinc-900 = shadcn primary button color
-            .accent_600 = Color.hex(0x09090B), // zinc-950
+            .accent_200 = Color.hex(0x5FC4C0), // lighter teal tint — dark-mode hover state
+            .accent_400 = Color.hex(0x39B3AF), // AI-Qadam primary teal (dark mode)
+            .accent_600 = Color.hex(0x008D89), // AI-Qadam primary teal (light mode, darker)
 
-            .teal_400 = Color.hex(0x2DD4BF), // RAI — teal-400 (AI-Qadam primary accent)
+            .teal_400 = Color.hex(0x39B3AF), // RAI — AI-Qadam primary teal accent (repointed)
 
-            .ok_400 = Color.hex(0x16A34A), // green-600
-            .warn_400 = Color.hex(0xD97706), // amber-600
-            .err_400 = Color.hex(0xDC2626), // red-600
-            .info_400 = Color.hex(0x2563EB), // blue-600
+            .ok_400 = Color.hex(0x00D391), // AI-Qadam success (dark)
+            .warn_400 = Color.hex(0xFFAB00), // AI-Qadam warning (dark)
+            .err_400 = Color.hex(0xFF6468), // AI-Qadam destructive (dark)
+            .info_400 = Color.hex(0x2563EB), // blue-600 (no AI-Qadam info token — unchanged)
 
             .white = Color.hex(0xFFFFFF),
             .black = Color.hex(0x000000),
@@ -210,6 +225,10 @@ pub const Tokens = struct {
     radius_sm: f32,
     radius_md: f32,
     radius_lg: f32,
+    // RN14 — additive field (2026-08-01, AAP §8): AI-Qadam's --radius-xl stop (16px),
+    // used by Card in the visual-analog task. Wired in both light() and dark() below;
+    // does not change any existing signature (INV-5.1).
+    radius_xl: f32 = 16,
 
     // type sizes (strictly increasing)
     text_xs: f32,
@@ -219,6 +238,9 @@ pub const Tokens = struct {
     text_xl: f32,
 
     /// Map palette stops to roles for LIGHT mode (see spec.md "Light vs dark mapping").
+    /// (AGENT AMENDMENT 2026-08-01: RN14 — remapped role→stop assignments to fit AI-Qadam's
+    /// actual (asymmetric) light/dark ramps: background #FFFFFF, muted #F5F5F5,
+    /// border #E5E5E5, muted-foreground #737373, foreground #0A0A0A.)
     pub fn light(p: Palette) Tokens {
         return .{
             .bg_canvas = p.gray_50,
@@ -226,8 +248,8 @@ pub const Tokens = struct {
             .bg_raised = p.white,
 
             .text_body = p.gray_900,
-            .text_muted = p.gray_600,
-            .text_disabled = p.gray_400,
+            .text_muted = p.gray_400,
+            .text_disabled = p.gray_200,
 
             .border_subtle = p.gray_100,
             .border_default = p.gray_200,
@@ -235,7 +257,7 @@ pub const Tokens = struct {
 
             .accent = p.accent_400,
             .accent_hover = p.accent_600,
-            .accent_text = p.white,
+            .accent_text = p.gray_50,
 
             .accent_teal = p.teal_400,
 
@@ -250,9 +272,10 @@ pub const Tokens = struct {
             .sp_lg = 24,
             .sp_xl = 32,
 
-            .radius_sm = 4,
+            .radius_sm = 6,
             .radius_md = 8,
-            .radius_lg = 16,
+            .radius_lg = 12,
+            .radius_xl = 16,
 
             .text_xs = 10,
             .text_sm = 12,
@@ -263,23 +286,35 @@ pub const Tokens = struct {
     }
 
     /// Map palette stops to roles for DARK mode. `accent` MUST equal the light-mode accent.
+    /// (AGENT AMENDMENT 2026-08-01: RN14 — remapped role→stop assignments to fit AI-Qadam's
+    /// actual dark ramp: background #0A0A0A, card/raised & muted/border #262626,
+    /// muted-foreground #A1A1A1, foreground #FAFAFA.
+    /// SUPERSEDED (AGENT AMENDMENT 2026-08-01, RN15, via AAP §8): the RN14 approximation
+    /// above — bg_surface/bg_raised sharing gray_800 (#262626) with border_default — made
+    /// Card/Input borders invisible against their own fill (Workflow 2 issue resolution,
+    /// Visual Tester finding: sampled border hex == sampled fill hex). AI-Qadam's card
+    /// surface (#171717) is genuinely distinct from its border/muted stop (#262626); the
+    /// Palette now carries a dedicated `gray_850` stop (#171717) for it (additive field,
+    /// no signature change, INV-5.1). bg_surface/bg_raised now map to gray_850 so fill and
+    /// border are visually distinct, matching the AI-Qadam source exactly instead of
+    /// approximating.
     pub fn dark(p: Palette) Tokens {
         return .{
             .bg_canvas = p.gray_900,
-            .bg_surface = p.gray_800,
-            .bg_raised = p.gray_600,
+            .bg_surface = p.gray_850,
+            .bg_raised = p.gray_850,
 
             .text_body = p.gray_50,
-            .text_muted = p.gray_200,
+            .text_muted = p.gray_600,
             .text_disabled = p.gray_400,
 
-            .border_subtle = p.gray_800,
-            .border_default = p.gray_600,
-            .border_strong = p.gray_400,
+            .border_subtle = p.gray_900,
+            .border_default = p.gray_800,
+            .border_strong = p.gray_600,
 
             .accent = p.accent_400,
             .accent_hover = p.accent_200,
-            .accent_text = p.white,
+            .accent_text = p.gray_900,
 
             .accent_teal = p.teal_400,
 
@@ -294,9 +329,10 @@ pub const Tokens = struct {
             .sp_lg = 24,
             .sp_xl = 32,
 
-            .radius_sm = 4,
+            .radius_sm = 6,
             .radius_md = 8,
-            .radius_lg = 16,
+            .radius_lg = 12,
+            .radius_xl = 16,
 
             .text_xs = 10,
             .text_sm = 12,

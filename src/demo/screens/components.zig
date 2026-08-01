@@ -13,6 +13,7 @@ const DropdownOption = mod07.DropdownOption;
 
 const shared  = @import("../shared/types.zig");
 const sidebar = @import("../shared/sidebar.zig");
+const ui      = @import("../../app/ui/mod.zig");
 
 // ---------------------------------------------------------------------------
 // Persistent option storage (program lifetime)
@@ -91,12 +92,12 @@ pub fn build(
     const b5_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Pending" } }};
     const b6_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Cancelled" } }};
 
-    const b1 = NodeDesc{ .tag = "Text", .classes = "rounded-full px-2 h-5 text-xs font-bold bg-accent", .attrs = &b1_attrs };
-    const b2 = NodeDesc{ .tag = "Card", .classes = "rounded-full px-2 h-5 text-xs bg-raised",           .attrs = &b2_attrs };
-    const b3 = NodeDesc{ .tag = "Card", .classes = "rounded-full px-2 h-5 text-xs border bg-canvas",    .attrs = &b3_attrs };
-    const b4 = NodeDesc{ .tag = "Card", .classes = "rounded-full px-2 h-5 text-xs font-bold bg-raised", .attrs = &b4_attrs };
-    const b5 = NodeDesc{ .tag = "Card", .classes = "rounded-full px-2 h-5 text-xs font-bold bg-raised", .attrs = &b5_attrs };
-    const b6 = NodeDesc{ .tag = "Card", .classes = "rounded-full px-2 h-5 text-xs font-bold bg-raised", .attrs = &b6_attrs };
+    const b1 = NodeDesc{ .tag = "Text", .classes = ui.Badge.default,   .attrs = &b1_attrs };
+    const b2 = NodeDesc{ .tag = "Card", .classes = ui.Badge.secondary, .attrs = &b2_attrs };
+    const b3 = NodeDesc{ .tag = "Card", .classes = ui.Badge.outline,   .attrs = &b3_attrs };
+    const b4 = NodeDesc{ .tag = "Card", .classes = ui.Badge.ok,        .attrs = &b4_attrs };
+    const b5 = NodeDesc{ .tag = "Card", .classes = ui.Badge.warn,      .attrs = &b5_attrs };
+    const b6 = NodeDesc{ .tag = "Card", .classes = ui.Badge.err,       .attrs = &b6_attrs };
 
     const badges_row_ch = [6]NodeDesc{ b1, b2, b3, b4, b5, b6 };
     const badges_row = NodeDesc{ .tag = "Row", .classes = "gap-2 flex-wrap", .children = &badges_row_ch };
@@ -116,11 +117,11 @@ pub fn build(
     const btn4_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Ghost" } }};
     const btn5_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Destructive" } }};
 
-    const btn1 = NodeDesc{ .tag = "Button", .classes = "",              .attrs = &btn1_attrs };
-    const btn2 = NodeDesc{ .tag = "Button", .classes = "border bg-raised", .attrs = &btn2_attrs };
-    const btn3 = NodeDesc{ .tag = "Button", .classes = "border bg-canvas", .attrs = &btn3_attrs };
-    const btn4 = NodeDesc{ .tag = "Button", .classes = "bg-canvas",     .attrs = &btn4_attrs };
-    const btn5 = NodeDesc{ .tag = "Button", .classes = "bg-raised",     .attrs = &btn5_attrs };
+    const btn1 = NodeDesc{ .tag = "Button", .classes = ui.Button.primary,     .attrs = &btn1_attrs };
+    const btn2 = NodeDesc{ .tag = "Button", .classes = ui.Button.secondary,   .attrs = &btn2_attrs };
+    const btn3 = NodeDesc{ .tag = "Button", .classes = ui.Button.outline,     .attrs = &btn3_attrs };
+    const btn4 = NodeDesc{ .tag = "Button", .classes = ui.Button.ghost,       .attrs = &btn4_attrs };
+    const btn5 = NodeDesc{ .tag = "Button", .classes = ui.Button.destructive, .attrs = &btn5_attrs };
 
     const btns_row_ch = [5]NodeDesc{ btn1, btn2, btn3, btn4, btn5 };
     const btns_row = NodeDesc{ .tag = "Row", .classes = "gap-3 flex-wrap", .children = &btns_row_ch };
@@ -136,11 +137,11 @@ pub fn build(
 
     // Input field
     const inp_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Full name" } }};
-    const inp_lbl = NodeDesc{ .tag = "Text", .classes = "text-sm font-bold", .attrs = &inp_lbl_attrs };
+    const inp_lbl = NodeDesc{ .tag = "Text", .classes = ui.Input.label, .attrs = &inp_lbl_attrs };
     const inp_ph_attrs = [1]Attr{.{ .name = "placeholder", .value = .{ .literal = "Enter your name..." } }};
-    const inp = NodeDesc{ .tag = "Input", .classes = "w-full", .attrs = &inp_ph_attrs };
+    const inp = NodeDesc{ .tag = "Input", .classes = ui.Input.base, .attrs = &inp_ph_attrs };
     const inp_hint_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Enter your name here." } }};
-    const inp_hint = NodeDesc{ .tag = "Text", .classes = "text-xs text-muted", .attrs = &inp_hint_attrs };
+    const inp_hint = NodeDesc{ .tag = "Text", .classes = ui.Input.hint, .attrs = &inp_hint_attrs };
     const inp_field_ch = [3]NodeDesc{ inp_lbl, inp, inp_hint };
     const inp_field = NodeDesc{ .tag = "Column", .classes = "gap-1 max-w-md", .children = &inp_field_ch };
 
@@ -199,7 +200,7 @@ pub fn build(
     const sc1_top = NodeDesc{ .tag = "Column", .classes = "gap-1 grow", .children = &sc1_top_ch };
     const sc1_inner_ch = [2]NodeDesc{ sc1_top, sc1_sub };
     const sc1_inner = NodeDesc{ .tag = "Column", .classes = "gap-2 grow", .children = &sc1_inner_ch };
-    const sc1 = NodeDesc{ .tag = "Card", .classes = "p-4 shadow grow", .children = &[1]NodeDesc{sc1_inner} };
+    const sc1 = NodeDesc{ .tag = "Card", .classes = ui.Card.surface ++ " grow", .children = &[1]NodeDesc{sc1_inner} };
 
     // Stat card 2 — Active Users
     const sc2_lbl_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Active Users" } }};
@@ -212,7 +213,7 @@ pub fn build(
     const sc2_top = NodeDesc{ .tag = "Column", .classes = "gap-1 grow", .children = &sc2_top_ch };
     const sc2_inner_ch = [2]NodeDesc{ sc2_top, sc2_sub };
     const sc2_inner = NodeDesc{ .tag = "Column", .classes = "gap-2 grow", .children = &sc2_inner_ch };
-    const sc2 = NodeDesc{ .tag = "Card", .classes = "p-4 shadow grow", .children = &[1]NodeDesc{sc2_inner} };
+    const sc2 = NodeDesc{ .tag = "Card", .classes = ui.Card.surface ++ " grow", .children = &[1]NodeDesc{sc2_inner} };
 
     const stat_cards_ch = [2]NodeDesc{ sc1, sc2 };
     const stat_cards = NodeDesc{ .tag = "Row", .classes = "gap-4", .children = &stat_cards_ch };

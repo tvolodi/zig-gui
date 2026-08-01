@@ -640,3 +640,141 @@ zero runtime code (just constants).
 Use module-level `var _values: [N]u8` + `var _opts: [N]DropdownOption` for stable storage
 (same pattern as `forms.zig` / `dashboard.zig`).
 
+---
+
+## 14. RN14/RN15 patterns (added 2026-08-01) — component-library visual fidelity + renderer fixes
+
+Session goal: make `src/app/ui/` (`Button`, `Card`, `Input`, `Badge`) visually reproduce a
+real external design system's tokens (AI-Qadam), bottom-up (components first, page assembly
+second). Along the way this uncovered and fixed four renderer-level bugs that were silently
+breaking rendering fidelity for the whole app, not just this feature. See
+`docs/specs/AMENDMENTS_LOG.md` (2026-08-01 RN14/RN15 entries) for the exact palette/token
+values changed. Patterns below are for the NEXT agent touching the renderer or component
+library — read this before assuming `filled_rect`/`border_rect`/`gradient_rect` behave the
+way their names suggest.
+
+### 14.1 Swapchain format: UNORM, not SRGB, when the shader already writes encoded bytes
+
+`VulkanBackend`'s swapchain surface-format selection (`src/01/types.zig`, surface-format
+selection near the swapchain-creation path) now prefers `VK_FORMAT_B8G8R8A8_UNORM` with
+`VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`, NOT `VK_FORMAT_B8G8R8A8_SRGB`. Root cause: CPU-side
+color prep (`Color09`/`Color.hex`) already stores sRGB-encoded byte values, and the vertex
+color attribute format is `VK_FORMAT_R8G8B8A8_UNORM` (linear passthrough). Pairing that with
+an `_SRGB` swapchain format made the GPU apply a SECOND linear→sRGB re-encode on store,
+double-encoding already-encoded values (measured pixel ≈ intended^(1/2.2)) — this washed out
+every color in the entire app, not just AI-Qadam colors. **Lesson: when your CPU-side color
+prep already produces final encoded bytes, the swapchain/target format must be UNORM. Only
+use an `_SRGB` format if you are deliberately feeding it linear values and want the GPU to do
+the encode.** Keep the color SPACE as SRGB_NONLINEAR regardless — that's about how the
+display interprets the bytes, not whether the GPU re-encodes them.
+
+### 14.2 Per-quad rounded-clip technique for `radius > 0` on ordinary fills
+
+`filled_rect` and `aa_filled_rect` DrawCommands carry a `radius` field that was previously
+declared on the contract but silently dropped by the Vulkan consumer (corners always
+rendered square regardless of `ComputedStyle.radius`). Fixed by reusing the EXISTING
+`clipRadii`/`clipEnabled` push-constant discard mechanism that scrollview clipping already
+used (previously scrollview-only) — no shader change needed. Pattern, in
+`VulkanBackend.drawFrame`'s command-walk loop:
+
+```zig
+if (r.radius > 0 and scissor_range_count + 2 <= scissor_ranges.len) {
+    const saved_clip = current_clip;
+    current_clip = .{ .rect = r.rect, .radius_tl = r.radius, .radius_tr = r.radius,
+                       .radius_br = r.radius, .radius_bl = r.radius };
+    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+    scissor_range_count += 1;
+    emitQuad(...);                    // the actual quad, now clipped to rounded corners
+    current_clip = saved_clip;        // restore whatever clip state was active before
+    scissor_ranges[scissor_range_count] = .{ .scissor = current_scissor, .first_vert = vert_count, .clip_rounded = current_clip };
+    scissor_range_count += 1;
+} else {
+    emitQuad(...);                    // radius == 0: no bracketing needed
+}
+```
+
+Each radius'd quad opens and closes its own scissor-range boundary, bracketing exactly that
+one quad. Because every rounded quad now consumes 2 extra range slots, **`scissor_ranges`
+was bumped from `[64]` to `[512]`** — a busy screen with many rounded cards/buttons/badges
+can exceed a 64-range budget fast. If you add a new draw-command kind with a `radius` field,
+follow this exact bracketing pattern rather than inventing a new clip mechanism.
+
+### 14.3 Border-stroke-via-4-quads technique
+
+`border_rect` previously emitted ONE opaque quad covering the entire element rect — meaning
+"a bordered element" rendered as a solid fill in the border color, not a stroke. Fixed by
+expanding to 4 edge quads (top/bottom/left/right), clamping width to `min(w,h)/2`:
+
+```zig
+const max_w = @min(br.rect.w, br.rect.h) / 2.0;
+const bw = if (br.width <= max_w) br.width else max_w;
+// top:    { x, y,          w,      h = bw }
+// bottom: { x, y+h-bw,     w,      h = bw }
+// left:   { x, y+bw,       w = bw, h-2*bw }
+// right:  { x+w-bw, y+bw,  w = bw, h-2*bw }
+```
+
+This reimplements (does not import) the same geometry `src/09`'s tested
+`expandBorderToQuads`/`clampBorderWidth` helpers use — `src/01` is lower-numbered than
+`src/09` and INV-3.4 forbids an upward import, so the two copies must be kept in sync by
+hand if the stroke geometry ever changes. The `.border_rect` DrawCommand itself is unchanged
+(frozen acceptance-test contract, `docs/specs/09.acceptance_test.zig`); only this consumer's
+interpretation of the command changed.
+
+### 14.4 CPU/shader draw-mode-number table (keep this in sync — it drifted once already)
+
+The `emitQuad(..., mode)` last argument is a raw integer that must agree with the `switch` in
+`quad.frag` (and its HLSL/WGSL equivalents). There is no enum shared between CPU and shader —
+just an integer convention. It had already drifted once (`gradient_rect` was using the
+unimplemented mode `2` instead of the real gradient mode `5`, so gradients rendered as a flat
+wrong color; `aa_filled_rect` was colliding with `gradient_rect` on mode `5`, so an AA rect
+rendered as a color blend toward black instead of a solid fill). Current, corrected mapping:
+
+| Mode | Meaning | CPU emitters |
+|---|---|---|
+| 0 | Solid rect | `filled_rect`, `aa_filled_rect`, `border_rect` edges, `image_rect` (tint-less path) |
+| 1 | Glyph (grayscale atlas alpha mask) | `.glyph` (non-subpixel) |
+| 2 | **Reserved** — unimplemented "bordered rect" stub in `quad.frag` | none — do not target this |
+| 3 | Image rect (RGBA atlas sample × tint) | `image_rect` |
+| 4 | SDF icon | `sdf_icon` |
+| 5 | Gradient (two-stop lerp driven by UV) | `gradient_rect` |
+| 6 | AA filled circle (per-pixel distance feather) | `aa_filled_circle` |
+| 7 | Subpixel glyph (RGB coverage atlas) | `.glyph` (subpixel) |
+
+If you add a new DrawCommand variant that needs a distinct shader path, claim mode `2` (the
+only reserved/unused slot) or add a new case to all three shaders (`quad.frag`, `quad.hlsl`,
+`quad.wgsl`) simultaneously and extend this table in the same change — do not reuse an
+already-claimed mode number.
+
+### 14.5 Screenshot workflow: invoke the binary directly, not `zig build run-demo --`
+
+`zig build run-demo -- --screenshot-frames N ...` was observed to hang in this session
+instead of running the N frames and exiting. For screenshot/visual-check work, prefer
+invoking the built binary directly:
+
+```powershell
+zig build
+zig-out\bin\showcase.exe --screenshot-frames 3 --screenshot-out testdata\screenshot_actual.png --initial-screen components
+```
+
+This bypasses whatever `zig build run-demo --` argument-forwarding or process-lifecycle issue
+caused the hang. `zig build visual-check` (which does not go through `run-demo`) is unaffected
+and remains the required automated gate — this note is only about ad hoc manual screenshots
+during a Visual Validation Loop.
+
+### 14.6 Open gap: badge corner radius does not render (flagged, not fixed)
+
+`ui.Badge.*` class strings include `rounded-sm`, and it was traced and confirmed in code that
+this correctly resolves to a non-zero `ComputedStyle.radius` at the badge element. Despite
+that, 3 independent pixel-level visual checks found badges render with perfectly square
+corners and zero anti-aliased curvature — while buttons and cards (which go through the same
+`filled_rect`/`aa_filled_rect` radius path documented in §14.2) DO show genuine rounded-corner
+AA in the same screenshots. The root cause was NOT found this session. Leading hypothesis,
+NOT confirmed: `BadgeState`/`_badge_state`'s draw-command construction (module 07/09, see §6
+module 07 R7B/R79 history) may have a badge-specific rect-emission path that doesn't forward
+`style.radius` into the `filled_rect`/`aa_filled_rect` command the same way the generic
+element-paint path does. Next agent: instrument or read the badge-specific render branch in
+`buildDrawList` (search for where `.badge` kind is special-cased) before assuming the fix is
+in `src/01/types.zig` — the radius plumbing there is already confirmed correct for the
+commands it receives; the bug is upstream of that, in what command badges actually emit.
+

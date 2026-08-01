@@ -388,6 +388,49 @@ that mirrors a real-world asset management UI.
 
 ---
 
+### Screen 13 — Components
+
+**Purpose:** Component gallery — the primary visual-fidelity coverage surface for the
+`src/app/ui/` class-string library (`Button`, `Card`, `Input`, `Badge`). Unlike Screen 14
+(which assembles a full page), this screen exercises each component in isolation so a
+developer can compare individual widget rendering directly against design-token ground
+truth.
+
+**Content:**
+- **Typography** — heading/large/base/small/xs/muted/bold text samples.
+- **Badges** — six variants (`ui.Badge.default/secondary/outline/ok/warn/err`) in a wrapped
+  row, colored via `tokens.accent_text`/`ok`/`warn`/`err` post-instantiation.
+- **Buttons** — five variants (`ui.Button.primary/secondary/outline/ghost/destructive`) in a
+  wrapped row.
+- **Form Controls** — labeled Input, Checkbox, Radio group, Slider, Dropdown, using
+  `ui.Input.label/base/hint` class strings.
+- **Stat Cards** — two `ui.Card.surface` cards (Revenue, Active Users) with label/value/delta
+  text.
+
+**Styling source (RN14/RN15):** As of 2026-08-01, `ui.Button`/`ui.Card`/`ui.Input`/`ui.Badge`
+render AI-Qadam-derived design tokens (dark-first palette, teal `#39B3AF` primary, `radius_lg`
+12px, `radius_xl` 16px) instead of generic shadcn placeholders — see
+`docs/specs/AMENDMENTS_LOG.md` RN14/RN15 entries for the exact token values and rationale.
+3 independent pixel-level visual verification passes confirmed:
+- Button color/rounding, button-variant distinctness, card border/radius, input
+  border/radius, and overall palette: **MATCH** (exact hex values + genuine anti-aliased
+  rounded-corner evidence at the pixel level).
+- **Badge corner radius: MISMATCH (known limitation, open).** Badges use the `rounded-sm`
+  class (correctly resolving to a non-zero `ComputedStyle.radius` — traced and confirmed in
+  code), but render with perfectly square corners and zero anti-aliased curvature at the
+  pixel level. The root cause was not found in this session; the leading hypothesis is that
+  `BadgeState`/`_badge_state`'s draw-command construction in module 07/09 (see
+  `docs/AGENT_GUIDE.md` §6 module 07, R7B/R79 history) does not route `style.radius` through
+  the same rounded-rect path used by ordinary `filled_rect`/`aa_filled_rect` commands — this
+  is flagged as an open investigation, not a confirmed root cause. Do not mark badge corner
+  rounding "done" until this is fixed and re-verified visually.
+
+**Framework features exercised:** `Text`, `Card`, `Button`, `Input`, `Checkbox`, `Radio`,
+`Slider`, `Dropdown`, `src/app/ui/` component class-string library, token-derived styling
+(INV-4.3).
+
+---
+
 ### Screen 14 — AI-Qadam visual analog
 
 **Purpose:** Demonstrate layout fidelity and dark-theme styling by rendering a visual
