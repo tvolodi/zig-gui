@@ -225,17 +225,50 @@ Closes the gap between functional and polished.
 
 ---
 
-## Milestone 14 — Animation `done`
+## Milestone 14 — Animation `partial` (M14-01..04 done 2026-08-01 via RN16; M14-05 open)
 
 A minimal, principled animation model that fits the architecture. Requires: RD6, RD7, RD8, RD9, RDA.
+
+**Correction (AGENT AMENDMENT 2026-08-01, RN16 Step 1 validator investigation):** M14-02
+through M14-05 were previously marked `done` but code inspection found no consumer of
+`ComputedStyle.transition_*`/`animate_*`/`fade_*`/`slide_in_from_top` anywhere in
+`src/06`, `src/07`, `src/09`, or `src/app` outside their own struct declarations and
+unit tests that merely check the class resolver sets the flags. `Scene._transition_state`
+/ `_enter_exit_state` and their accessors exist but are never read except by
+`07_test.zig` tests exercising the accessors directly. `ProgressState.anim_frame_value`
+(M14-04) is never written anywhere — spinner/indeterminate-progress-bar animation is
+currently a static no-op frozen at phase 0, despite `scene.frame_count` being correctly
+updated every frame. `AppInner.tickAnimations`/`anim_timelines`/`prefer_reduced_motion`/
+`setReducedMotion` (M14-05) do not exist in `src/app/app.zig`. Only M14-01
+(`src/app/anim_timeline.zig` — the standalone `AnimTimeline` scalar animator) is
+genuinely complete and correct in isolation; it is simply never imported anywhere.
+Statuses below corrected to reflect actual code state; see
+`docs/specs/AMENDMENTS_LOG.md` for the log entry.
+
+**Update (2026-08-01, RN16 implementation complete, independently visually verified):**
+M14-02/M14-03/M14-04 are now genuinely wired, not just parsed. Root cause of the M14-02/03
+gap was `instantiateNode`'s style-merge block silently dropping the `transition_*`/
+`animate_*`/`fade_*` flags between module 06 and `final_style` — fixed in `src/07/types.zig`.
+`Scene.updateColorTransition`/`tickAnimations`/`hasActiveStyleAnimations`/`hideWithFade`
+(`src/07/types.zig`) now drive hover/press color easing and enter/exit fade via the
+previously-unused `AnimTimeline` (M14-01), called each frame from `AppInner.run()` and
+`AppInner.syncPseudoStates`/`updateCardHoverStates`. `ProgressState.anim_frame_value`
+(M14-04) is now written from `Scene.tickAnimations()` for `.spinner`, `.progress_bar`, and the
+new loading `.button` — see `docs/AGENT_GUIDE.md` §14.7 for full detail. M14-05 is only
+partially addressed: `Scene.tickAnimations()` provides the frame-driven tick loop RD9/RDA both
+depend on, but the RDA-specific surface — a `prefer_reduced_motion: bool` field and
+`setReducedMotion` method on `AppInner` that force all timelines to complete instantly — does
+not exist. RDA was never part of RN16's acceptance criteria (see
+`docs/requirements/RN16_animated_component_library.md` §6), so M14-05 remains open as a
+separate follow-up, not a regression.
 
 | ID | Feature | Depends on | Requirements | Status |
 |---|---|---|---|---|
 | M14-01 | **Animation timeline** — `AnimTimeline` drives a `f32` value from 0→1 over a duration with an easing function; ticks mark subscribed elements dirty | M2-01 | [RD6](requirements/RD6_animation_timeline.md) | `done` |
-| M14-02 | **Style transitions** — `transition-{opacity,background}` Tailwind class triggers an `AnimTimeline` when the value changes; blends old and new `ComputedStyle` fields over the duration | M14-01, 09 | [RD7](requirements/RD7_style_transitions.md) | `done` |
-| M14-03 | **Enter / exit animations** — `animate-in` / `animate-out` classes play a fade when an element's `isHidden` state changes | M14-01, M5-03 | [RD8](requirements/RD8_enter_exit_animations.md) | `done` |
-| M14-04 | **Spinner and progress animation** — `ProgressBar` indeterminate mode and `Spinner` use a proper `AnimTimeline` instead of `frame_count` arithmetic | M14-01, M7-04 | [RD9](requirements/RD9_spinner_progress_animation.md) | `done` |
-| M14-05 | **Reduced-motion respect** — `prefer_reduced_motion: bool` on `AppInner` disables all `AnimTimeline` playback | M14-01 | [RDA](requirements/RDA_reduced_motion.md) | `done` |
+| M14-02 | **Style transitions** — `transition-{opacity,background}` Tailwind class triggers an `AnimTimeline` when the value changes; blends old and new `ComputedStyle` fields over the duration | M14-01, 09 | [RD7](requirements/RD7_style_transitions.md) | `done` (RN16, 2026-08-01) — hover/press background+border color easing wired via `Scene.updateColorTransition`/`tickAnimations`, read in `buildDrawList` |
+| M14-03 | **Enter / exit animations** — `animate-in` / `animate-out` classes play a fade when an element's `isHidden` state changes | M14-01, M5-03 | [RD8](requirements/RD8_enter_exit_animations.md) | `done` (RN16, 2026-08-01) — enter-fade wired into `Scene.instantiate`, exit-fade via `Scene.hideWithFade` |
+| M14-04 | **Spinner and progress animation** — `ProgressBar` indeterminate mode and `Spinner` use a proper `AnimTimeline` instead of `frame_count` arithmetic | M14-01, M7-04 | [RD9](requirements/RD9_spinner_progress_animation.md) | `done` (RN16, 2026-08-01) — `ProgressState.anim_frame_value` now written every frame by `Scene.tickAnimations()` for `.spinner`/`.progress_bar`/loading `.button` |
+| M14-05 | **Reduced-motion respect** — `prefer_reduced_motion: bool` on `AppInner` disables all `AnimTimeline` playback | M14-01 | [RDA](requirements/RDA_reduced_motion.md) | `partial — frame-driven tick loop (Scene.tickAnimations) now exists, but no prefer_reduced_motion field/setReducedMotion method on AppInner; not in RN16 scope` |
 
 ---
 

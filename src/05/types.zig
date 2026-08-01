@@ -16,6 +16,13 @@ const store = @import("../03/types.zig");
 
 pub const Insets = store.Insets;
 
+/// RN16 — Standard transition/enter-exit animation duration, in frames.
+/// Derived from AI-Qadam's own CSS (`transition: all 150ms var(--ease-out)`) at an assumed
+/// 60fps display refresh rate: 150ms * 60/1000 = 9 frames. Named here (not scattered as a
+/// magic number) so both module 05's mirrored spec and module 07's live `Scene` wiring agree
+/// on the same value. See `docs/AGENT_GUIDE.md` §14.7 for the full rationale.
+pub const TRANSITION_DURATION_FRAMES: u32 = 9;
+
 // ---------------------------------------------------------------------------
 // Layer 0 — Color
 // ---------------------------------------------------------------------------
@@ -411,6 +418,14 @@ pub const TransitionState = struct {
     background_timeline_idx: u32 = 0xFFFFFFFF,
     from_background: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
     to_background: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+
+    /// RN16 — border_color transition (additive, INV-5.1). Mirrors the background pair
+    /// above; module 07's Scene is the live implementation (see that file for the actual
+    /// AnimTimeline wiring — this module-05 copy stays a shape-only spec mirror).
+    active_border: bool = false,
+    border_timeline_idx: u32 = 0xFFFFFFFF,
+    from_border: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    to_border: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
 };
 
 /// M14-03 — Per-element state for enter/exit animations.
@@ -479,6 +494,18 @@ pub fn checkboxPseudo(t: Tokens) PseudoStyleSet {
         .focus = .{ .border_color = Color.hex(0x0066FF), .border_width = 2 },
         .active = .{},
         .disabled = .{ .text_color = t.text_disabled },
+    };
+}
+
+/// RN16 — Hover overrides for the `ui.Card.hoverable` variant. Card has no focus/active
+/// concept (not a focusable widget — see `docs/AGENT_GUIDE.md` §14.7); only hover lightens the
+/// surface and strengthens the border, matching AI-Qadam's `.card:hover` treatment.
+pub fn cardPseudo(t: Tokens) PseudoStyleSet {
+    return .{
+        .hover = .{ .background = t.bg_raised, .border_color = t.border_strong },
+        .focus = .{},
+        .active = .{},
+        .disabled = .{},
     };
 }
 

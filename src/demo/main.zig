@@ -43,6 +43,14 @@ var _click_idx: u32 = 0;
 var _click_count: u32 = 0;
 var _click_fired: bool = false;
 
+// RN16 — --hover-idx support: hold a synthetic hover (ButtonState.hovered = true) on a given
+// button element index from frame 2 onward, so a multi-frame screenshot comparison
+// (--screenshot-frames 1 vs --screenshot-frames 10) can observe a hover color TRANSITION
+// mid-flight rather than only ever seeing the fully-settled start/end state. Reuses the exact
+// same "set state once, let the normal per-frame sync/tick loop do the rest" pattern as
+// --click-idx above — no new interaction-injection mechanism.
+var _hover_idx: u32 = std.math.maxInt(u32);
+
 /// Per-frame app-level tick: update toast expiry, tooltip visibility, and rebuild overlay slots.
 fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
     // Synthetic click injection: fire _click_count clicks on _click_idx once, on frame 2+
@@ -57,6 +65,16 @@ fn toastAppTick(ai: *app_types.app_impl.AppInner) void {
                     cb.call(cb.ptr);
                 }
             }
+            scene.elements.markAllDirty();
+        }
+    }
+    // RN16 — Synthetic hover hold: set once at frame 2, held every frame after (the button's
+    // .hovered field is read fresh each frame by AppInner.syncPseudoStates, so re-asserting it
+    // isn't even required, but doing so is harmless and keeps this robust to future changes).
+    if (_hover_idx != std.math.maxInt(u32) and ai.frame_count >= 2) {
+        const scene = &ai.scene;
+        if (_hover_idx < scene._button_state.items.len) {
+            scene._button_state.items[_hover_idx].hovered = true;
             scene.elements.markAllDirty();
         }
     }
@@ -107,6 +125,7 @@ pub fn main(init: std.process.Init) !void {
     _click_idx = 0;
     _click_count = 0;
     _click_fired = false;
+    _hover_idx = std.math.maxInt(u32);
     {
         var i: usize = 1;
         while (i < proc_args.len) : (i += 1) {
@@ -125,6 +144,9 @@ pub fn main(init: std.process.Init) !void {
             } else if (std.mem.eql(u8, proc_args[i], "--click-count") and i + 1 < proc_args.len) {
                 i += 1;
                 _click_count = std.fmt.parseInt(u32, proc_args[i], 10) catch 0;
+            } else if (std.mem.eql(u8, proc_args[i], "--hover-idx") and i + 1 < proc_args.len) {
+                i += 1;
+                _hover_idx = std.fmt.parseInt(u32, proc_args[i], 10) catch std.math.maxInt(u32);
             } else if (std.mem.eql(u8, proc_args[i], "--dark")) {
                 dark_mode = true;
             }

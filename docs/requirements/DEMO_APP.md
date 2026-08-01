@@ -400,12 +400,31 @@ truth.
 - **Typography** — heading/large/base/small/xs/muted/bold text samples.
 - **Badges** — six variants (`ui.Badge.default/secondary/outline/ok/warn/err`) in a wrapped
   row, colored via `tokens.accent_text`/`ok`/`warn`/`err` post-instantiation.
-- **Buttons** — five variants (`ui.Button.primary/secondary/outline/ghost/destructive`) in a
-  wrapped row.
+- **Buttons** — six variants in a wrapped row: `ui.Button.primary/secondary/outline/ghost/
+  destructive`, plus (RN16) a `ui.Button.loading` variant with the `loading="true"` attribute —
+  renders a rotating spinner-style busy indicator (8 tick marks, same render formula as the
+  standalone `.spinner` widget, scaled to button height) in place of the label, driven by
+  `scene.frame_count`.
 - **Form Controls** — labeled Input, Checkbox, Radio group, Slider, Dropdown, using
   `ui.Input.label/base/hint` class strings.
 - **Stat Cards** — two `ui.Card.surface` cards (Revenue, Active Users) with label/value/delta
   text.
+- **Motion (RN16, 2026-08-01)** — a two-card row demonstrating the animated component library:
+  - "Hover me" — a `ui.Card.hoverable` card. Background/border ease over ~150ms
+    (`AnimTimeline`, ease-out) on hover, matching AI-Qadam's own
+    `transition: all 150ms var(--ease-out)`. Card hover is detected by a dedicated scan
+    (`AppInner.updateCardHoverStates`, `src/app/app.zig`) restricted to cards that opted in via
+    `transition-colors` — Cards are intentionally NOT part of `focusable_indices` (not
+    keyboard-tabbable), so this does not touch Tab-key focus order.
+  - "Fades in" — a `ui.Card.enter_fade` card. Opacity animates 0→1 over ~150ms every time this
+    screen is navigated to (`Scene.instantiate` starts the enter-fade for every element with
+    `fade_in`/`animate_in` set, once per whole-tree rebuild — see
+    `docs/AGENT_GUIDE.md` §14.7 for why "on instantiate" means "on screen navigation" in this
+    data-oriented, whole-tree-rebuild architecture).
+  - All button variants above (Primary/Secondary/Outline/Ghost/Destructive/Loading) and the
+    Input in Form Controls also carry `transition-colors`, so their hover/press/focus color
+    changes ease instead of snapping — this is not a separate visible section, it's baked into
+    the base `ui.Button`/`ui.Input` class strings.
 
 **Styling source (RN14/RN15):** As of 2026-08-01, `ui.Button`/`ui.Card`/`ui.Input`/`ui.Badge`
 render AI-Qadam-derived design tokens (dark-first palette, teal `#39B3AF` primary, `radius_lg`

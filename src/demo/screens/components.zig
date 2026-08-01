@@ -116,14 +116,21 @@ pub fn build(
     const btn3_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Outline" } }};
     const btn4_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Ghost" } }};
     const btn5_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Destructive" } }};
+    // RN16 — Loading variant: `loading="true"` replaces the label with a spinner busy
+    // indicator (src/09/types.zig .button loading render path, driven by scene.frame_count).
+    const btn6_attrs = [2]Attr{
+        .{ .name = "text", .value = .{ .literal = "Loading" } },
+        .{ .name = "loading", .value = .{ .literal = "true" } },
+    };
 
     const btn1 = NodeDesc{ .tag = "Button", .classes = ui.Button.primary,     .attrs = &btn1_attrs };
     const btn2 = NodeDesc{ .tag = "Button", .classes = ui.Button.secondary,   .attrs = &btn2_attrs };
     const btn3 = NodeDesc{ .tag = "Button", .classes = ui.Button.outline,     .attrs = &btn3_attrs };
     const btn4 = NodeDesc{ .tag = "Button", .classes = ui.Button.ghost,       .attrs = &btn4_attrs };
     const btn5 = NodeDesc{ .tag = "Button", .classes = ui.Button.destructive, .attrs = &btn5_attrs };
+    const btn6 = NodeDesc{ .tag = "Button", .classes = ui.Button.loading,     .attrs = &btn6_attrs };
 
-    const btns_row_ch = [5]NodeDesc{ btn1, btn2, btn3, btn4, btn5 };
+    const btns_row_ch = [6]NodeDesc{ btn1, btn2, btn3, btn4, btn5, btn6 };
     const btns_row = NodeDesc{ .tag = "Row", .classes = "gap-3 flex-wrap", .children = &btns_row_ch };
 
     const btns_sect_ch = [2]NodeDesc{ btns_h, btns_row };
@@ -221,9 +228,38 @@ pub fn build(
     const stat_sect = NodeDesc{ .tag = "Column", .classes = "gap-3", .children = &stat_sect_ch };
 
     // -----------------------------------------------------------------------
+    // Motion section (RN16) — hover/press color transitions + enter fade.
+    // Buttons/Inputs above already carry `transition-colors` on their base class strings;
+    // this section demonstrates the two behaviors that need a dedicated example: a card whose
+    // background/border eases on hover (Card has no built-in hover tracking, so this is the
+    // one place that behavior is visible), and a card that fades in on screen entry.
+    // -----------------------------------------------------------------------
+    const motion_h_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Motion" } }};
+    const motion_h = NodeDesc{ .tag = "Text", .classes = "font-bold", .attrs = &motion_h_attrs };
+
+    const hov_title_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Hover me" } }};
+    const hov_title = NodeDesc{ .tag = "Text", .classes = ui.Card.header, .attrs = &hov_title_attrs };
+    const hov_desc_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Background and border ease over ~150ms on hover." } }};
+    const hov_desc = NodeDesc{ .tag = "Text", .classes = ui.Card.desc, .attrs = &hov_desc_attrs };
+    const hov_card_ch = [2]NodeDesc{ hov_title, hov_desc };
+    const hov_card = NodeDesc{ .tag = "Card", .classes = ui.Card.hoverable ++ " grow", .children = &hov_card_ch };
+
+    const fade_title_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Fades in" } }};
+    const fade_title = NodeDesc{ .tag = "Text", .classes = ui.Card.header, .attrs = &fade_title_attrs };
+    const fade_desc_attrs = [1]Attr{.{ .name = "text", .value = .{ .literal = "Animates opacity 0 to 1 each time this screen is opened." } }};
+    const fade_desc = NodeDesc{ .tag = "Text", .classes = ui.Card.desc, .attrs = &fade_desc_attrs };
+    const fade_card_ch = [2]NodeDesc{ fade_title, fade_desc };
+    const fade_card = NodeDesc{ .tag = "Card", .classes = ui.Card.enter_fade ++ " grow", .children = &fade_card_ch };
+
+    const motion_cards_ch = [2]NodeDesc{ hov_card, fade_card };
+    const motion_cards = NodeDesc{ .tag = "Row", .classes = "gap-4", .children = &motion_cards_ch };
+    const motion_sect_ch = [2]NodeDesc{ motion_h, motion_cards };
+    const motion_sect = NodeDesc{ .tag = "Column", .classes = "gap-3", .children = &motion_sect_ch };
+
+    // -----------------------------------------------------------------------
     // Assemble all sections into a scrollable column
     // -----------------------------------------------------------------------
-    const content_ch = [8]NodeDesc{ h1, sub, sep, typo_sect, badges_sect, btns_sect, forms_sect, stat_sect };
+    const content_ch = [9]NodeDesc{ h1, sub, sep, typo_sect, badges_sect, btns_sect, forms_sect, stat_sect, motion_sect };
     const content = NodeDesc{ .tag = "Column", .classes = "p-4 gap-6", .children = &content_ch };
     const scroll_ch = [1]NodeDesc{content};
     const scroll = NodeDesc{ .tag = "ScrollView", .classes = "flex-1", .children = &scroll_ch };

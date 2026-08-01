@@ -60,10 +60,14 @@ test-results/
 
 # std.testing.TmpDir artifacts — Zig 0.16 creates these at CWD with random 16+ char names.
 # They contain only test_settings.txt, test.log, leak.log, or roll.log from test suites.
-# Pattern: 13+ chars of [A-Za-z0-9_-] at the repo root.
+# Pattern: 13+ chars of [A-Za-z0-9_-] at the repo root ONLY (leading slash anchors it —
+# without the anchor this also matched any markdown filename stem >=13 chars anywhere in the
+# repo, e.g. docs/requirements/RN16_animated_component_library.md and
+# docs/requirements/RAI_aiqadam_visual_analog.md were silently swallowed as "untracked" and
+# never made it into git; fixed 2026-08-01, RN16 documentation step, both files force-added).
 # Gitignore does not support regex {} quantifiers — only ? (one char) and * (0+ chars).
 # The verbose form below matches any 13+ char alphanumeric/underscore/hyphen name at root.
-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*
+/[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*
 # Dependencies (if vendored)
 deps/
 

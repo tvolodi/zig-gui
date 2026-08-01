@@ -15,3 +15,14 @@ pub const subtle   = "p-6 bg-surface rounded-lg";
 pub const header   = "font-bold text-lg mb-2";
 /// Card description — muted text below header.
 pub const desc     = "text-sm text-muted mb-4";
+
+/// RN16 (2026-08-01) — Hoverable card: same as `surface`, but background/border ease over
+/// ~150ms on hover instead of snapping (`transition-colors`, matches AI-Qadam's own CSS).
+/// Note: Card has no built-in ButtonState-style hover tracking of its own — callers that want
+/// a genuine hover response must drive `scene.setPseudo(idx, .{ .hover = true/false })`
+/// themselves (e.g. from a synthetic test hook or a future pointer-hit-test pass over Cards).
+/// This class only makes the transition *possible*; it does not add hover detection.
+pub const hoverable = surface ++ " transition-colors";
+
+/// RN16 — Card that fades in when its screen is instantiated (`fade_in`, ~150ms ease-out).
+pub const enter_fade = surface ++ " fade-in";

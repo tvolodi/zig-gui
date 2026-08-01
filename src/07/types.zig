@@ -17,7 +17,11 @@ const store_mod = @import("../03/types.zig");
 const theme = @import("../05/types.zig");
 const markup = @import("../06/types.zig");
 const font_family_mod = @import("../app/font_family.zig");
+const anim_timeline = @import("../app/anim_timeline.zig");
 const debug = @import("debug.zig");
+
+/// RN16 — Re-export so callers (app.zig, ui/*.zig) don't need a second import path.
+pub const AnimTimeline = anim_timeline.AnimTimeline;
 
 /// RB0 — Re-export CursorShape so callers only need to import this module.
 pub const CursorShape = mod01.CursorShape;
@@ -341,6 +345,9 @@ pub const ButtonState = struct {
     pressed: bool = false,
     disabled: bool = false,
     on_click: ?CallbackFn = null,
+    /// RN16 — Loading/busy state: buildDrawList replaces the label with a spinner-style
+    /// tick-mark animation (reuses the `.spinner` render path, driven by `scene.frame_count`).
+    loading: bool = false,
 };
 
 pub const InputState = struct {
@@ -662,6 +669,20 @@ fn colorEq(a: theme.Color, b: theme.Color) bool {
     return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a;
 }
 
+/// RN16 — Linearly interpolate between two Colors by factor t [0, 1]. Duplicated from module
+/// 09's `lerpColor` (same formula) because module 07 < module 09 in build order (INV-3.4);
+/// `Scene.updateColorTransition`/`tickAnimations` need it to compute the "current interpolated
+/// value" when retargeting a timeline mid-flight.
+fn lerpColorRN16(a: theme.Color, b: theme.Color, t: f32) theme.Color {
+    const ct = std.math.clamp(t, 0.0, 1.0);
+    return .{
+        .r = @intFromFloat(@as(f32, @floatFromInt(a.r)) + (@as(f32, @floatFromInt(b.r)) - @as(f32, @floatFromInt(a.r))) * ct),
+        .g = @intFromFloat(@as(f32, @floatFromInt(a.g)) + (@as(f32, @floatFromInt(b.g)) - @as(f32, @floatFromInt(a.g))) * ct),
+        .b = @intFromFloat(@as(f32, @floatFromInt(a.b)) + (@as(f32, @floatFromInt(b.b)) - @as(f32, @floatFromInt(a.b))) * ct),
+        .a = @intFromFloat(@as(f32, @floatFromInt(a.a)) + (@as(f32, @floatFromInt(b.a)) - @as(f32, @floatFromInt(a.a))) * ct),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // M14-02 — Per-element transition state for style animations
 // ---------------------------------------------------------------------------
@@ -676,6 +697,18 @@ pub const TransitionState = struct {
     background_timeline_idx: u32 = 0xFFFFFFFF,
     from_background: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
     to_background: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+
+    /// RN16 — background color transition timeline (150ms ease-out, matches AI-Qadam CSS).
+    /// `active_background` above is repurposed as "background transition currently running or
+    /// just-finished-this-frame" (buildDrawList reads it to decide whether to lerp).
+    background_anim: anim_timeline.AnimTimeline = .{ .duration = theme.TRANSITION_DURATION_FRAMES, .easing = .ease_out },
+
+    /// RN16 — border_color transition (same treatment as background — AI-Qadam's own CSS is
+    /// `transition: all 150ms ease-out`, so border_color, not just background, eases).
+    active_border: bool = false,
+    from_border: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    to_border: theme.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    border_anim: anim_timeline.AnimTimeline = .{ .duration = theme.TRANSITION_DURATION_FRAMES, .easing = .ease_out },
 };
 
 // ---------------------------------------------------------------------------
@@ -688,6 +721,10 @@ pub const EnterExitState = struct {
     enter_timeline_idx: u32 = 0xFFFFFFFF,
     exit_timeline_idx: u32 = 0xFFFFFFFF,
     pending_hidden: bool = false,
+
+    /// RN16 — opacity timeline shared by both enter (0→1) and exit (1→0, read as 1-value)
+    /// fades. `entering`/`exiting` above select which direction buildDrawList applies.
+    fade_anim: anim_timeline.AnimTimeline = .{ .duration = theme.TRANSITION_DURATION_FRAMES, .easing = .ease_out },
 };
 
 // ---------------------------------------------------------------------------
@@ -992,6 +1029,23 @@ pub const Scene = struct {
                 else => {},
             }
         }
+
+        // RN16 — Enter animation: every screen navigation calls Scene.reset() + instantiate()
+        // once to rebuild the whole tree fresh (see src/app/navigator.zig), so "start the
+        // enter-fade when instantiated" means "start it here, for every opted-in element,
+        // right after the whole tree is built" — this is the one true instantiation point in
+        // this data-oriented model (there is no incremental single-element mount/unmount).
+        for (self._style.items, 0..) |st, i| {
+            if (st.fade_in or st.animate_in) {
+                if (i >= self._enter_exit_state.items.len) continue;
+                const ees = &self._enter_exit_state.items[i];
+                ees.fade_anim.duration = if (st.transition_duration > 0) st.transition_duration else theme.TRANSITION_DURATION_FRAMES;
+                ees.fade_anim.easing = .ease_out;
+                ees.fade_anim.start();
+                ees.entering = true;
+                ees.exiting = false;
+            }
+        }
         return id;
     }
 
@@ -1150,6 +1204,199 @@ pub const Scene = struct {
     // M14-03 — Enter/exit state accessor.
     pub fn enterExitStateOf(self: *Scene, idx: u32) *EnterExitState {
         return &self._enter_exit_state.items[idx];
+    }
+
+    // -----------------------------------------------------------------------
+    // RN16 — Hover/press color transitions
+    // -----------------------------------------------------------------------
+
+    /// Resolve the target background/border color for `idx` given its current PseudoState,
+    /// the same override-precedence rule as module 09's `resolveStyle` (disabled > active >
+    /// hover > focus > base) but restricted to just the two color fields this function needs.
+    /// Duplicated (not shared with module 09) because module 07 < module 09 in build order
+    /// (INV-3.4) — module 09 depends on this file, not the reverse.
+    fn resolvePseudoColorTargets(base: ComputedStyle, overrides: theme.PseudoStyleSet, state: PseudoState) struct { background: theme.Color, border_color: theme.Color } {
+        var bg = base.background;
+        var bd = base.border_color;
+        if (state.focus) {
+            if (overrides.focus.background) |v| bg = v;
+            if (overrides.focus.border_color) |v| bd = v;
+        }
+        if (state.hover) {
+            if (overrides.hover.background) |v| bg = v;
+            if (overrides.hover.border_color) |v| bd = v;
+        }
+        if (state.active) {
+            if (overrides.active.background) |v| bg = v;
+            if (overrides.active.border_color) |v| bd = v;
+        }
+        if (state.disabled) {
+            if (overrides.disabled.background) |v| bg = v;
+            if (overrides.disabled.border_color) |v| bd = v;
+        }
+        return .{ .background = bg, .border_color = bd };
+    }
+
+    /// RN16 — Called once per frame (after pseudo-state sync, before buildDrawList) for every
+    /// focusable element. If the element's `ComputedStyle.transition_background` flag is set
+    /// (from a `transition-colors`/`transition-background` class) and the resolved pseudo-state
+    /// target color has changed since last frame, (re)start an ease-out AnimTimeline from the
+    /// CURRENT interpolated color to the new target — matching AI-Qadam's
+    /// `transition: all 150ms ease-out`. No-op for elements that didn't opt in (INV-5.4: no
+    /// behavior change for existing components that don't use the new classes).
+    pub fn updateColorTransition(self: *Scene, idx: u32, tokens: theme.Tokens) void {
+        if (idx >= self._style.items.len) return;
+        const style = self._style.items[idx];
+        if (!style.transition_background) return;
+
+        const kind = self._kind.items[idx];
+        const overrides: theme.PseudoStyleSet = switch (kind) {
+            .button => theme.buttonPseudo(tokens),
+            .input => theme.inputPseudo(tokens),
+            .dropdown => theme.dropdownPseudo(tokens),
+            .checkbox => theme.checkboxPseudo(tokens),
+            .card => theme.cardPseudo(tokens), // RN16 — hoverable card variant
+            else => theme.PseudoStyleSet{},
+        };
+        const pseudo = if (idx < self._pseudo.items.len) self._pseudo.items[idx] else PseudoState{};
+        const target = resolvePseudoColorTargets(style, overrides, pseudo);
+
+        const ts = &self._transition_state.items[idx];
+
+        // Background.
+        if (!colorEq(target.background, ts.to_background) or !ts.active_background) {
+            if (!colorEq(target.background, ts.to_background)) {
+                // Retarget: animate from the CURRENT interpolated value, not the old target,
+                // so a hover->unhover->hover flick reverses smoothly instead of jumping.
+                const current = if (ts.active_background)
+                    lerpColorRN16(ts.from_background, ts.to_background, ts.background_anim.value)
+                else
+                    target.background;
+                ts.from_background = if (ts.active_background) current else target.background;
+                ts.to_background = target.background;
+                ts.background_anim.duration = if (style.transition_duration > 0) style.transition_duration else theme.TRANSITION_DURATION_FRAMES;
+                ts.background_anim.easing = .ease_out;
+                ts.background_anim.start();
+                ts.active_background = true;
+            }
+        }
+
+        // Border color.
+        if (!colorEq(target.border_color, ts.to_border)) {
+            const current = if (ts.active_border)
+                lerpColorRN16(ts.from_border, ts.to_border, ts.border_anim.value)
+            else
+                target.border_color;
+            ts.from_border = current;
+            ts.to_border = target.border_color;
+            ts.border_anim.duration = if (style.transition_duration > 0) style.transition_duration else theme.TRANSITION_DURATION_FRAMES;
+            ts.border_anim.easing = .ease_out;
+            ts.border_anim.start();
+            ts.active_border = true;
+        }
+    }
+
+    /// RN16 — Advance every element's active transition/enter-exit timelines by one frame.
+    /// Called once per frame from the app loop (same cadence as `frame_count` increments),
+    /// mirroring the existing frame-driven pattern used by spinner/progress_bar (R73).
+    pub fn tickAnimations(self: *Scene) void {
+        for (self._transition_state.items) |*ts| {
+            if (ts.active_background and ts.background_anim.running) {
+                ts.background_anim.tick();
+            }
+            if (ts.active_border and ts.border_anim.running) {
+                ts.border_anim.tick();
+            }
+        }
+        for (self._enter_exit_state.items, 0..) |*ees, i| {
+            if (ees.entering and ees.fade_anim.running) {
+                ees.fade_anim.tick();
+                if (!ees.fade_anim.running) ees.entering = false;
+            }
+            if (ees.exiting and ees.fade_anim.running) {
+                ees.fade_anim.tick();
+                if (!ees.fade_anim.running) {
+                    ees.exiting = false;
+                    // Fade-out finished: actually hide the element now (RN16 exit mechanism —
+                    // reuses the existing setHidden/_hidden bit, same as tabs/accordion).
+                    self.setHidden(@intCast(i), true);
+                }
+            }
+        }
+
+        // Pre-existing gap (M14-04, found in passing while touching this exact frame-driven
+        // update loop for RN16): `ProgressState.anim_frame_value` was declared as "synced from
+        // AnimTimeline each frame" but nothing ever wrote it — spinner/indeterminate-progress
+        // were frozen despite `frame_count` incrementing correctly. Fixed here per this
+        // project's "fix issues immediately" rule, matching the behavior already documented in
+        // `docs/AGENT_GUIDE.md` R73 (spinner: frame_count % 8 over 8 phases; progress_bar
+        // indeterminate: frame_count % 120 band cycle). Not part of RN16's button/card/input/
+        // badge scope otherwise — this is the narrowest possible fix (data sync only, no new
+        // render path).
+        for (self._kind.items, 0..) |kind, i| {
+            if (i >= self._progress_state.items.len) continue;
+            switch (kind) {
+                .spinner => {
+                    self._progress_state.items[i].anim_frame_value =
+                        @as(f32, @floatFromInt(self.frame_count % 8)) / 8.0;
+                },
+                .progress_bar => {
+                    if (self._progress_state.items[i].indeterminate) {
+                        self._progress_state.items[i].anim_frame_value =
+                            @as(f32, @floatFromInt(self.frame_count % 120)) / 120.0;
+                    }
+                },
+                .button => {
+                    // RN16 — Loading buttons reuse the spinner's phase computation (same
+                    // frame_count % 8 formula) so buildDrawList's button-loading render path
+                    // (src/09/types.zig) reads a real, moving anim_frame_value instead of the
+                    // permanently-0 default (ProgressState is never otherwise touched for
+                    // non-spinner/progress_bar kinds).
+                    if (i < self._button_state.items.len and self._button_state.items[i].loading) {
+                        self._progress_state.items[i].anim_frame_value =
+                            @as(f32, @floatFromInt(self.frame_count % 8)) / 8.0;
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    /// RN16 — Hide element `idx` with an exit fade instead of an instant `setHidden(true)`
+    /// snap, when it opted in via the `fade_out`/`animate_out` class. Starts the exit timeline;
+    /// `tickAnimations()` calls the real `setHidden(true)` once the fade completes (mirrors the
+    /// existing tabs/accordion `setHidden` mechanism — no new lifecycle path). Elements that
+    /// did NOT opt in fall back to the plain instant `setHidden` (unchanged prior behavior).
+    pub fn hideWithFade(self: *Scene, idx: u32) void {
+        if (idx >= self._style.items.len) return;
+        const st = self._style.items[idx];
+        if (!st.fade_out and !st.animate_out) {
+            self.setHidden(idx, true);
+            return;
+        }
+        if (idx >= self._enter_exit_state.items.len) return;
+        const ees = &self._enter_exit_state.items[idx];
+        ees.fade_anim.duration = if (st.transition_duration > 0) st.transition_duration else theme.TRANSITION_DURATION_FRAMES;
+        ees.fade_anim.easing = .ease_out;
+        ees.fade_anim.start();
+        ees.exiting = true;
+        ees.entering = false;
+        if (idx < self.elements.dirty.bit_length) self.elements.dirty.set(idx);
+    }
+
+    /// RN16 — True while any element has a running color-transition or enter/exit-fade
+    /// timeline. Used by `hasAnimatedElements()` (src/app/app.zig) to keep the frame loop
+    /// polling instead of idling, the same way spinner/indeterminate-progress already do.
+    pub fn hasActiveStyleAnimations(self: *const Scene) bool {
+        for (self._transition_state.items) |ts| {
+            if (ts.active_background and ts.background_anim.running) return true;
+            if (ts.active_border and ts.border_anim.running) return true;
+        }
+        for (self._enter_exit_state.items) |ees| {
+            if (ees.entering and ees.fade_anim.running) return true;
+            if (ees.exiting and ees.fade_anim.running) return true;
+        }
+        return false;
     }
 
     pub fn count(self: *Scene) u32 {
@@ -2202,6 +2449,27 @@ pub const Scene = struct {
         if (!colorEq(resolved.style.shadow_color, empty.style.shadow_color))
             final_style.shadow_color = resolved.style.shadow_color;
 
+        // RN16 — M14-02/M14-03 transition & enter/exit flags. These were previously parsed by
+        // module 06 (transition-colors, animate-in, fade-in, etc. — see src/06/types.zig) but
+        // dropped here: the merge block never copied them from `resolved.style` into
+        // `final_style`, so every ComputedStyle instantiated via NodeDesc had these flags
+        // permanently false regardless of class string. This was the actual root cause of
+        // "nothing downstream reads them" — nothing could, because they never survived
+        // instantiation. Fixed as boolean-OR merges (a flag is "on" if the class set it).
+        if (resolved.style.transition_opacity) final_style.transition_opacity = true;
+        if (resolved.style.transition_background) final_style.transition_background = true;
+        if (resolved.style.transition_colors) final_style.transition_colors = true;
+        if (resolved.style.transition_duration != empty.style.transition_duration)
+            final_style.transition_duration = resolved.style.transition_duration;
+        if (resolved.style.animate_in) final_style.animate_in = true;
+        if (resolved.style.animate_out) final_style.animate_out = true;
+        if (resolved.style.fade_in) final_style.fade_in = true;
+        if (resolved.style.fade_out) final_style.fade_out = true;
+        if (resolved.style.slide_in_from_top) final_style.slide_in_from_top = true;
+        if (resolved.style.slide_in_from_bottom) final_style.slide_in_from_bottom = true;
+        if (resolved.style.slide_out_to_top) final_style.slide_out_to_top = true;
+        if (resolved.style.slide_out_to_bottom) final_style.slide_out_to_bottom = true;
+
         // Padding sub-fields
         if (resolved.style.padding.top != empty.style.padding.top)
             final_style.padding.top = resolved.style.padding.top;
@@ -2770,6 +3038,21 @@ pub const Scene = struct {
                     if (markup.parseFloat(attr_val)) |v| ps.value = std.math.clamp(v, 0.0, 1.0);
                 } else if (std.mem.eql(u8, attr.name, "indeterminate")) {
                     ps.indeterminate = std.mem.eql(u8, attr_val, "true");
+                }
+            }
+        }
+
+        // RN16: parse button `loading` attribute — replaces label with a spinner-style busy
+        // indicator (buildDrawList) while true, driven by scene.frame_count.
+        if (kind == .button) {
+            var bs = &self._button_state.items[id.index];
+            for (desc.attrs) |attr| {
+                const attr_val: []const u8 = switch (attr.value) {
+                    .literal => |s| s,
+                    .bind => continue,
+                };
+                if (std.mem.eql(u8, attr.name, "loading")) {
+                    bs.loading = std.mem.eql(u8, attr_val, "true");
                 }
             }
         }

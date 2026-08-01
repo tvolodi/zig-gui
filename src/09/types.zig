@@ -755,13 +755,41 @@ pub fn buildDrawList(
             .input => theme_mod.inputPseudo(tokens),
             .dropdown => theme_mod.dropdownPseudo(tokens),
             .checkbox => theme_mod.checkboxPseudo(tokens),
+            .card => theme_mod.cardPseudo(tokens), // RN16 — hoverable card variant
             else => PseudoStyleSet{},
         };
 
-        const style = resolveStyle(base_style, overrides, pseudo);
+        var style = resolveStyle(base_style, overrides, pseudo);
+
+        // RN16 — When a hover/press color transition is actively interpolating, override the
+        // resolved instant-snap color with the CURRENT eased timeline value instead. Read-only
+        // override of the two paint properties AnimTimeline drives (background, border_color) —
+        // does not touch layout/position/size (RN16 non-goal).
+        if (id.index < scene._transition_state.items.len) {
+            const ts = scene._transition_state.items[id.index];
+            if (ts.active_background and ts.background_anim.running) {
+                style.background = lerpColor(ts.from_background, ts.to_background, ts.background_anim.value);
+            }
+            if (ts.active_border and ts.border_anim.running) {
+                style.border_color = lerpColor(ts.from_border, ts.to_border, ts.border_anim.value);
+            }
+        }
+
+        // RN16 — Enter/exit fade: multiply effective alpha by the current fade progress.
+        // Enter fades 0→1 (timeline value is the fraction opaque); exit fades 1→0 (timeline
+        // value counts UP from 0 as it plays, so opacity is 1 - value).
+        var enter_exit_alpha: f32 = 1.0;
+        if (id.index < scene._enter_exit_state.items.len) {
+            const ees = scene._enter_exit_state.items[id.index];
+            if (ees.entering) {
+                enter_exit_alpha = ees.fade_anim.value;
+            } else if (ees.exiting) {
+                enter_exit_alpha = 1.0 - ees.fade_anim.value;
+            }
+        }
 
         // R45: Accumulate effective alpha.
-        const effective_alpha = parent_alpha * style.opacity;
+        const effective_alpha = parent_alpha * style.opacity * enter_exit_alpha;
 
         const kind = scene.kindOfIdx(id.index);
 
@@ -1018,8 +1046,13 @@ pub fn buildDrawList(
             }
         }
 
+        // RN16 — Button loading state: true while this button's ButtonState.loading is set.
+        // Replaces the label (step 3) with a spinner-style busy indicator (step 4) instead.
+        const button_is_loading = kind == .button and id.index < scene._button_state.items.len and
+            scene._button_state.items[id.index].loading;
+
         // 3. Text glyphs (inputs/textarea/checkbox/radio/badge emit in step 4 with custom placement)
-        if (kind != .checkbox and kind != .radio and kind != .badge and kind != .input and kind != .textarea and kind != .maskable_value and kind != .trend_badge) {
+        if (!button_is_loading and kind != .checkbox and kind != .radio and kind != .badge and kind != .input and kind != .textarea and kind != .maskable_value and kind != .trend_badge) {
             if (scene.textOf(id)) |str| {
                 if (str.len > 0) {
                     const elem_font = if (scene.font_family) |fam| fam.face(style.font_bold, style.font_italic) else font;
@@ -1060,6 +1093,35 @@ pub fn buildDrawList(
         switch (kind) {
             .button => {
                 // Pseudo-state visual handled via resolveStyle (R40).
+                // RN16 — Loading state: render a busy indicator in place of the label.
+                // Reuses the exact `.spinner` 8-tick-mark rendering formula (R73) above,
+                // scaled to the button's height (not width — a button is a wide pill, not a
+                // square, so using computed.w like the standalone spinner would produce a
+                // huge off-center mark) and using the button's own resolved text_color so it
+                // stays visible against any variant's background (primary/secondary/outline/
+                // ghost/destructive all resolve different backgrounds).
+                if (button_is_loading) {
+                    const ps = scene.progressStateOf(id.index);
+                    const N: u32 = 8;
+                    const cx = computed.x + computed.w / 2.0;
+                    const cy = computed.y + computed.h / 2.0;
+                    const diameter = @min(computed.w, computed.h);
+                    const r = diameter * 0.28;
+                    const tw = diameter * 0.09;
+                    const th = diameter * 0.22;
+                    const raw_t = ps.anim_frame_value;
+                    const phase_idx: u32 = @intFromFloat(raw_t * 7.999);
+                    var i: u32 = 0;
+                    while (i < N) : (i += 1) {
+                        const angle = @as(f32, @floatFromInt(i)) * (std.math.tau / @as(f32, @floatFromInt(N)));
+                        const age: u32 = (i + N - phase_idx) % N;
+                        const a_frac: f32 = @as(f32, @floatFromInt(N - age)) / @as(f32, @floatFromInt(N));
+                        const tick_alpha = effective_alpha * a_frac;
+                        const tx = cx + r * @cos(angle) - tw / 2.0;
+                        const ty = cy + r * @sin(angle) - th / 2.0;
+                        try emitFilledRectAA(&list, alloc, .{ .x = tx, .y = ty, .w = tw, .h = th }, toColor09(applyOpacity(style.text_color, tick_alpha)), tw / 2.0);
+                    }
+                }
             },
             .dropdown => {
                 // Bug 2 fix: render selected option label in closed state.

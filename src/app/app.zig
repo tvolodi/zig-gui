@@ -311,6 +311,10 @@ fn colorEq(a: mod05.Color, b: mod05.Color) bool {
 /// (spinners, indeterminate progress bars). Used to decide between waitEvents/pollEvents.
 fn hasAnimatedElements(scene: *const Scene, tooltip: *const @import("tooltip.zig").TooltipManager) bool {
     if (tooltip.isPending()) return true;
+    // RN16 — active hover/press color transitions or enter/exit fades also require continuous
+    // redraws, same reasoning as spinner/indeterminate progress below. Reuses the exact
+    // "scan and return true" pattern rather than adding a second animation-detection mechanism.
+    if (scene.hasActiveStyleAnimations()) return true;
     var i: u32 = 0;
     while (i < scene._kind.items.len) : (i += 1) {
         if (i < scene._hidden.items.len and scene._hidden.items[i]) continue;
@@ -319,6 +323,11 @@ fn hasAnimatedElements(scene: *const Scene, tooltip: *const @import("tooltip.zig
             .progress_bar => {
                 if (i < scene._progress_state.items.len and
                     scene._progress_state.items[i].indeterminate) return true;
+            },
+            .button => {
+                // RN16 — Button `loading` state renders a spinner in place of the label,
+                // driven by frame_count exactly like the standalone .spinner widget.
+                if (i < scene._button_state.items.len and scene._button_state.items[i].loading) return true;
             },
             else => {},
         }
@@ -716,6 +725,8 @@ pub const AppInner = struct {
             self.frame_time_ms = @bitCast(@as(i64, @truncate(@divFloor(std.Io.Clock.real.now(_t_io1).nanoseconds, 1_000_000))));
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
+            // RN16 — Advance color-transition and enter/exit-fade timelines once per real frame.
+            self.scene.tickAnimations();
 
             // Measure text (module 07).
             self.scene.font_family = &self.font_family;
@@ -986,6 +997,8 @@ pub const AppInner = struct {
             self.frame_time_ms = @bitCast(@as(i64, @truncate(@divFloor(std.Io.Clock.real.now(_t_io2).nanoseconds, 1_000_000))));
             self.scene.frame_count = self.frame_count;
             self.scene.frame_time_ms = self.frame_time_ms;
+            // RN16 — Advance color-transition and enter/exit-fade timelines once per real frame.
+            self.scene.tickAnimations();
 
             self.scene.font_family = &self.font_family;
             self.scene.measurePass(self.font_family.face(false, false), &self.atlas_cpu) catch {};
@@ -1483,6 +1496,10 @@ pub const AppInner = struct {
                 },
                 else => {},
             }
+            // RN16 — Once this element's PseudoState is current for this frame, check whether
+            // its resolved hover/press/focus/disabled color target changed and (re)start its
+            // transition timeline. Must run after setPseudo above so it sees this frame's state.
+            self.scene.updateColorTransition(idx, self.tokens);
         }
     }
 
@@ -1497,6 +1514,7 @@ pub const AppInner = struct {
                     self.last_cursor_x = mm.x;
                     self.last_cursor_y = mm.y;
                     self.updateHoverStates(mm.x, mm.y);
+                    self.updateCardHoverStates(mm.x, mm.y); // RN16
                     // R7C: tooltip hover tracking — find topmost element with a tooltip attr.
                     var found_tooltip = false;
                     for (0..self.scene._kind.items.len) |i| {
@@ -1806,6 +1824,31 @@ pub const AppInner = struct {
             }
             if (dirty and idx < self.scene.elements.dirty.bit_length)
                 self.scene.elements.dirty.set(idx);
+        }
+    }
+
+    /// RN16 — Hover detection for the `ui.Card.hoverable` variant. Cards are intentionally NOT
+    /// part of `focusable_indices` (they are not keyboard-focusable/tabbable — that loop drives
+    /// Tab-key navigation order, a concern this task must not touch), so this is a separate,
+    /// narrowly-scoped scan restricted to cards that opted in via `transition-colors`
+    /// (`ComputedStyle.transition_background`) — plain cards pay zero extra cost here.
+    fn updateCardHoverStates(self: *AppInner, x: f32, y: f32) void {
+        for (self.scene._kind.items, 0..) |kind, i| {
+            if (kind != .card) continue;
+            const idx: u32 = @intCast(i);
+            if (idx >= self.scene._style.items.len) continue;
+            if (!self.scene._style.items[idx].transition_background) continue;
+            if (idx >= self.scene.elements.layout.items.len) continue;
+            const scroll = self.scrollOffsetFor(idx);
+            const rect = self.scene.elements.layout.items[idx].computed;
+            const vx = rect.x - scroll.x;
+            const vy = rect.y - scroll.y;
+            const hit = x >= vx and x < vx + rect.w and y >= vy and y < vy + rect.h;
+            const was = idx < self.scene._pseudo.items.len and self.scene._pseudo.items[idx].hover;
+            if (was != hit) {
+                self.scene.setPseudo(idx, .{ .hover = hit });
+            }
+            self.scene.updateColorTransition(idx, self.tokens);
         }
     }
 

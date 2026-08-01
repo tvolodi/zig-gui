@@ -173,13 +173,14 @@ pub fn build(b: *std.Build) void {
             ialias("../03_element_store/types.zig", "mod03_element_store"),
             ialias("../05_theme/types.zig", "mod05_theme"),
         } },
-        .{ .name = "mod07_components", .root = "src/07/types.zig", .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod06_markup", "mod_font_family" }, .extra_imports = &.{
+        .{ .name = "mod07_components", .root = "src/07/types.zig", .deps = &.{ "mod01_platform", "mod02_text", "mod03_element_store", "mod05_theme", "mod06_markup", "mod_font_family", "mod_anim_timeline" }, .extra_imports = &.{
             ialias("../01/types.zig", "mod01_platform"),
             ialias("../02/types.zig", "mod02_text"),
             ialias("../03/types.zig", "mod03_element_store"),
             ialias("../05/types.zig", "mod05_theme"),
             ialias("../06/types.zig", "mod06_markup"),
             ialias("../app/font_family.zig", "mod_font_family"),
+            ialias("../app/anim_timeline.zig", "mod_anim_timeline"),
             ialias("../03_element_store/types.zig", "mod03_element_store"),
             ialias("../05_theme/types.zig", "mod05_theme"),
             ialias("../06_markup_style/types.zig", "mod06_markup"),
@@ -214,6 +215,7 @@ pub fn build(b: *std.Build) void {
             ialias("../09/types.zig", "mod09_renderer"),
         } },
         // App helper modules.
+        .{ .name = "mod_anim_timeline", .root = "src/app/anim_timeline.zig" },
         .{ .name = "mod_font_family", .root = "src/app/font_family.zig", .deps = &.{"mod02_text"}, .extra_imports = &.{ialias("../02/types.zig", "mod02_text")} },
         .{ .name = "mod_image_atlas", .root = "src/app/image_atlas.zig" },
         .{ .name = "mod_overlay", .root = "src/app/overlay.zig", .deps = &.{"mod01_platform"}, .extra_imports = &.{ialias("../01/types.zig", "mod01_platform")} },

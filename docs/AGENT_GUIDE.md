@@ -778,3 +778,105 @@ element-paint path does. Next agent: instrument or read the badge-specific rende
 in `src/01/types.zig` — the radius plumbing there is already confirmed correct for the
 commands it receives; the bug is upstream of that, in what command badges actually emit.
 
+### 14.7 RN16 (2026-08-01) — Animated component library: transitions, enter/exit fade, loading state
+
+`TransitionState`/`EnterExitState` (`src/07/types.zig`) previously existed as inert struct shapes
+— `ComputedStyle.transition_*`/`animate_*`/`fade_*` flags were parsed by module 06 but then
+**silently dropped during `instantiateNode`'s style-merge block** (it copied ~20 named fields
+from `resolved.style` into `final_style` but never these), so no element could ever have them
+set regardless of class string. That merge gap, not a missing animator, was the actual root
+cause of "nothing downstream reads them" — fixed by adding the RN16 boolean-OR merge block
+right after the shadow-color merge in `instantiateNode`.
+
+**AnimTimeline reuse.** `src/app/anim_timeline.zig`'s `AnimTimeline` (M14-01, pure scalar
+0→1 animator, no Scene dependency) was fully implemented but never imported anywhere. RN16
+wires it directly into module 07: `TransitionState` gained `background_anim`/`border_anim`
+fields (embedded `AnimTimeline`, not the old dead `*_timeline_idx: u32` indirection — there was
+never a backing array for that), `EnterExitState` gained `fade_anim`. Importing an app-layer
+type into module 07 required a `build.zig` module registration (`mod_anim_timeline`, mirrors
+the existing `mod_font_family` pattern already used by module 07) — Zig's explicit module graph
+doesn't do implicit relative-path resolution across module boundaries even when the source
+file itself has zero problematic dependencies.
+
+**150ms → frames constant.** `theme.TRANSITION_DURATION_FRAMES = 9` (`src/05/types.zig`),
+derived from AI-Qadam's own `transition: all 150ms ease-out` at an assumed 60fps refresh
+(150 × 60 / 1000 = 9). A class string's `duration-N` (module 06) overrides this per-element via
+`ComputedStyle.transition_duration`.
+
+**Hover/press color transitions.** `Scene.updateColorTransition(idx, tokens)` (module 07)
+resolves the pseudo-state target color the same way module 09's `resolveStyle` does (duplicated,
+not shared — module 07 < module 09 in build order, INV-3.4) and, when the target changed since
+last frame, retargets `background_anim`/`border_anim` FROM the current interpolated value (not
+the old target) so a rapid hover/unhover/hover flick reverses smoothly instead of snapping.
+Called from `AppInner.syncPseudoStates` (per focusable element, every frame) for
+Button/Input/Dropdown/Checkbox. **Card is not focusable** (not part of `focusable_indices` —
+that array drives Tab-key order, a keyboard-navigation concern RN16 must not touch), so a
+hoverable Card (`ui.Card.hoverable`, opts in via `transition-colors`) gets a separate,
+narrowly-scoped hover scan: `AppInner.updateCardHoverStates`, called from the `mouse_move`
+dispatch handler, restricted to `.card` elements with `ComputedStyle.transition_background`
+set — plain (non-hoverable) cards pay zero extra per-frame cost. A `theme.cardPseudo(tokens)`
+override set was added (hover only — Card has no focus/active concept) and wired into both
+module 09's `overrides` switch (`buildDrawList`) and module 07's mirrored
+`resolvePseudoColorTargets` switch — **both switches must be kept in sync** when adding a new
+pseudo-aware widget kind; they intentionally duplicate each other rather than module 09 calling
+into module 07's version, per the same build-order constraint above.
+
+`Scene.tickAnimations()` advances every element's active timelines by one frame; called once
+per real frame from `AppInner.run()`, immediately after the `frame_count +%= 1` /
+`self.scene.frame_count = self.frame_count` block (both copies of the frame loop — this
+codebase currently has two near-duplicate frame-loop bodies in `app.zig`, keep them in sync).
+`buildDrawList` (module 09) reads the ticked value: right after `resolveStyle` resolves the
+instant-snap pseudo-state color, an RN16 block overwrites `style.background`/`style.border_color`
+with `lerpColor(from, to, timeline.value)` whenever that element's transition is
+`active_* and *_anim.running`. Once `running` goes false (timeline complete), the override no
+longer applies and the plain `resolveStyle` result (which by then equals the same settled
+color) is used — no discontinuity at completion.
+
+**Enter/exit fade.** Every screen navigation calls `scene.reset()` then `screen.build()` (which
+calls `Scene.instantiate` exactly once for the whole tree — see `src/app/navigator.zig`); there
+is no incremental single-element mount/unmount in this data-oriented model. So "start the
+enter-fade when instantiated" is implemented at the end of `Scene.instantiate`: after the whole
+tree is built, it scans every element for `fade_in`/`animate_in` and starts `fade_anim` 0→1 for
+each. Practically this means enter-fade plays once per screen-entry, for every opted-in element
+on that screen simultaneously — not truly per-element mount timing, which this architecture has
+no mechanism for. Exit fade uses `Scene.hideWithFade(idx)`: if the element opted in via
+`fade_out`/`animate_out`, it starts `fade_anim` playing (read as `1 - value` for opacity) and
+sets `exiting = true` instead of calling `setHidden` immediately; `tickAnimations()` calls the
+real `setHidden(idx, true)` once the fade completes — reusing the exact `_hidden`/`display=.none`
+mechanism tabs/accordion already use, no new lifecycle path. Elements that did NOT opt in fall
+back to the plain instant `setHidden` (zero behavior change for existing callers).
+`buildDrawList` multiplies `effective_alpha` by the enter/exit fade factor, same mechanism as
+the pre-existing `applyOpacity`/R45.
+
+**Button loading state.** `ButtonState.loading: bool` (new field, additive per INV-5.1), set via
+a `loading="true"` NodeDesc attribute (parsed in `instantiateNode`, mirrors the existing
+`date_picker` `disabled` attribute pattern). When true, `buildDrawList` skips the label glyph
+emission (step 3) and instead renders the exact `.spinner` widget's 8-tick-mark formula (R73)
+inside the `.button` case of step 4 — scaled to `min(computed.w, computed.h)` instead of
+`computed.w` alone (a button is a wide pill, not a square; using width directly produced a
+huge off-center mark), and colored with the button's own resolved `text_color` so it stays
+legible against any variant's background. `hasAnimatedElements()` (`src/app/app.zig`) checks
+`ButtonState.loading` alongside the existing `.spinner`/indeterminate-`.progress_bar` cases so
+the frame loop keeps polling instead of idling while a loading button is on screen.
+
+**Pre-existing bug fixed in passing (M14-04):** `ProgressState.anim_frame_value` — the field
+spinner/indeterminate-progress-bar rendering reads every frame — was declared as "synced from
+AnimTimeline each frame" but nothing ever wrote it; `scene.frame_count` incremented correctly
+but the standalone `.spinner`/indeterminate `.progress_bar` widgets were completely frozen
+despite `docs/AGENT_GUIDE.md` (pre-RN16 revision) claiming they animate. Found while
+implementing `Scene.tickAnimations()` — the exact frame-driven sync loop this value needed —
+and fixed there (`frame_count % 8` for spinner phase, `frame_count % 120` for the indeterminate
+band, matching the formulas already documented for R73). The Button-loading spinner above
+reuses this same sync line, extended to also cover `.button` elements with `loading = true`.
+
+**Verification tooling:** `--hover-idx N` (`src/demo/main.zig`) holds `ButtonState.hovered =
+true` on element index N from frame 2 onward — mirrors the existing `--click-idx`/
+`--click-count` synthetic-interaction pattern exactly (set state once, let the normal per-frame
+sync/tick loop do the rest) — added because there was no existing way to trigger and hold a
+hover state for a headless multi-frame screenshot comparison. Use
+`zig-out\bin\showcase.exe --dark --initial-screen components --hover-idx 43
+--screenshot-frames N` with varying N to sample a transition mid-flight (element 43 = the
+"Primary" button in the Components screen's Buttons row as of this writing — element indices
+are DFS-instantiation-order-dependent and will shift if screen content above it changes; do not
+hardcode 43 elsewhere without re-verifying).
+

@@ -8,8 +8,12 @@
 //! Usage:
 //!   const a = [1]Attr{.{ .name = "text", .value = .{ .literal = "Submit" } }};
 //!   const n = NodeDesc{ .tag = "Button", .classes = button.primary, .attrs = &a };
+//!
+//! RN16 (2026-08-01): all variants below opt into `transition-colors` so hover/press color
+//! changes ease over ~150ms (AnimTimeline, ease-out) instead of snapping instantly — matches
+//! AI-Qadam's own `transition: all 150ms var(--ease-out)`. See docs/AGENT_GUIDE.md §14.7.
 
-const base = "h-10 rounded-md px-4 gap-2 text-sm font-medium";
+const base = "h-10 rounded-md px-4 gap-2 text-sm font-medium transition-colors";
 
 /// Default primary action — filled teal (tokens.accent) background, accent_text foreground.
 /// Both come from theme.buttonPrimary (the base style); no override classes needed here.
@@ -24,3 +28,9 @@ pub const ghost = base ++ " bg-transparent";
 /// .btn-destructive uses the destructive token as background; not expressible as a static
 /// class string since there is no bg-err class in the module-06 resolver).
 pub const destructive = base;
+/// RN16 — Loading/busy variant: same visual base as primary, but callers additionally set the
+/// `loading="true"` attribute (src/07/types.zig ButtonState.loading) to replace the label with
+/// a spinner-style busy indicator driven by scene.frame_count. Usage:
+///   const a = [1]Attr{.{ .name = "loading", .value = .{ .literal = "true" } }};
+///   const n = NodeDesc{ .tag = "Button", .classes = button.loading, .attrs = &a };
+pub const loading = base;
